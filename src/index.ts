@@ -1,20 +1,20 @@
 // Export all types
 
 // Export classes
-export { FFmpegCommand } from "./command.js";
-export { FFmpegRunner } from "./runner.js";
+export { FFmpegTranscodeCommand as FFmpegCommand } from "./command.js"
+export { FFmpegRunner } from "./runner.js"
 export type {
-  ExecutionResult,
   FFmpegCommandOptions,
-  FFmpegInput,
-  FFmpegOutput,
+  FFmpegExecutionResult as ExecutionResult,
+  FFmpegInputType as FFmpegInput,
+  FFmpegOutputType as FFmpegOutput,
   FFmpegRunnerOptions,
   ProbeResult,
   ProgressInfo
-} from "./types.js";
+} from "./types.js"
 
 // Create and export default runner instance
-import { FFmpegRunner } from "./runner.js";
+import { FFmpegRunner } from "./runner.js"
 
 /**
  * Default FFmpeg runner instance using system PATH
@@ -23,4 +23,4 @@ import { FFmpegRunner } from "./runner.js";
  * binaries from the system PATH. Most users can use this directly without
  * creating their own runner instance.
  */
-export const defaultRunner = new FFmpegRunner();
+export const defaultRunner = new FFmpegRunner()

@@ -1,0 +1,20 @@
+{
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  },
+  "[jsoncl]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "biomejs.biome", 
+  }
+}

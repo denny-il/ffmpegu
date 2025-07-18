@@ -1,12 +1,13 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.0.0-beta.6/schema.json",
 	"vcs": {
-		"enabled": false,
+		"enabled": true,
 		"clientKind": "git",
 		"useIgnoreFile": true
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": true,
+		"includes": ["src/**/*", "tests/**/*", "tsconfig.json", "package.json"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -20,7 +21,11 @@
 	},
 	"javascript": {
 		"formatter": {
-			"quoteStyle": "double"
+			"quoteStyle": "double",
+			"indentStyle": "space",
+			"semicolons": "asNeeded",
+			"trailingCommas": "none",
+			"indentWidth": 2
 		}
 	},
 	"assist": {

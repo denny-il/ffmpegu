@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        FFMPEG_VERSION: latest
     volumes:
       - ./src:/app/src:ro
       - ./tests/integration:/app/tests/integration:ro
@@ -12,4 +14,5 @@ services:
       - ./vitest.config.ts:/app/vitest.config.ts:ro
     environment:
       - NODE_ENV=test
-    command: pnpm run test:integration
+    entrypoint: pnpm
+    command: ["run", "test:integration"]

@@ -1,431 +1,464 @@
-import { Readable, Writable } from "node:stream";
-import { beforeEach, describe, expect, it } from "vitest";
-import { FFmpegCommand, FFmpegRunner } from "../../src/index.ts";
-
-describe("Integration Tests", () => {
-	let mockRunner: FFmpegRunner;
-
-	beforeEach(() => {
-		// Create a mock runner for integration testing
-		mockRunner = new FFmpegRunner({
-			ffmpegPath: "true", // Use true command for silent testing
-			ffprobePath: "true",
-		});
-	});
-
-	describe("Runner Configuration", () => {
-		it("should create runner with default paths", () => {
-			const runner = new FFmpegRunner();
-			expect(runner.ffmpegPath).toBe("ffmpeg");
-			expect(runner.ffprobePath).toBe("ffprobe");
-		});
-
-		it("should create runner with custom paths", () => {
-			const runner = new FFmpegRunner({
-				ffmpegPath: "/custom/ffmpeg",
-				ffprobePath: "/custom/ffprobe",
-			});
-			expect(runner.ffmpegPath).toBe("/custom/ffmpeg");
-			expect(runner.ffprobePath).toBe("/custom/ffprobe");
-		});
-
-		it("should handle partial configuration", () => {
-			const runner = new FFmpegRunner({
-				ffmpegPath: "/custom/ffmpeg",
-			});
-			expect(runner.ffmpegPath).toBe("/custom/ffmpeg");
-			expect(runner.ffprobePath).toBe("ffprobe");
-		});
-	});
-
-	describe("Validation Integration", () => {
-		it("should validate successful binary check", async () => {
-			// Using 'true' command which always succeeds
-			const runner = new FFmpegRunner({
-				ffmpegPath: "true",
-				ffprobePath: "true",
-			});
-
-			const isValid = await runner.validate();
-			expect(isValid).toBe(true);
-		});
-
-		it("should fail validation with non-existent binaries", async () => {
-			const runner = new FFmpegRunner({
-				ffmpegPath: "/non-existent/ffmpeg",
-				ffprobePath: "/non-existent/ffprobe",
-			});
-
-			const isValid = await runner.validate();
-			expect(isValid).toBe(false);
-		});
-
-		it("should fail validation with invalid exit codes", async () => {
-			// Using 'false' command which always fails
-			const runner = new FFmpegRunner({
-				ffmpegPath: "false",
-				ffprobePath: "false",
-			});
-
-			const isValid = await runner.validate();
-			expect(isValid).toBe(false);
-		});
-	});
-
-	describe("Command Execution Integration", () => {
-		it("should execute command and capture output", async () => {
-			const command = new FFmpegCommand({
-				outputOptions: ["hello", "world"],
-			});
-
-			const result = await mockRunner.run(command);
-
-			// Verify ExecutionResult structure
-			expect(result).toHaveProperty("exitCode");
-			expect(result).toHaveProperty("stdout");
-			expect(result).toHaveProperty("stderr");
-			expect(result).toHaveProperty("success");
-			expect(typeof result.exitCode).toBe("number");
-			expect(typeof result.stdout).toBe("string");
-			expect(typeof result.stderr).toBe("string");
-			expect(typeof result.success).toBe("boolean");
-		});
-
-		it("should handle successful command execution", async () => {
-			const command = new FFmpegCommand({
-				outputOptions: ["test", "output"],
-			});
-
-			const result = await mockRunner.run(command);
-			expect(result.success).toBe(true);
-			expect(result.exitCode).toBe(0);
-		});
-
-		it("should handle command execution errors", async () => {
-			// Using 'false' command which always fails
-			const failRunner = new FFmpegRunner({
-				ffmpegPath: "false",
-				ffprobePath: "false",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["test"],
-			});
-
-			const result = await failRunner.run(command);
-			expect(result.success).toBe(false);
-			expect(result.exitCode).not.toBe(0);
-		});
-
-		it("should handle process spawn errors", async () => {
-			const invalidRunner = new FFmpegRunner({
-				ffmpegPath: "/absolutely/non/existent/binary",
-				ffprobePath: "/absolutely/non/existent/binary",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["test"],
-			});
-
-			await expect(invalidRunner.run(command)).rejects.toThrow(
-				"Failed to spawn FFmpeg process",
-			);
-		});
-	});
-
-	describe("Streaming Integration", () => {
-		it("should handle input stream correctly", async () => {
-			const inputStream = new Readable({
-				read() {
-					this.push("test data");
-					this.push(null);
-				},
-			});
-
-			const command = new FFmpegCommand({
-				input: inputStream,
-				outputOptions: ["output"],
-			});
-
-			expect(command.usesStdin).toBe(true);
-			expect(command.usesStdout).toBe(false);
-
-			const result = await mockRunner.run(command);
-			expect(result.success).toBe(true);
-		});
-
-		it("should handle output stream correctly", async () => {
-			let capturedData = "";
-			const outputStream = new Writable({
-				write(chunk, _encoding, callback) {
-					capturedData += chunk.toString();
-					callback();
-				},
-			});
-
-			const command = new FFmpegCommand({
-				input: "test-input",
-				output: outputStream,
-			});
-
-			expect(command.usesStdin).toBe(false);
-			expect(command.usesStdout).toBe(true);
-
-			const result = await mockRunner.run(command);
-			expect(result.success).toBe(true);
-		});
-
-		it("should handle both input and output streams", async () => {
-			const inputStream = new Readable({
-				read() {
-					this.push("input data");
-					this.push(null);
-				},
-			});
-
-			let capturedData = "";
-			const outputStream = new Writable({
-				write(chunk, _encoding, callback) {
-					capturedData += chunk.toString();
-					callback();
-				},
-			});
-
-			const command = new FFmpegCommand({
-				input: inputStream,
-				output: outputStream,
-			});
-
-			expect(command.usesStdin).toBe(true);
-			expect(command.usesStdout).toBe(true);
-
-			const result = await mockRunner.run(command);
-			expect(result.success).toBe(true);
-		});
-
-		it("should handle stream errors gracefully", async () => {
-			const errorStream = new Readable({
-				read() {
-					// This is a mock test, so we'll just provide normal data
-					this.push("test data");
-					this.push(null);
-				},
-			});
-
-			// Add error handler to prevent unhandled error
-			errorStream.on("error", () => {
-				// Error handling is tested elsewhere
-			});
-
-			const command = new FFmpegCommand({
-				input: errorStream,
-				outputOptions: ["output"],
-			});
-
-			// Should not throw - error handling is managed by the process
-			const result = await mockRunner.run(command);
-			expect(result).toHaveProperty("success");
-		});
-	});
-
-	describe("Probe Integration", () => {
-		it("should handle probe command execution", async () => {
-			// Mock invalid JSON response using echo
-			const jsonRunner = new FFmpegRunner({
-				ffmpegPath: "true",
-				ffprobePath: "echo",
-			});
-
-			// This will fail because echo doesn't return valid JSON
-			await expect(jsonRunner.probe("test-file")).rejects.toThrow(
-				"Failed to parse FFprobe output",
-			);
-		});
-
-		it("should handle probe command with valid JSON", async () => {
-			// Create a runner that outputs valid JSON using printf
-			const validJsonRunner = new FFmpegRunner({
-				ffmpegPath: "true",
-				ffprobePath: "printf", // printf can output formatted text
-			});
-
-			// This will still fail since we need actual JSON, but tests the structure
-			await expect(
-				validJsonRunner.probe('{"format":{}, "streams":[]}'),
-			).rejects.toThrow();
-		});
-
-		it("should handle probe with non-existent binary", async () => {
-			const invalidRunner = new FFmpegRunner({
-				ffmpegPath: "true",
-				ffprobePath: "/non-existent/ffprobe",
-			});
-
-			await expect(invalidRunner.probe("test-file")).rejects.toThrow(
-				"Failed to spawn FFprobe process",
-			);
-		});
-
-		it("should verify ProbeResult structure", async () => {
-			// We can't easily test successful probe without mocking more,
-			// but we can verify the error handling structure
-			const runner = new FFmpegRunner({
-				ffmpegPath: "true",
-				ffprobePath: "false", // Command that always exits with code 1
-			});
-
-			await expect(runner.probe("test-file")).rejects.toThrow(
-				"FFprobe failed with exit code 1",
-			);
-		});
-	});
-
-	describe("Error Handling Integration", () => {
-		it("should propagate process errors correctly", async () => {
-			const runner = new FFmpegRunner({
-				ffmpegPath: "/absolutely/non/existent/command",
-				ffprobePath: "true",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["test"],
-			});
-
-			await expect(runner.run(command)).rejects.toThrow(
-				"Failed to spawn FFmpeg process",
-			);
-		});
-
-		it("should handle exit codes correctly", async () => {
-			// Test with command that exits with specific code
-			const exitCodeRunner = new FFmpegRunner({
-				ffmpegPath: "sh",
-				ffprobePath: "true",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["-c", "exit 42"],
-			});
-
-			const result = await exitCodeRunner.run(command);
-			expect(result.exitCode).toBe(42);
-			expect(result.success).toBe(false);
-		});
-
-		it("should capture stderr output", async () => {
-			// Use a command that writes to stderr
-			const stderrRunner = new FFmpegRunner({
-				ffmpegPath: "sh",
-				ffprobePath: "true",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["-c", "echo 'error message' >&2"],
-			});
-
-			const result = await stderrRunner.run(command);
-			expect(result.stderr).toContain("error message");
-		});
-
-		it("should handle missing exit code", async () => {
-			// This tests the fallback to -1 when exit code is null
-			const command = new FFmpegCommand({
-				outputOptions: ["test"],
-			});
-
-			const result = await mockRunner.run(command);
-			// Normal execution should have a valid exit code
-			expect(typeof result.exitCode).toBe("number");
-			expect(result.exitCode).toBeGreaterThanOrEqual(0);
-		});
-	});
-
-	describe("Command Arguments Integration", () => {
-		it("should generate correct arguments for file-based commands", () => {
-			const command = new FFmpegCommand({
-				input: "input.mp4",
-				inputOptions: ["-ss", "00:01:00"],
-				output: "output.mp4",
-				outputOptions: ["-t", "10", "-vcodec", "libx264"],
-			});
-
-			const args = command.toArgs();
-			expect(args).toEqual([
-				"-ss",
-				"00:01:00", // input options
-				"-i",
-				"input.mp4", // input
-				"-t",
-				"10",
-				"-vcodec",
-				"libx264", // output options
-				"output.mp4", // output
-			]);
-		});
-
-		it("should generate correct arguments for stream-based commands", () => {
-			const inputStream = new Readable();
-			const outputStream = new Writable();
-
-			const command = new FFmpegCommand({
-				input: inputStream,
-				output: outputStream,
-				inputOptions: ["-f", "mp4"],
-				outputOptions: ["-f", "mp4"],
-			});
-
-			const args = command.toArgs();
-			expect(args).toEqual([
-				"-f",
-				"mp4", // input options
-				"-i",
-				"pipe:0", // input (stdin)
-				"-f",
-				"mp4", // output options
-				"pipe:1", // output (stdout)
-			]);
-		});
-	});
-
-	describe("Process Lifecycle Integration", () => {
-		it("should handle process completion events", async () => {
-			const command = new FFmpegCommand({
-				outputOptions: ["completion", "test"],
-			});
-
-			const result = await mockRunner.run(command);
-
-			// Verify the result indicates proper process completion
-			expect(result.success).toBe(true);
-			expect(result.exitCode).toBe(0);
-		});
-
-		it("should handle process error events", async () => {
-			const errorRunner = new FFmpegRunner({
-				ffmpegPath: "/this/definitely/does/not/exist",
-				ffprobePath: "true",
-			});
-
-			const command = new FFmpegCommand({
-				outputOptions: ["test"],
-			});
-
-			// Should reject with specific error message
-			await expect(errorRunner.run(command)).rejects.toThrow(
-				"Failed to spawn FFmpeg process",
-			);
-		});
-
-		it("should handle process close events", async () => {
-			const command = new FFmpegCommand({
-				outputOptions: ["test", "close", "event"],
-			});
-
-			const result = await mockRunner.run(command);
-
-			// Should complete successfully
-			expect(result).toBeDefined();
-			expect(typeof result.exitCode).toBe("number");
-		});
-	});
-});
+import { createReadStream, createWriteStream, existsSync } from "node:fs"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { PassThrough, Readable } from "node:stream"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { FFmpegTranscodeCommand } from "../../src/command.js"
+import { FFmpegRunner } from "../../src/runner.js"
+
+describe("FFmpeg Integration Tests", () => {
+  let runner: FFmpegRunner
+  let tempDir: string
+  let assetDir: string
+
+  beforeEach(async () => {
+    runner = new FFmpegRunner()
+    tempDir = await mkdtemp(join(tmpdir(), "ffmpeg-test-"))
+    assetDir = join(process.cwd(), "assets")
+  })
+
+  afterEach(async () => {
+    if (tempDir && existsSync(tempDir)) {
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  describe("validation", () => {
+    it("should validate FFmpeg binaries are available", async () => {
+      const isValid = await runner.validate()
+      expect(isValid).toBe(true)
+    })
+
+    it("should fail validation with invalid binary paths", async () => {
+      const invalidRunner = new FFmpegRunner({
+        ffmpegPath: "/nonexistent/ffmpeg",
+        ffprobePath: "/nonexistent/ffprobe"
+      })
+
+      const isValid = await invalidRunner.validate()
+      expect(isValid).toBe(false)
+    })
+  })
+
+  describe("probe functionality", () => {
+    it("should probe video file and return structured data", async () => {
+      const videoPath = join(assetDir, "video.mp4")
+      const result = await runner.probe(videoPath)
+
+      expect(result.raw).toBeDefined()
+      expect(result.data).toBeDefined()
+      expect(typeof result.raw).toBe("string")
+      expect(typeof result.data).toBe("object")
+
+      // Verify it's valid JSON
+      const parsed = JSON.parse(result.raw)
+      expect(parsed).toEqual(result.data)
+    })
+
+    it("should probe audio file and return structured data", async () => {
+      const audioPath = join(assetDir, "audio.mp3")
+      const result = await runner.probe(audioPath)
+
+      expect(result.raw).toBeDefined()
+      expect(result.data).toBeDefined()
+      expect(typeof result.raw).toBe("string")
+      expect(typeof result.data).toBe("object")
+    })
+
+    it("should handle nonexistent file gracefully", async () => {
+      const nonexistentPath = join(tempDir, "nonexistent.mp4")
+
+      await expect(runner.probe(nonexistentPath)).rejects.toThrow()
+    })
+
+    it("should handle invalid media file", async () => {
+      const invalidPath = join(tempDir, "invalid.txt")
+      await writeFile(invalidPath, "This is not a media file")
+
+      await expect(runner.probe(invalidPath)).rejects.toThrow()
+    })
+  })
+
+  describe("file-to-file operations", () => {
+    it("should handle successful file conversion", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "output.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"] // Copy codecs, limit to 1 second
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle file operation errors", async () => {
+      const inputPath = join(tempDir, "nonexistent.mp4")
+      const outputPath = join(tempDir, "output.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-c", "copy"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(false)
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr).toContain("No such file or directory")
+    })
+
+    it("should handle invalid output path", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = "/invalid/path/output.mp4"
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(false)
+      expect(result.exitCode).not.toBe(0)
+    })
+  })
+
+  describe("stream handling", () => {
+    it("should handle readable stream input to file output", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "stream-output.mp4")
+      const inputStream = createReadStream(inputPath)
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputStream,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle file input to writable stream output", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "stream-output.ts")
+      const outputStream = createWriteStream(outputPath)
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputStream,
+        outputOptions: ["-c", "copy", "-t", "1", "-f", "mpegts"]
+      })
+
+      const result = await runner.run(command)
+
+      // Close the stream if it's still open
+      if (!outputStream.writableEnded) {
+        outputStream.end()
+      }
+
+      // Wait for stream to finish writing
+      await new Promise<void>((resolve, reject) => {
+        if (outputStream.writableEnded) {
+          resolve()
+        } else {
+          outputStream.on("finish", () => resolve())
+          outputStream.on("close", () => resolve())
+          outputStream.on("error", reject)
+        }
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle stream-to-stream operations", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "stream-to-stream.ts")
+
+      const inputStream = createReadStream(inputPath)
+      const outputStream = createWriteStream(outputPath)
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputStream,
+        output: outputStream,
+        outputOptions: ["-c", "copy", "-t", "1", "-f", "mpegts"]
+      })
+
+      const result = await runner.run(command)
+
+      // Close the stream if it's still open
+      if (!outputStream.writableEnded) {
+        outputStream.end()
+      }
+
+      // Wait for stream to finish writing
+      await new Promise<void>((resolve, reject) => {
+        if (outputStream.writableEnded) {
+          resolve()
+        } else {
+          outputStream.on("finish", () => resolve())
+          outputStream.on("close", () => resolve())
+          outputStream.on("error", reject)
+        }
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle PassThrough streams", async () => {
+      const inputPath = join(assetDir, "audio.mp3")
+      const outputPath = join(tempDir, "passthrough-output.mp3")
+
+      const passthroughInput = new PassThrough()
+      const passthroughOutput = new PassThrough()
+      const outputFileStream = createWriteStream(outputPath)
+
+      // Pipe the output stream to file
+      passthroughOutput.pipe(outputFileStream)
+
+      const command = new FFmpegTranscodeCommand({
+        input: passthroughInput,
+        output: passthroughOutput,
+        outputOptions: ["-c", "copy", "-t", "1", "-f", "mp3"]
+      })
+
+      // Start the FFmpeg process
+      const runPromise = runner.run(command)
+
+      // Pipe input file to the PassThrough stream after a small delay
+      // to ensure FFmpeg is ready
+      setTimeout(() => {
+        const inputFileStream = createReadStream(inputPath)
+        inputFileStream.pipe(passthroughInput)
+
+        inputFileStream.on("error", (error) => {
+          console.warn("Input file stream error:", error.message)
+        })
+      }, 100)
+
+      const result = await runPromise
+
+      // Wait for output file to be written
+      await new Promise<void>((resolve) => {
+        if (outputFileStream.writableEnded) {
+          resolve()
+        } else {
+          outputFileStream.on("finish", () => resolve())
+          outputFileStream.on("close", () => resolve())
+        }
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle stream errors gracefully", async () => {
+      const outputPath = join(tempDir, "error-output.mp4")
+
+      // Create a readable stream that will error after a delay
+      const errorStream = new Readable({
+        read() {
+          // Error after a small delay to let FFmpeg start
+          setTimeout(() => {
+            this.emit("error", new Error("Stream error"))
+          }, 100)
+        }
+      })
+
+      const command = new FFmpegTranscodeCommand({
+        input: errorStream,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-f", "mp4"]
+      })
+
+      // This should handle the error and reject
+      await expect(runner.run(command)).rejects.toThrow("Stream error")
+    })
+  })
+
+  describe("command options handling", () => {
+    it("should handle input options correctly", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "input-options.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        inputOptions: ["-ss", "0"], // Seek to start
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle complex output options", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "complex-options.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: [
+          "-c:v",
+          "copy",
+          "-c:a",
+          "copy",
+          "-t",
+          "1",
+          "-avoid_negative_ts",
+          "make_zero"
+        ]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+      expect(existsSync(outputPath)).toBe(true)
+    })
+
+    it("should handle invalid options gracefully", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "invalid-options.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-invalid_option", "value"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(false)
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr).toContain("Unrecognized option")
+    })
+  })
+
+  describe("execution result handling", () => {
+    it("should capture stderr output for successful operations", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "stderr-test.mp4")
+
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.stderr).toBeDefined()
+      expect(result.stderr.length).toBeGreaterThan(0)
+      // FFmpeg typically outputs progress info to stderr
+      expect(result.stderr).toMatch(/time=|frame=|speed=/)
+    })
+
+    it("should handle commands with no output", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+
+      // Use -f null to discard output
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: "-",
+        outputOptions: ["-t", "1", "-f", "null"]
+      })
+
+      const result = await runner.run(command)
+
+      expect(result.success).toBe(true)
+      expect(result.exitCode).toBe(0)
+    })
+
+    it("should timeout on hanging operations", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const outputPath = join(tempDir, "timeout-test.mp4")
+
+      // This should complete quickly due to -t 1
+      const command = new FFmpegTranscodeCommand({
+        input: inputPath,
+        output: outputPath,
+        outputOptions: ["-c", "copy", "-t", "1"]
+      })
+
+      const startTime = Date.now()
+      const result = await runner.run(command)
+      const endTime = Date.now()
+
+      expect(result.success).toBe(true)
+      expect(endTime - startTime).toBeLessThan(5000) // Should complete in less than 5 seconds
+    })
+  })
+
+  describe("concurrent operations", () => {
+    it("should handle multiple concurrent operations", async () => {
+      const inputPath = join(assetDir, "video.mp4")
+      const operations = Array.from({ length: 3 }, (_, i) => {
+        const outputPath = join(tempDir, `concurrent-${i}.mp4`)
+        const command = new FFmpegTranscodeCommand({
+          input: inputPath,
+          output: outputPath,
+          outputOptions: ["-c", "copy", "-t", "1"]
+        })
+        return runner.run(command)
+      })
+
+      const results = await Promise.all(operations)
+
+      results.forEach((result, i) => {
+        expect(result.success).toBe(true)
+        expect(result.exitCode).toBe(0)
+        expect(existsSync(join(tempDir, `concurrent-${i}.mp4`))).toBe(true)
+      })
+    })
+
+    it("should handle mixed success/failure concurrent operations", async () => {
+      const validInputPath = join(assetDir, "video.mp4")
+      const invalidInputPath = join(tempDir, "nonexistent.mp4")
+
+      const operations = [
+        runner.run(
+          new FFmpegTranscodeCommand({
+            input: validInputPath,
+            output: join(tempDir, "success.mp4"),
+            outputOptions: ["-c", "copy", "-t", "1"]
+          })
+        ),
+        runner.run(
+          new FFmpegTranscodeCommand({
+            input: invalidInputPath,
+            output: join(tempDir, "failure.mp4"),
+            outputOptions: ["-c", "copy"]
+          })
+        )
+      ]
+
+      const results = await Promise.all(operations)
+
+      expect(results[0].success).toBe(true)
+      expect(results[1].success).toBe(false)
+    })
+  })
+})

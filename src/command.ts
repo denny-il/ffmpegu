@@ -1,8 +1,13 @@
-import type {
-  FFmpegCommandOptions,
-  FFmpegInput,
-  FFmpegOutput,
-} from "./types.js";
+import type { Readable } from "node:stream"
+import type { FFmpegCommandOptions } from "./types.js"
+
+export class FFmpegBaseCommand {
+  readonly args: readonly string[]
+
+  constructor(args: string[]) {
+    this.args = Object.freeze(args)
+  }
+}
 
 /**
  * Immutable FFmpeg command configuration
@@ -10,66 +15,61 @@ import type {
  * Represents a complete FFmpeg command with input, output, and options.
  * Once constructed, the command cannot be modified.
  */
-export class FFmpegCommand {
-	public readonly input?: FFmpegInput;
-	public readonly inputOptions: readonly string[];
-	public readonly output?: FFmpegOutput;
-	public readonly outputOptions: readonly string[];
+export class FFmpegCommand extends FFmpegBaseCommand {
+  readonly inputPipes: readonly [number, Readable][]
+  readonly outputPipes: readonly [number, Readable][]
 
-	constructor(options: FFmpegCommandOptions = {}) {
-		this.input = options.input;
-		this.inputOptions = Object.freeze(options.inputOptions ?? []);
-		this.output = options.output;
-		this.outputOptions = Object.freeze(options.outputOptions ?? []);
-	}
+  constructor(protected readonly options: FFmpegCommandOptions) {
+    let pipeIndex = 0
+    const args: string[] = []
+    const pipes: [number, Readable][] = []
+    const { inputs, output, outputOptions = [] } = options
 
-	/**
-	 * Convert the command to FFmpeg arguments array
-	 * This method handles the conversion of streams to appropriate FFmpeg arguments
-	 */
-	toArgs(): string[] {
-		const args: string[] = [];
+    for (const { input, options = [] } of inputs) {
+      // Add input options first (before -i)
+      args.push(...options)
 
-		// Add input options first (before -i)
-		args.push(...this.inputOptions);
+      // Add input
+      if (input !== undefined) {
+        if (typeof input === "string") {
+          args.push("-i", input)
+        } else {
+          pipes.push([pipeIndex, input])
+          args.push("-i", `pipe:${pipeIndex++}`)
+        }
+      }
+    }
 
-		// Add input
-		if (this.input !== undefined) {
-			if (typeof this.input === "string") {
-				args.push("-i", this.input);
-			} else {
-				// For streams, use pipe:0 (stdin)
-				args.push("-i", "pipe:0");
-			}
-		}
+    // Add output options
+    args.push(...outputOptions)
 
-		// Add output options
-		args.push(...this.outputOptions);
+    // Add output
+    if (output !== undefined) {
+      if (typeof output === "string") {
+        args.push(output)
+      } else {
+        args.push(`pipe:1`)
+      }
+    }
 
-		// Add output
-		if (this.output !== undefined) {
-			if (typeof this.output === "string") {
-				args.push(this.output);
-			} else {
-				// For streams, use pipe:1 (stdout)
-				args.push("pipe:1");
-			}
-		}
+    super(args)
 
-		return args;
-	}
+    this.inputPipes = Object.freeze(pipes)
+  }
 
-	/**
-	 * Check if this command uses stdin for input
-	 */
-	get usesStdin(): boolean {
-		return this.input !== undefined && typeof this.input !== "string";
-	}
+  /**
+   * Check if this command uses stdin for input
+   */
+  get usesStdin(): boolean {
+    return this.options.inputs.some(
+      (input) => input.input === undefined || typeof input.input !== "string"
+    )
+  }
 
-	/**
-	 * Check if this command uses stdout for output
-	 */
-	get usesStdout(): boolean {
-		return this.output !== undefined && typeof this.output !== "string";
-	}
+  /**
+   * Check if this command uses stdout for output
+   */
+  get usesStdout(): boolean {
+    return this.output !== undefined && typeof this.output !== "string"
+  }
 }
