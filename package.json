@@ -29,9 +29,10 @@
     "format:check": "biome format",
     "docs:generate": "node --env-file .env scripts/ffmpeg-documentation.ts",
     "prepublish": "rm -rf ./dist && $npm_execpath run build && $npm_execpath run test",
-    "publish:minor": "$npm_execpath version minor && $npm_execpath run publish",
-    "publish:major": "$npm_execpath version major && $npm_execpath run publish",
-    "publish:patch": "$npm_execpath version patch && $npm_execpath run publish"
+    "version:git": "git add package.json && git commit -m 'chore: release v$npm_package_version' || echo 'No changes to commit' && git tag v$npm_package_version && git push && git push --tags",
+    "version:minor": "$npm_execpath run prepublish && $npm_execpath version minor --no-git-tag-version && $npm_execpath run version:git",
+    "version:major": "$npm_execpath run prepublish && $npm_execpath version major --no-git-tag-version && $npm_execpath run version:git",
+    "version:patch": "$npm_execpath run prepublish && $npm_execpath version patch --no-git-tag-version && $npm_execpath run version:git"
   },
   "devDependencies": {
     "@ai-sdk/google": "^3.0.10",
