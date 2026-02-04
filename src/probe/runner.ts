@@ -99,7 +99,16 @@ function exec(command: string, args: string[]) {
 }
 
 async function stringFromReadable(readable: Readable): Promise<string> {
-  return Buffer.concat(await Array.fromAsync(readable))
-    .toString()
-    .trim()
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = []
+    readable.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    readable.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf-8").trim())
+    })
+    readable.on("error", (err) => {
+      reject(err)
+    })
+  })
 }

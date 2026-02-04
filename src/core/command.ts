@@ -159,8 +159,12 @@ export class FFmpeguCommand {
 
   protected async clean() {
     await Promise.all([
-      ...this.inputPipeStreams.values().map((stream) => stream.clean()),
-      ...this.outputPipeStreams.values().map((stream) => stream.clean())
+      ...Array.from(this.inputPipeStreams.values()).map((stream) =>
+        stream.clean()
+      ),
+      ...Array.from(this.outputPipeStreams.values()).map((stream) =>
+        stream.clean()
+      )
     ])
     this.inputPipeStreams.clear()
     this.outputPipeStreams.clear()

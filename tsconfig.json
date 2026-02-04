@@ -4,8 +4,8 @@
 		"outDir": "./dist",
 
 		// Enable latest features
-		"lib": ["ESNext"],
-		"target": "esnext",
+		"lib": ["ES2024"],
+		"target": "es2024",
 		"module": "nodenext",
 		"moduleDetection": "force",
 		"allowJs": true,
