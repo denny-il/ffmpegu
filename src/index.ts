@@ -1,26 +1,40 @@
-// Export all types
+import { FFmpeguCommand } from "./core/command.ts"
+import { FFmpeguInput } from "./core/input.ts"
+import { FFmpeguOutput } from "./core/output.ts"
+import { FFmpeguFFmpegRunner } from "./core/runner.ts"
+import * as _filters from "./filters/index.ts"
+import * as _options from "./options/index.ts"
+import { FFmpeguProbeCommand } from "./probe/command.ts"
+import { FFmpeguFFprobeRunner } from "./probe/runner.ts"
 
-// Export classes
-export { FFmpegTranscodeCommand as FFmpegCommand } from "./command.js"
-export { FFmpegRunner } from "./runner.js"
+export { FFmpeguFilterBuilder } from "./filters/builder.ts"
+export { FFmpeguFilterChain } from "./filters/chain.ts"
+export { FFmpeguFilterGraph } from "./filters/graph.ts"
+export { FFmpeguFilterLabelRef } from "./filters/label.ts"
+export { FFmpeguSimpleFilter } from "./filters/simple.ts"
+export { FFmpeguOptions } from "./options/core.ts"
 export type {
-  FFmpegCommandOptions,
-  FFmpegExecutionResult as ExecutionResult,
-  FFmpegInputType as FFmpegInput,
-  FFmpegOutputType as FFmpegOutput,
-  FFmpegRunnerOptions,
-  ProbeResult,
-  ProgressInfo
-} from "./types.js"
+  FFmpeguFFprobeFormat,
+  FFmpeguFFprobeJson,
+  FFmpeguFFprobeStream
+} from "./types/index.ts"
 
-// Create and export default runner instance
-import { FFmpegRunner } from "./runner.js"
+const DefaultFFmpegRunner = new FFmpeguFFmpegRunner("ffmpeg")
+const DefaultFFprobeRunner = new FFmpeguFFprobeRunner("ffprobe")
 
-/**
- * Default FFmpeg runner instance using system PATH
- *
- * This is a pre-configured runner that uses the default 'ffmpeg' and 'ffprobe'
- * binaries from the system PATH. Most users can use this directly without
- * creating their own runner instance.
- */
-export const defaultRunner = new FFmpegRunner()
+export namespace ffmpegu {
+  export const createFFmpegRunner = (binPath: string) =>
+    new FFmpeguFFmpegRunner(binPath)
+  export const createFFprobeRunner = (binPath: string) =>
+    new FFmpeguFFprobeRunner(binPath)
+  export const runner = DefaultFFmpegRunner
+  export const probeRunner = DefaultFFprobeRunner
+  export const input = FFmpeguInput
+  export const output = FFmpeguOutput
+  export const command = FFmpeguCommand.create
+  export const probe = FFmpeguProbeCommand
+  export const filters = _filters
+  export const options = _options
+}
+
+export default ffmpegu

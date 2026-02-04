@@ -1,170 +1,132 @@
-import { describe, expect, it } from "vitest"
-import { FFmpegTranscodeCommand } from "../../src/command.js"
+import type { ReadStream, WriteStream } from "node:fs"
+import type { FileHandle } from "node:fs/promises"
+import { PassThrough } from "node:stream"
+import { describe, expect, it, vi } from "vitest"
+import { FFmpeguCommand } from "../../src/core/command.ts"
+import { FFmpeguInput } from "../../src/core/input.ts"
+import { FFmpeguOutput } from "../../src/core/output.ts"
+import { createPipeHandler } from "../../src/core/streams.ts"
+import { FFmpeguOptions } from "../../src/options/core.ts"
 
-describe("FFmpegCommand", () => {
-  describe("constructor", () => {
-    it("should create command with default options", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: undefined as any,
-        output: undefined as any
-      })
+vi.mock("../../src/core/streams.ts", () => ({
+  createPipeHandler: vi.fn()
+}))
 
-      expect(command.input).toBeUndefined()
-      expect(command.inputOptions).toEqual([])
-      expect(command.output).toBeUndefined()
-      expect(command.outputOptions).toEqual([])
+describe.sequential("Command", () => {
+  it("should compile args in order", async () => {
+    const input = FFmpeguInput.fromFile("/test/input.mp4")
+    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const command = FFmpeguCommand.create({
+      global: FFmpeguOptions.create("-y"),
+      inputs: [input],
+      outputs: [output]
     })
 
-    it("should create command with provided options", () => {
-      const options = {
-        input: "input.mp4",
-        inputOptions: ["-ss", "00:01:00"],
-        output: "output.mp4",
-        outputOptions: ["-t", "10", "-vcodec", "libx264"]
-      }
+    const { args } = await command.compile()
 
-      const command = new FFmpegTranscodeCommand(options)
-
-      expect(command.input).toBe("input.mp4")
-      expect(command.inputOptions).toEqual(["-ss", "00:01:00"])
-      expect(command.output).toBe("output.mp4")
-      expect(command.outputOptions).toEqual(["-t", "10", "-vcodec", "libx264"])
-    })
-
-    it("should freeze options arrays to make them immutable", () => {
-      const inputOptions = ["-ss", "00:01:00"]
-      const outputOptions = ["-t", "10"]
-
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: "output.mp4",
-        inputOptions,
-        outputOptions
-      })
-
-      expect(Object.isFrozen(command.inputOptions)).toBe(true)
-      expect(Object.isFrozen(command.outputOptions)).toBe(true)
-    })
+    expect(args).toEqual(["-y", "-i", "/test/input.mp4", "/test/output.mp4"])
   })
 
-  describe("toArgs", () => {
-    it("should generate correct args for file-based input/output", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        inputOptions: ["-ss", "00:01:00"],
-        output: "output.mp4",
-        outputOptions: ["-t", "10", "-vcodec", "libx264"]
+  it("should keep immutability for withGlobal/withInput/withOutput", () => {
+    const base = FFmpeguCommand.create({ inputs: [], outputs: [] })
+    const input = FFmpeguInput.fromFile("/test/input.mp4")
+    const output = FFmpeguOutput.toFile("/test/output.mp4")
+
+    const withInput = base.withInput(input)
+    const withOutput = withInput.withOutput(output)
+    const withGlobal = withOutput.withGlobal(FFmpeguOptions.create("-vn"))
+
+    expect(base).not.toBe(withInput)
+    expect(withInput.inputs).toEqual([input])
+    expect(withInput.outputs).toEqual([])
+
+    expect(withOutput.inputs).toEqual([input])
+    expect(withOutput.outputs).toEqual([output])
+
+    expect(
+      withGlobal.global!.getArgs({
+        get: () => 0,
+        has: () => true
       })
-
-      const args = command.toArgs()
-
-      expect(args).toEqual([
-        "-ss",
-        "00:01:00", // input options
-        "-i",
-        "input.mp4", // input
-        "-t",
-        "10",
-        "-vcodec",
-        "libx264", // output options
-        "output.mp4" // output
-      ])
-    })
-
-    it("should handle missing input and output", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: undefined as any,
-        output: undefined as any,
-        inputOptions: ["-f", "lavfi"],
-        outputOptions: ["-t", "5"]
-      })
-
-      const args = command.toArgs()
-
-      expect(args).toEqual([
-        "-f",
-        "lavfi", // input options
-        "-t",
-        "5" // output options
-      ])
-    })
-
-    it("should use pipe:0 for stream input", () => {
-      const mockStream = { pipe: () => {} }
-      const command = new FFmpegTranscodeCommand({
-        input: mockStream as any,
-        output: "output.mp4"
-      })
-
-      const args = command.toArgs()
-
-      expect(args).toEqual(["-i", "pipe:0", "output.mp4"])
-    })
-
-    it("should use pipe:1 for stream output", () => {
-      const mockStream = { write: () => {} }
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: mockStream as any
-      })
-
-      const args = command.toArgs()
-
-      expect(args).toEqual(["-i", "input.mp4", "pipe:1"])
-    })
+    ).toEqual(["-vn"])
   })
 
-  describe("usesStdin", () => {
-    it("should return false for string input", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: "output.mp4"
-      })
-      expect(command.usesStdin).toBe(false)
+  it("should merge global options when adding", () => {
+    const command = FFmpeguCommand.create({
+      global: FFmpeguOptions.create("-y"),
+      inputs: [],
+      outputs: []
     })
 
-    it("should return false for undefined input", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: undefined as any,
-        output: "output.mp4"
-      })
-      expect(command.usesStdin).toBe(false)
-    })
+    const next = command.withGlobal(FFmpeguOptions.create("-vn"))
 
-    it("should return true for stream input", () => {
-      const mockStream = { pipe: () => {} }
-      const command = new FFmpegTranscodeCommand({
-        input: mockStream as any,
-        output: "output.mp4"
-      })
-      expect(command.usesStdin).toBe(true)
-    })
+    expect(command.global!.getArgs({ get: () => 0, has: () => true })).toEqual([
+      "-y"
+    ])
+    expect(next.global!.getArgs({ get: () => 0, has: () => true })).toEqual([
+      "-y",
+      "-vn"
+    ])
   })
 
-  describe("usesStdout", () => {
-    it("should return false for string output", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: "output.mp4"
-      })
-      expect(command.usesStdout).toBe(false)
+  it("should clean pipe handlers on compile failure", async () => {
+    const cleanSpy = vi.fn()
+    const createPipeHandlerMock = vi.mocked(createPipeHandler)
+
+    createPipeHandlerMock.mockResolvedValue({
+      dir: "/tmp/ffmpegu",
+      path: "/tmp/ffmpegu/0",
+      handler: {
+        createWriteStream: () => new PassThrough() as unknown as WriteStream,
+        createReadStream: () => new PassThrough() as unknown as ReadStream
+      } as unknown as FileHandle,
+      clean: cleanSpy
     })
 
-    it("should return false for undefined output", () => {
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: undefined as any
-      })
-      expect(command.usesStdout).toBe(false)
+    const okInput = {
+      source: new PassThrough(),
+      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
+      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
+    } as unknown as FFmpeguInput
+
+    const badInput = {
+      source: new PassThrough(),
+      compile: vi.fn().mockRejectedValue(new Error("compile failed"))
+    } as unknown as FFmpeguInput
+
+    const command = FFmpeguCommand.create({
+      inputs: [okInput, badInput],
+      outputs: []
     })
 
-    it("should return true for stream output", () => {
-      const mockStream = { write: () => {} }
-      const command = new FFmpegTranscodeCommand({
-        input: "input.mp4",
-        output: mockStream as any
-      })
-      expect(command.usesStdout).toBe(true)
+    await expect(command.compile()).rejects.toThrow("compile failed")
+    expect(cleanSpy).toHaveBeenCalled()
+  })
+
+  it("should collect output pipe streams", async () => {
+    const createPipeHandlerMock = vi.mocked(createPipeHandler)
+    const readStream = new PassThrough()
+
+    createPipeHandlerMock.mockResolvedValueOnce({
+      dir: "/tmp/ffmpegu",
+      path: "/tmp/ffmpegu/1",
+      handler: {
+        createWriteStream: () => new PassThrough() as unknown as WriteStream,
+        createReadStream: () => readStream as unknown as ReadStream
+      } as unknown as FileHandle,
+      clean: vi.fn()
     })
+
+    const output = {
+      destination: new PassThrough(),
+      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
+      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
+    } as unknown as FFmpeguOutput
+
+    const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })
+    const result = await command.compile()
+
+    expect(result.outputStreams).toHaveLength(1)
+    expect(result.outputStreams[0].source).toBe(readStream)
   })
 })
