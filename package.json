@@ -28,7 +28,6 @@
     "format": "biome format --write",
     "format:check": "biome format",
     "docs:generate": "node --env-file .env scripts/ffmpeg-documentation.ts",
-    "publish": "rm -rf ./dist && $npm_execpath run build && $npm_execpath run test && $npm_execpath publish --access public --no-git-checks",
     "prepublish": "rm -rf ./dist && $npm_execpath run build && $npm_execpath run test",
     "publish:minor": "$npm_execpath version minor && $npm_execpath run publish",
     "publish:major": "$npm_execpath version major && $npm_execpath run publish",
