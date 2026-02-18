@@ -1,6 +1,7 @@
 {
   "name": "ffmpegu",
   "version": "0.1.0",
+  "type": "module",
   "description": "Simple ffmpeg library for JavaScript backend runtimes with direct access to ffmpeg binary functionality",
   "keywords": [
     "ffmpeg",
@@ -15,7 +16,10 @@
   ],
   "author": "ilchishin.denis@gmail.com",
   "license": "MIT",
-  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/denny-il/ffmpegu"
+  },
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
     "dev": "tsgo --watch",
