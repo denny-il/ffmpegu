@@ -7,6 +7,8 @@ Typed, composable FFmpeg command builder and runner for Javascript runtimes.
 - Fluent, type-safe construction of FFmpeg commands via `ffmpegu.command()`.
 - First-class helpers for inputs/outputs, stream mapping, and filters.
 - Built-in runners for FFmpeg and FFprobe with structured results.
+- Opt-in structured FFmpeg progress callbacks via `runner.run(command, { onProgress })`.
+- Optional cancellation via `runner.run(command, { signal })`.
 
 ## Install
 

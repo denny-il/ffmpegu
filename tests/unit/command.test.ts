@@ -1,12 +1,12 @@
-import type { ReadStream, WriteStream } from "node:fs"
-import type { FileHandle } from "node:fs/promises"
-import { PassThrough } from "node:stream"
-import { describe, expect, it, vi } from "vitest"
-import { FFmpeguCommand } from "../../src/core/command.ts"
-import { FFmpeguInput } from "../../src/core/input.ts"
-import { FFmpeguOutput } from "../../src/core/output.ts"
-import { createPipeHandler } from "../../src/core/streams.ts"
-import { FFmpeguOptions } from "../../src/options/core.ts"
+import type { ReadStream, WriteStream } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
+import { PassThrough } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
+import { FFmpeguCommand } from "../../src/core/command.ts";
+import { FFmpeguInput } from "../../src/core/input.ts";
+import { FFmpeguOutput } from "../../src/core/output.ts";
+import { createPipeHandler } from "../../src/core/streams.ts";
+import { FFmpeguOptions } from "../../src/options/core.ts";
 
 vi.mock("../../src/core/streams.ts", () => ({
   createPipeHandler: vi.fn()

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { ffmpegu } from "../../src/index.ts"
+import { describe, expect, it } from "vitest";
+import { ffmpegu } from "../../src/index.ts";
 
 describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
   const runner = ffmpegu.createFFprobeRunner("ffprobe")
@@ -11,12 +11,28 @@ describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
   it("should probe file and parse json", async () => {
     const command = ffmpegu.probe.fromFile("./assets/video.mp4")
     const result = await runner.run(command)
+
     expect(result.code).toBe(0)
     expect(result.result).toBeDefined()
     expect(result.result).toMatchObject({
-      format: expect.any(Object),
-      streams: expect.any(Array)
+      format: expect.objectContaining({
+        format_name: expect.stringContaining("mov")
+      }),
+      streams: expect.arrayContaining([
+        expect.objectContaining({
+          codec_type: "video",
+          codec_name: "h264",
+          width: 640,
+          height: 360
+        })
+      ])
     })
+
+    expect(
+      (result.result?.streams ?? []).filter(
+        (stream) => stream.codec_type === "audio"
+      )
+    ).toHaveLength(0)
   })
 
   it("should surface parse errors from non-ffprobe output", async () => {

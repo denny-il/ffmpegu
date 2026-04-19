@@ -1,5 +1,6 @@
-import type { FileHandle } from "node:fs/promises"
-import type { FFmpeguArgument } from "../core/argument.ts"
+import type { Abortable } from "node:events";
+import type { FileHandle } from "node:fs/promises";
+import type { FFmpeguArgument } from "../core/argument.ts";
 
 export interface FFmpeguReferencesInterface {
   get(ref: FFmpeguCompilable): number
@@ -31,6 +32,27 @@ export type FFmpeguUserArg =
   | FFmpeguPrimitiveUserArgValue
   | [string, FFmpeguUserArgValue?]
   | Record<string, FFmpeguUserArgValue>
+
+export interface FFmpeguFFmpegProgress {
+  frame?: number
+  fps?: number
+  bitrate?: string
+  total_size?: number
+  out_time_us?: number
+  out_time_ms?: number
+  out_time?: string
+  dup_frames?: number
+  drop_frames?: number
+  speed?: number
+  progress: string
+  raw: Record<string, string>
+  [key: string]: number | string | Record<string, string> | undefined
+}
+
+export interface FFmpeguFFmpegRunOptions {
+  onProgress?: (progress: FFmpeguFFmpegProgress) => void
+  signal?: Abortable["signal"]
+}
 
 export type FFmpeguFFprobeTags = Record<string, string>
 export type FFmpeguFFprobeDisposition = Record<string, number>

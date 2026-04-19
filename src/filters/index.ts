@@ -10,4 +10,5 @@ export const label = FFmpeguFilterLabelRef.create
 export const chain = FFmpeguFilterChain.create
 export const graph = FFmpeguFilterGraph.create
 
-export * from "./common.ts"
+export * from "./common/audio.ts"
+export * from "./common/video.ts"

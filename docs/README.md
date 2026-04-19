@@ -46,6 +46,34 @@ const result = await runner.run(command)
 console.log(result.code)
 ```
 
+### Progress callbacks
+
+```ts
+const result = await runner.run(command, {
+  onProgress(progress) {
+    console.log(progress.progress)
+    console.log(progress.frame)
+    console.log(progress.out_time)
+    console.log(progress.speed)
+  }
+})
+
+console.log(result.code)
+```
+
+### Cancellation
+
+```ts
+const controller = new AbortController()
+
+const result = runner.run(command, {
+  signal: controller.signal
+})
+
+controller.abort()
+await result // rejects with AbortError
+```
+
 ### Options
 
 `ffmpegu.options.custom(...)` builds FFmpeg arguments using a compact, type-safe syntax. Each argument can be:
@@ -78,6 +106,8 @@ const extended = ffmpegu.options.concat(base, ffmpegu.options.preset("fast"))
 ```
 
 Common option helpers are available under `ffmpegu.options.*` (e.g. `videoCodec`, `audioCodec`, `audioBitrate`, `crf`, `preset`).
+
+Stream-disabling helpers are also available: `noVideo()`, `noAudio()`, `noSubtitle()`, `noData()`.
 
 There are also helpers for common routing/filtering flags:
 
@@ -227,6 +257,20 @@ console.log(result.args)
 console.log(result.stdout)
 console.log(result.stderr)
 ```
+
+To receive parsed progress updates while FFmpeg is running, pass `onProgress`:
+
+```ts
+await runner.run(command, {
+  onProgress(progress) {
+    console.log(progress.progress)
+    console.log(progress.frame)
+    console.log(progress.out_time)
+  }
+})
+```
+
+You can also cancel a running command with an `AbortSignal`.
 
 #### Binary validation
 

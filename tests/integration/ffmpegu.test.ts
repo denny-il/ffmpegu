@@ -1,13 +1,137 @@
-import { createReadStream, createWriteStream } from "node:fs"
-import { mkdir } from "node:fs/promises"
-import { describe, expect, it, vi } from "vitest"
-import { ffmpegu } from "../../src/index.ts"
+import { createReadStream, createWriteStream } from "node:fs";
+import { access, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type {
+    FFmpeguFFprobeJson,
+    FFmpeguFFprobeStream
+} from "../../src/index.ts";
+import { ffmpegu } from "../../src/index.ts";
 
 describe.sequential("Integration", { timeout: 120_000 }, () => {
   const runner = ffmpegu.createFFmpegRunner("ffmpeg")
+  const probeRunner = ffmpegu.createFFprobeRunner("ffprobe")
+  const testOutputDir = "./tests/__output"
+
+  const outputPath = (...parts: string[]) => join(testOutputDir, ...parts)
+
+  beforeAll(async () => {
+    await rm(testOutputDir, { recursive: true, force: true })
+    await mkdir(testOutputDir, { recursive: true })
+
+    await expect(access(testOutputDir)).resolves.not.toThrow()
+
+    const outputDir = await stat(testOutputDir)
+    expect(outputDir.isDirectory()).toBe(true)
+  })
+
+  afterAll(async () => {
+    await rm(testOutputDir, { recursive: true, force: true })
+    await expect(access(testOutputDir)).rejects.toThrow()
+  })
+
+  const expectOutputFile = async (filePath: string) => {
+    await expect(access(filePath)).resolves.not.toThrow()
+
+    const file = await stat(filePath)
+    expect(file.isFile()).toBe(true)
+    expect(file.size).toBeGreaterThan(0)
+
+    return file
+  }
+
+  const probeOutput = async (filePath: string) => {
+    await expectOutputFile(filePath)
+
+    const result = await probeRunner.run(ffmpegu.probe.fromFile(filePath))
+    expect(result.code).toBe(0)
+    expect(result.result).toBeDefined()
+    expect(result.result).toMatchObject({
+      format: expect.any(Object),
+      streams: expect.any(Array)
+    })
+
+    return result.result as FFmpeguFFprobeJson
+  }
+
+  const getStreams = (media: FFmpeguFFprobeJson, codecType: string) =>
+    (media.streams ?? []).filter(
+      (stream): stream is FFmpeguFFprobeStream =>
+        stream.codec_type === codecType
+    )
+
+  const expectVideoStream = (
+    media: FFmpeguFFprobeJson,
+    options: {
+      width: number
+      height: number
+      codecName?: string
+    }
+  ) => {
+    const videoStreams = getStreams(media, "video")
+
+    expect(videoStreams).toHaveLength(1)
+    expect(videoStreams[0]).toMatchObject({
+      width: options.width,
+      height: options.height,
+      codec_name: options.codecName ?? expect.any(String)
+    })
+  }
+
+  const expectAudioStream = (
+    media: FFmpeguFFprobeJson,
+    options: {
+      codecName?: string
+      channels?: number
+    } = {}
+  ) => {
+    const audioStreams = getStreams(media, "audio")
+
+    expect(audioStreams).toHaveLength(1)
+
+    if (typeof options.codecName !== "undefined") {
+      expect(audioStreams[0]?.codec_name).toBe(options.codecName)
+    }
+
+    if (typeof options.channels !== "undefined") {
+      expect(audioStreams[0]?.channels).toBe(options.channels)
+    }
+  }
+
+  const expectNoAudioStream = (media: FFmpeguFFprobeJson) => {
+    expect(getStreams(media, "audio")).toHaveLength(0)
+  }
+
+  const expectDurationAtLeast = (
+    media: FFmpeguFFprobeJson,
+    seconds: number
+  ) => {
+    expect(Number(media.format?.duration ?? 0)).toBeGreaterThan(seconds)
+  }
+
+  const expectDurationBetween = (
+    media: FFmpeguFFprobeJson,
+    minSeconds: number,
+    maxSeconds: number
+  ) => {
+    const duration = Number(media.format?.duration ?? 0)
+    expect(duration).toBeGreaterThan(minSeconds)
+    expect(duration).toBeLessThan(maxSeconds)
+  }
+
+  const expectFormatNameToContain = (
+    media: FFmpeguFFprobeJson,
+    expectedFormat: string
+  ) => {
+    expect(media.format?.format_name).toContain(expectedFormat)
+  }
 
   it("should run validate a binary", async () => {
     await expect(runner.validateBinary()).resolves.not.toThrow()
+  })
+
+  it("should validate ffprobe binary", async () => {
+    await expect(probeRunner.validateBinary()).resolves.not.toThrow()
   })
 
   it("should not run validate a binary", async () => {
@@ -21,7 +145,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/output.mp4",
+          outputPath("output.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
@@ -36,13 +160,95 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const media = await probeOutput(outputPath("output.mp4"))
+    expectFormatNameToContain(media, "mp4")
+    expectVideoStream(media, { width: 640, height: 360, codecName: "h264" })
+    expectNoAudioStream(media)
+    expectDurationAtLeast(media, 20)
+  })
+
+  it("should emit structured progress updates", async () => {
+    const updates: Array<{ progress: string; frame?: number }> = []
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
+      outputs: [
+        ffmpegu.output.toFile(
+          outputPath("output-progress.mp4"),
+          ffmpegu.options.concat(
+            ffmpegu.options.videoCodec("libx264"),
+            ffmpegu.options.preset("fast"),
+            ffmpegu.options.crf(23),
+            ffmpegu.options.audioCodec("aac"),
+            ffmpegu.options.audioBitrate("192k")
+          )
+        )
+      ]
+    })
+
+    const result = await runner.run(command, {
+      onProgress: (progress) => {
+        updates.push({ progress: progress.progress, frame: progress.frame })
+      }
+    })
+
+    expect(result.code).toBe(0)
+    expect(updates.length).toBeGreaterThan(0)
+    expect(updates.at(-1)).toMatchObject({ progress: "end" })
+    expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
+
+    const media = await probeOutput(outputPath("output-progress.mp4"))
+    expectVideoStream(media, { width: 640, height: 360 })
+    expectNoAudioStream(media)
+  })
+
+  it("should abort a running command via signal", async () => {
+    const controller = new AbortController()
+    const updates: Array<{ progress: string; frame?: number }> = []
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [
+        ffmpegu.input.fromFile(
+          "./assets/video.mp4",
+          ffmpegu.options.custom(["-stream_loop", "-1"])
+        )
+      ],
+      outputs: [
+        ffmpegu.output.toFile(
+          "/dev/null",
+          ffmpegu.options.concat(
+            ffmpegu.options.format("null"),
+            ffmpegu.options.noAudio()
+          )
+        )
+      ]
+    })
+
+    const result = runner.run(command, {
+      signal: controller.signal,
+      onProgress: (progress) => {
+        updates.push({ progress: progress.progress, frame: progress.frame })
+
+        if (updates.length === 1) {
+          controller.abort()
+        }
+      }
+    })
+
+    await expect(result).rejects.toMatchObject({ name: "AbortError" })
+    expect(updates.length).toBeGreaterThan(0)
+    expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
+    expect(controller.signal.aborted).toBe(true)
   })
 
   it("should run a command with input and output map", async () => {
     const input1 = ffmpegu.input.fromFile("./assets/video.mp4")
     const input2 = ffmpegu.input.fromFile("./assets/audio.mp3")
     const output1 = ffmpegu.output.toFile(
-      "./assets/output/output1.mp4",
+      outputPath("output-map1.mp4"),
       ffmpegu.options.concat(
         ffmpegu.options.map(input1.video),
         ffmpegu.options.map(input2.audio.track(0)),
@@ -52,7 +258,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       )
     )
     const output2 = ffmpegu.output.toFile(
-      "./assets/output/output2.mp4",
+      outputPath("output-map2.mp4"),
       ffmpegu.options.concat(
         ffmpegu.options.map(input1.video.track(0)),
         ffmpegu.options.map(input2.audio.track(0)),
@@ -71,20 +277,38 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
 
     const result = await runner.run(command)
     expect(result.code).toBe(0)
+
+    const media1 = await probeOutput(outputPath("output-map1.mp4"))
+    expectFormatNameToContain(media1, "mp4")
+    expectVideoStream(media1, { width: 640, height: 360, codecName: "h264" })
+    expectAudioStream(media1, { codecName: "aac", channels: 2 })
+    expectDurationAtLeast(media1, 100)
+
+    const media2 = await probeOutput(outputPath("output-map2.mp4"))
+    expectFormatNameToContain(media2, "mp4")
+    expectVideoStream(media2, { width: 640, height: 360, codecName: "h264" })
+    expectAudioStream(media2, { codecName: "aac", channels: 2 })
+    expectDurationAtLeast(media2, 100)
   })
 
   it("should run a command with input and output streams", async () => {
     const inputStreamCloseSpy = vi.fn()
     const inputStream = createReadStream("./assets/video.mp4")
     inputStream.on("close", inputStreamCloseSpy)
+    const inputStreamClosed = new Promise<void>((resolve) => {
+      inputStream.on("close", () => resolve())
+    })
     const input = ffmpegu.input.fromStream(
       inputStream,
       ffmpegu.options.format("mp4")
     )
 
     const outputStream1CloseSpy = vi.fn()
-    const outputStream1 = createWriteStream("./assets/output/output1.mp4")
+    const outputStream1 = createWriteStream(outputPath("output-stream1.mp4"))
     outputStream1.on("close", outputStream1CloseSpy)
+    const outputStream1Closed = new Promise<void>((resolve) => {
+      outputStream1.on("close", () => resolve())
+    })
     const output1 = ffmpegu.output.toStream(
       outputStream1,
       ffmpegu.options.concat(
@@ -96,8 +320,11 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     )
 
     const outputStream2CloseSpy = vi.fn()
-    const outputStream2 = createWriteStream("./assets/output/output2.mp4")
+    const outputStream2 = createWriteStream(outputPath("output-stream2.mp4"))
     outputStream2.on("close", outputStream2CloseSpy)
+    const outputStream2Closed = new Promise<void>((resolve) => {
+      outputStream2.on("close", () => resolve())
+    })
     const output2 = ffmpegu.output.toStream(
       outputStream2,
       ffmpegu.options.concat(
@@ -117,9 +344,25 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
     expect(result.code).toBe(0)
 
+    await Promise.all([
+      inputStreamClosed,
+      outputStream1Closed,
+      outputStream2Closed
+    ])
+
     expect(inputStreamCloseSpy).toHaveBeenCalled()
     expect(outputStream1CloseSpy).toHaveBeenCalled()
     expect(outputStream2CloseSpy).toHaveBeenCalled()
+
+    const media1 = await probeOutput(outputPath("output-stream1.mp4"))
+    expectFormatNameToContain(media1, "mp4")
+    expectVideoStream(media1, { width: 640, height: 360, codecName: "h264" })
+    expectNoAudioStream(media1)
+
+    const media2 = await probeOutput(outputPath("output-stream2.mp4"))
+    expectFormatNameToContain(media2, "mp4")
+    expectVideoStream(media2, { width: 640, height: 360, codecName: "h264" })
+    expectNoAudioStream(media2)
   })
 
   it("should run a command with filters", async () => {
@@ -128,7 +371,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/output-filter.mp4",
+          outputPath("output-filter.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.videoFilter(
               ffmpegu.filters.scale({ w: 320, h: 180 })
@@ -136,7 +379,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
             ffmpegu.options.crf(23),
-            "-an"
+            ffmpegu.options.noAudio()
           )
         )
       ]
@@ -145,6 +388,11 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const media = await probeOutput(outputPath("output-filter.mp4"))
+    expectVideoStream(media, { width: 320, height: 180, codecName: "h264" })
+    expectNoAudioStream(media)
+    expectDurationAtLeast(media, 20)
   })
 
   it("should run a command with filter graph builder", async () => {
@@ -183,24 +431,24 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/output-graph1.mp4",
+          outputPath("output-graph1.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.filterComplex(graph),
             ffmpegu.options.map(labelOut1),
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
             ffmpegu.options.crf(23),
-            "-an"
+            ffmpegu.options.noAudio()
           )
         ),
         ffmpegu.output.toFile(
-          "./assets/output/output-graph2.mp4",
+          outputPath("output-graph2.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.map(labelOut2),
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
             ffmpegu.options.crf(23),
-            "-an"
+            ffmpegu.options.noAudio()
           )
         )
       ]
@@ -209,6 +457,14 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const media1 = await probeOutput(outputPath("output-graph1.mp4"))
+    expectVideoStream(media1, { width: 320, height: 180, codecName: "h264" })
+    expectNoAudioStream(media1)
+
+    const media2 = await probeOutput(outputPath("output-graph2.mp4"))
+    expectVideoStream(media2, { width: 160, height: 90, codecName: "h264" })
+    expectNoAudioStream(media2)
   })
 
   it("should run a command with input refs in filter graph", async () => {
@@ -234,14 +490,14 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       inputs: [input],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/output-filter-input.mp4",
+          outputPath("output-filter-input.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.filterComplex(graph),
             ffmpegu.options.map(outLabel),
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
             ffmpegu.options.crf(23),
-            "-an"
+            ffmpegu.options.noAudio()
           )
         )
       ]
@@ -250,6 +506,10 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const media = await probeOutput(outputPath("output-filter-input.mp4"))
+    expectVideoStream(media, { width: 320, height: 180, codecName: "h264" })
+    expectNoAudioStream(media)
   })
 
   it("should run a command with escaped filter values", async () => {
@@ -267,13 +527,13 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/output-filter-select.mp4",
+          outputPath("output-filter-select.mp4"),
           ffmpegu.options.concat(
             ffmpegu.options.videoFilter(filterChain),
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
             ffmpegu.options.crf(23),
-            "-an"
+            ffmpegu.options.noAudio()
           )
         )
       ]
@@ -282,17 +542,22 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const media = await probeOutput(outputPath("output-filter-select.mp4"))
+    expectVideoStream(media, { width: 640, height: 360, codecName: "h264" })
+    expectNoAudioStream(media)
+    expectDurationBetween(media, 0.9, 1.1)
   })
 
   it("should run a command with HLS encoding", async () => {
-    await mkdir("./assets/output/hls", { recursive: true })
+    await mkdir(outputPath("hls"), { recursive: true })
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/hls/stream.m3u8",
+          outputPath("hls", "stream.m3u8"),
           ffmpegu.options.concat(
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
@@ -302,10 +567,10 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
             ffmpegu.options.hls({
               time: 4,
               listSize: 0,
-              flags: "program_date_time"
-            }),
-            ["hls_playlist_type", "vod"],
-            ["hls_segment_filename", "./assets/output/hls/segment-%03d.ts"]
+              flags: "program_date_time",
+              playlistType: "vod",
+              segmentFilename: outputPath("hls", "segment-%03d.ts")
+            })
           )
         )
       ]
@@ -314,17 +579,45 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const manifestPath = outputPath("hls", "stream.m3u8")
+    const manifest = await readFile(manifestPath, "utf-8")
+
+    expect(manifest).toContain("#EXTM3U")
+    expect(manifest).toContain("#EXT-X-ENDLIST")
+    expect(manifest).toContain("segment-000.ts")
+    expect(manifest).toContain("segment-003.ts")
+
+    const files = await readdir(outputPath("hls"))
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "segment-000.ts",
+        "segment-001.ts",
+        "segment-002.ts",
+        "segment-003.ts",
+        "stream.m3u8"
+      ])
+    )
+
+    await Promise.all(
+      [
+        "segment-000.ts",
+        "segment-001.ts",
+        "segment-002.ts",
+        "segment-003.ts"
+      ].map((file) => expectOutputFile(outputPath("hls", file)))
+    )
   })
 
   it("should run a command with DASH encoding", async () => {
-    await mkdir("./assets/output/dash", { recursive: true })
+    await mkdir(outputPath("dash"), { recursive: true })
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
       inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
       outputs: [
         ffmpegu.output.toFile(
-          "./assets/output/dash/stream.mpd",
+          outputPath("dash", "stream.mpd"),
           ffmpegu.options.merge(
             ffmpegu.options.videoCodec("libx264"),
             ffmpegu.options.preset("fast"),
@@ -344,6 +637,38 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     const result = await runner.run(command)
 
     expect(result.code).toBe(0)
+
+    const manifestPath = outputPath("dash", "stream.mpd")
+    const manifest = await readFile(manifestPath, "utf-8")
+
+    expect(manifest).toContain("<MPD")
+    expect(manifest).toContain('contentType="video"')
+    expect(manifest).toContain("init-stream$RepresentationID$.m4s")
+    expect(manifest).toContain(
+      "chunk-stream$RepresentationID$-$Number%05d$.m4s"
+    )
+
+    const files = await readdir(outputPath("dash"))
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "init-stream0.m4s",
+        "chunk-stream0-00001.m4s",
+        "chunk-stream0-00002.m4s",
+        "chunk-stream0-00003.m4s",
+        "chunk-stream0-00004.m4s",
+        "stream.mpd"
+      ])
+    )
+
+    await Promise.all(
+      [
+        "init-stream0.m4s",
+        "chunk-stream0-00001.m4s",
+        "chunk-stream0-00002.m4s",
+        "chunk-stream0-00003.m4s",
+        "chunk-stream0-00004.m4s"
+      ].map((file) => expectOutputFile(outputPath("dash", file)))
+    )
   })
 
   it("should return non-zero for missing input", async () => {
@@ -354,14 +679,17 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
 
     if (!available) return
 
+    await rm(outputPath("missing.mp4"), { force: true })
+
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
       inputs: [ffmpegu.input.fromFile("./assets/does-not-exist.mp4")],
-      outputs: [ffmpegu.output.toFile("./assets/output/missing.mp4")]
+      outputs: [ffmpegu.output.toFile(outputPath("missing.mp4"))]
     })
 
     const result = await runner.run(command)
 
     expect(result.code).not.toBe(0)
+    await expect(access(outputPath("missing.mp4"))).rejects.toThrow()
   })
 })

@@ -40,14 +40,14 @@
     "version:patch": "$npm_execpath run prepublish && $npm_execpath version patch --no-git-tag-version && $npm_execpath run version:git && $npm_execpath run version:publish"
   },
   "devDependencies": {
-    "@ai-sdk/google": "^3.0.10",
-    "@biomejs/biome": "2.3.14",
+    "@ai-sdk/google": "^3.0.53",
+    "@biomejs/biome": "2.4.12",
     "@types/node": "^24.0.0",
-    "@typescript/native-preview": "7.0.0-dev.20260115.1",
+    "@typescript/native-preview": "7.0.0-dev.20260416.2",
     "@vitest/coverage-v8": "4.0.18",
-    "ai": "^6.0.39",
-    "htmlparser2": "^10.0.0",
-    "vitest": "4.0.18"
+    "ai": "^6.0.141",
+    "htmlparser2": "^12.0.0",
+    "vitest": "4.1.2"
   },
   "engines": {
     "node": ">=24.0.0"

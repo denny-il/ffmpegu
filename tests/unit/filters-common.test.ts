@@ -35,6 +35,11 @@ describe.sequential("Filters Common", () => {
       "scale=w=320:h=180"
     ])
     expect(fps({ fps: 30 }).getArgs(refs)).toEqual(["fps=fps=30"])
+    expect(
+      fps({ fps: 30, start_time: { seconds: 1, milliseconds: 250 } }).getArgs(
+        refs
+      )
+    ).toEqual(["fps=fps=30:start_time=00:00:01.250"])
     expect(crop({ w: 100, h: 80, x: 1, y: 2 }).getArgs(refs)).toEqual([
       "crop=w=100:h=80:x=1:y=2"
     ])
@@ -86,12 +91,25 @@ describe.sequential("Filters Common", () => {
     expect(atrim({ start: 1, end: 2 }).getArgs(refs)).toEqual([
       "atrim=start=1:end=2"
     ])
+    expect(
+      atrim({
+        start: { minutes: 1 },
+        duration: { seconds: 30, milliseconds: 500 }
+      }).getArgs(refs)
+    ).toEqual(["atrim=start=00:01:00.000:duration=00:00:30.500"])
     expect(asetpts({ expr: "PTS-STARTPTS" }).getArgs(refs)).toEqual([
       "asetpts=expr=PTS-STARTPTS"
     ])
     expect(afade({ type: "in", duration: 1 }).getArgs(refs)).toEqual([
       "afade=type=in:duration=1"
     ])
+    expect(
+      afade({
+        type: "in",
+        start_time: { seconds: 2 },
+        duration: { milliseconds: 750 }
+      }).getArgs(refs)
+    ).toEqual(["afade=type=in:start_time=00:00:02.000:duration=00:00:00.750"])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([

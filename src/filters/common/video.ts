@@ -1,6 +1,7 @@
-import type { FilterArgument, FilterOptions } from "./core.ts"
-import type { FFmpeguFilterLabelRef } from "./label.ts"
-import { FFmpeguSimpleFilter } from "./simple.ts"
+import { type FFmpeguTimeObject, resolveTimeOptions } from "../../utils.ts"
+import type { FilterArgument, FilterOptions } from "../core.ts"
+import type { FFmpeguFilterLabelRef } from "../label.ts"
+import { FFmpeguSimpleFilter } from "../simple.ts"
 
 type FilterLabels = {
   inputs?: FFmpeguFilterLabelRef[]
@@ -8,6 +9,19 @@ type FilterLabels = {
 }
 
 type FilterOptionValue = FilterArgument
+type FilterTimeValue = FilterOptionValue | FFmpeguTimeObject
+
+const create = (
+  name: string,
+  options: FilterOptions = {},
+  labels: FilterLabels = {}
+) =>
+  FFmpeguSimpleFilter.create(
+    name,
+    options,
+    labels.inputs ?? [],
+    labels.outputs ?? []
+  )
 
 export type ScaleOptions = {
   w?: FilterOptionValue
@@ -22,7 +36,7 @@ export type ScaleOptions = {
 
 export type FpsOptions = {
   fps?: FilterOptionValue
-  start_time?: FilterOptionValue
+  start_time?: FilterTimeValue
   round?: FilterOptionValue
   eof_action?: FilterOptionValue
 }
@@ -106,94 +120,10 @@ export type SetPtsOptions = {
   expr?: FilterOptionValue
 }
 
-export type VolumeOptions = {
-  volume?: FilterOptionValue
-  precision?: FilterOptionValue
-  replaygain?: FilterOptionValue
-  eval?: FilterOptionValue
-}
-
-export type AtempoOptions = {
-  tempo?: FilterOptionValue
-}
-
-export type AresampleOptions = {
-  sample_rate?: FilterOptionValue
-  resampler?: FilterOptionValue
-  async?: FilterOptionValue
-  first_pts?: FilterOptionValue
-  min_comp?: FilterOptionValue
-  max_comp?: FilterOptionValue
-  compensation_duration?: FilterOptionValue
-  compensation_distance?: FilterOptionValue
-  cutoff?: FilterOptionValue
-}
-
-export type AtrimOptions = {
-  start?: FilterOptionValue
-  end?: FilterOptionValue
-  start_pts?: FilterOptionValue
-  end_pts?: FilterOptionValue
-  start_sample?: FilterOptionValue
-  end_sample?: FilterOptionValue
-  start_time?: FilterOptionValue
-  end_time?: FilterOptionValue
-  duration?: FilterOptionValue
-}
-
-export type AsetPtsOptions = {
-  expr?: FilterOptionValue
-}
-
-export type AfadeOptions = {
-  type?: FilterOptionValue
-  start_sample?: FilterOptionValue
-  nb_samples?: FilterOptionValue
-  start_time?: FilterOptionValue
-  duration?: FilterOptionValue
-  curve?: FilterOptionValue
-}
-
-export type HighpassOptions = {
-  f?: FilterOptionValue
-  width_type?: FilterOptionValue
-  width?: FilterOptionValue
-  poles?: FilterOptionValue
-  mix?: FilterOptionValue
-}
-
-export type LowpassOptions = {
-  f?: FilterOptionValue
-  width_type?: FilterOptionValue
-  width?: FilterOptionValue
-  poles?: FilterOptionValue
-  mix?: FilterOptionValue
-}
-
-export type AformatOptions = {
-  sample_fmts?: FilterOptionValue
-  sample_rates?: FilterOptionValue
-  channel_layouts?: FilterOptionValue
-  channels?: FilterOptionValue
-}
-
-const create = (
-  name: string,
-  options: FilterOptions = {},
-  labels: FilterLabels = {}
-) =>
-  FFmpeguSimpleFilter.create(
-    name,
-    options,
-    labels.inputs ?? [],
-    labels.outputs ?? []
-  )
-
-// Video filters
 export const scale = (options: ScaleOptions = {}, labels?: FilterLabels) =>
   create("scale", options, labels)
 export const fps = (options: FpsOptions = {}, labels?: FilterLabels) =>
-  create("fps", options, labels)
+  create("fps", resolveTimeOptions(options, ["start_time"]), labels)
 export const crop = (options: CropOptions = {}, labels?: FilterLabels) =>
   create("crop", options, labels)
 export const pad = (options: PadOptions = {}, labels?: FilterLabels) =>
@@ -222,27 +152,3 @@ export const select = (options: SelectOptions = {}, labels?: FilterLabels) =>
   create("select", options, labels)
 export const setpts = (options: SetPtsOptions = {}, labels?: FilterLabels) =>
   create("setpts", options, labels)
-
-// Audio filters
-export const volume = (options: VolumeOptions = {}, labels?: FilterLabels) =>
-  create("volume", options, labels)
-export const atempo = (options: AtempoOptions = {}, labels?: FilterLabels) =>
-  create("atempo", options, labels)
-export const aresample = (
-  options: AresampleOptions = {},
-  labels?: FilterLabels
-) => create("aresample", options, labels)
-export const atrim = (options: AtrimOptions = {}, labels?: FilterLabels) =>
-  create("atrim", options, labels)
-export const asetpts = (options: AsetPtsOptions = {}, labels?: FilterLabels) =>
-  create("asetpts", options, labels)
-export const afade = (options: AfadeOptions = {}, labels?: FilterLabels) =>
-  create("afade", options, labels)
-export const highpass = (
-  options: HighpassOptions = {},
-  labels?: FilterLabels
-) => create("highpass", options, labels)
-export const lowpass = (options: LowpassOptions = {}, labels?: FilterLabels) =>
-  create("lowpass", options, labels)
-export const aformat = (options: AformatOptions = {}, labels?: FilterLabels) =>
-  create("aformat", options, labels)

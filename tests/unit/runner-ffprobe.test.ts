@@ -1,11 +1,11 @@
-import type { ChildProcess } from "node:child_process"
-import { spawn } from "node:child_process"
-import { EventEmitter } from "node:events"
-import { access } from "node:fs/promises"
-import { Readable } from "node:stream"
-import { describe, expect, it, vi } from "vitest"
-import { FFmpeguProbeCommand } from "../../src/probe/command.ts"
-import { FFmpeguFFprobeRunner } from "../../src/probe/runner.ts"
+import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { access } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
+import { FFmpeguProbeCommand } from "../../src/probe/command.ts";
+import { FFmpeguFFprobeRunner } from "../../src/probe/runner.ts";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn()

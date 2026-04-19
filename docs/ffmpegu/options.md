@@ -11,6 +11,7 @@ Options are composed using `ffmpegu.options.custom(...)` and helpers in `ffmpegu
 Common helpers:
 
 - Codecs: `videoCodec`, `audioCodec`, `subtitleCodec`, `copy`, `videoCopy`, `audioCopy`
+- Disable streams: `noVideo`, `noAudio`, `noSubtitle`, `noData`
 - Bitrates: `videoBitrate`, `audioBitrate`, `minRate`, `maxRate`, `bufferSize`
 - Quality: `crf`, `preset`, `tune`, `profileVideo`, `profileAudio`, `level`
 - Timing: `startTime`, `duration`, `to`
@@ -28,6 +29,13 @@ const opts = ffmpegu.options.concat(
   ffmpegu.options.crf(23),
   ffmpegu.options.audioCodec("aac"),
   ffmpegu.options.audioBitrate(192, "k")
+)
+```
+
+```ts
+const silentVideo = ffmpegu.options.concat(
+  ffmpegu.options.videoCodec("libx264"),
+  ffmpegu.options.noAudio()
 )
 ```
 

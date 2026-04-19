@@ -21,6 +21,10 @@ describe.sequential("Options", () => {
 
   it("should format mapping and timing options", () => {
     expect(ffmpegu.options.map("0:v").getArgs(refs)).toEqual(["-map", "0:v"])
+    expect(ffmpegu.options.noVideo().getArgs(refs)).toEqual(["-vn"])
+    expect(ffmpegu.options.noAudio().getArgs(refs)).toEqual(["-an"])
+    expect(ffmpegu.options.noSubtitle().getArgs(refs)).toEqual(["-sn"])
+    expect(ffmpegu.options.noData().getArgs(refs)).toEqual(["-dn"])
     expect(ffmpegu.options.shortest().getArgs(refs)).toEqual(["-shortest"])
     expect(ffmpegu.options.startTime(1.5).getArgs(refs)).toEqual(["-ss", "1.5"])
     expect(ffmpegu.options.duration("00:00:10").getArgs(refs)).toEqual([
@@ -28,6 +32,27 @@ describe.sequential("Options", () => {
       "00:00:10"
     ])
     expect(ffmpegu.options.to(42).getArgs(refs)).toEqual(["-to", "42"])
+
+    expect(
+      ffmpegu.options.startTime({ hours: 1, minutes: 30 }).getArgs(refs)
+    ).toEqual(["-ss", "01:30:00.000"])
+    expect(
+      ffmpegu.options
+        .duration({ minutes: 1, seconds: 30, milliseconds: 500 })
+        .getArgs(refs)
+    ).toEqual(["-t", "00:01:30.500"])
+    expect(ffmpegu.options.to({ seconds: 45 }).getArgs(refs)).toEqual([
+      "-to",
+      "00:00:45.000"
+    ])
+    expect(
+      ffmpegu.options
+        .duration({ seconds: 75, milliseconds: 1500 })
+        .getArgs(refs)
+    ).toEqual(["-t", "00:01:16.500"])
+    expect(
+      ffmpegu.options.duration({ minutes: 61, seconds: 120 }).getArgs(refs)
+    ).toEqual(["-t", "01:03:00.000"])
   })
 
   it("should format codec options", () => {
@@ -157,7 +182,7 @@ describe.sequential("Options", () => {
       "-hls_list_size",
       "0",
       "-hls_flags",
-      "split_by_time,delete_segments"
+      "split_by_time+delete_segments"
     ])
 
     expect(
@@ -186,10 +211,10 @@ describe.sequential("Options", () => {
       "dash",
       "-adaptation_sets",
       "id=0,streams=v id=1,streams=a",
-      "-window_size",
-      "5",
       "-streaming",
-      "1"
+      "1",
+      "-window_size",
+      "5"
     ])
 
     expect(ffmpegu.options.dash({ streaming: 0 }).getArgs(refs)).toEqual([
