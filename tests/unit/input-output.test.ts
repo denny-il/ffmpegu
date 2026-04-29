@@ -42,6 +42,7 @@ describe.sequential("Input/Output", () => {
     const input = FFmpeguInput.fromStream(stream)
     const args = await input.compile(refs)
 
+    expect(createPipeMock).toHaveBeenCalledWith("0")
     expect(args).toEqual(["-i", "/tmp/ffmpegu/0"])
     expect(input.pipe).toEqual({ dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" })
   })
@@ -71,6 +72,26 @@ describe.sequential("Input/Output", () => {
     const output = FFmpeguOutput.toStream(stream)
     const args = await output.compile(refs)
 
+    expect(createPipeMock).toHaveBeenCalledWith("0")
+    expect(args).toEqual(["/tmp/ffmpegu/1"])
+    expect(output.pipe).toEqual({ dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" })
+  })
+
+  it("should offset stream output pipe index by existing inputs", async () => {
+    const refs = new FFmpeguReferences()
+    const stream = new PassThrough()
+
+    refs.get(FFmpeguInput.fromFile("/test/input.mp4"))
+
+    createPipeMock.mockResolvedValueOnce({
+      dir: "/tmp/ffmpegu",
+      path: "/tmp/ffmpegu/1"
+    })
+
+    const output = FFmpeguOutput.toStream(stream)
+    const args = await output.compile(refs)
+
+    expect(createPipeMock).toHaveBeenCalledWith("1")
     expect(args).toEqual(["/tmp/ffmpegu/1"])
     expect(output.pipe).toEqual({ dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" })
   })
@@ -84,5 +105,18 @@ describe.sequential("Input/Output", () => {
 
     const input = FFmpeguInput.fromStream(stream)
     await expect(input.compile(refs)).rejects.toThrow("boom")
+  })
+
+  it("should propagate output pipe creation errors without setting pipe", async () => {
+    const refs = new FFmpeguReferences()
+    const stream = new PassThrough()
+    const error = new Error("boom")
+
+    createPipeMock.mockRejectedValueOnce(error)
+
+    const output = FFmpeguOutput.toStream(stream)
+
+    await expect(output.compile(refs)).rejects.toThrow("boom")
+    expect(output.pipe).toBeUndefined()
   })
 })

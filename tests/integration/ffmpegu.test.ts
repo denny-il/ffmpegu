@@ -1,12 +1,20 @@
-import { createReadStream, createWriteStream } from "node:fs";
-import { access, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createReadStream, createWriteStream } from "node:fs"
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat
+} from "node:fs/promises"
+import { join } from "node:path"
+import { PassThrough, Writable } from "node:stream"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type {
-    FFmpeguFFprobeJson,
-    FFmpeguFFprobeStream
-} from "../../src/index.ts";
-import { ffmpegu } from "../../src/index.ts";
+  FFmpeguFFprobeJson,
+  FFmpeguFFprobeStream
+} from "../../src/index.ts"
+import { ffmpegu } from "../../src/index.ts"
 
 describe.sequential("Integration", { timeout: 120_000 }, () => {
   const runner = ffmpegu.createFFmpegRunner("ffmpeg")
@@ -14,6 +22,47 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
   const testOutputDir = "./tests/__output"
 
   const outputPath = (...parts: string[]) => join(testOutputDir, ...parts)
+
+  const waitForEvent = (
+    emitter: { once: (event: string, listener: () => void) => unknown },
+    event: string
+  ) =>
+    new Promise<void>((resolve) => {
+      emitter.once(event, () => resolve())
+    })
+
+  const createWritableSink = () => {
+    const sink = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback()
+      }
+    })
+
+    sink.on("error", () => {})
+
+    return sink
+  }
+
+  const createFailingWritable = (error: Error, failAfterWrites = 1) => {
+    let writes = 0
+
+    const sink = new Writable({
+      write(_chunk, _encoding, callback) {
+        writes += 1
+
+        if (writes >= failAfterWrites) {
+          callback(error)
+          return
+        }
+
+        callback()
+      }
+    })
+
+    sink.on("error", () => {})
+
+    return sink
+  }
 
   beforeAll(async () => {
     await rm(testOutputDir, { recursive: true, force: true })
@@ -38,6 +87,19 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     expect(file.size).toBeGreaterThan(0)
 
     return file
+  }
+
+  const expectNoUsableOutputFile = async (filePath: string) => {
+    const exists = await access(filePath).then(
+      () => true,
+      () => false
+    )
+
+    if (!exists) return
+
+    const file = await stat(filePath)
+    expect(file.isFile()).toBe(true)
+    expect(file.size).toBe(0)
   }
 
   const probeOutput = async (filePath: string) => {
@@ -244,6 +306,158 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     expect(controller.signal.aborted).toBe(true)
   })
 
+  it("should reject when a stream input errors mid-run", async () => {
+    const inputError = new Error("input stream failed")
+    const inputStream = new PassThrough()
+    inputStream.on("error", () => {})
+    const inputClosed = waitForEvent(inputStream, "close")
+
+    const outputStream = createWritableSink()
+    const outputClosed = waitForEvent(outputStream, "close")
+    const outputDestroySpy = vi.spyOn(outputStream, "destroy")
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [
+        ffmpegu.input.fromStream(
+          inputStream,
+          ffmpegu.options.concat(
+            ffmpegu.options.custom(["-re"]),
+            ffmpegu.options.format("mp4")
+          )
+        )
+      ],
+      outputs: [
+        ffmpegu.output.toStream(
+          outputStream,
+          ffmpegu.options.concat(
+            ffmpegu.options.format("mpegts"),
+            ffmpegu.options.videoCodec("libx264"),
+            ffmpegu.options.noAudio()
+          )
+        )
+      ]
+    })
+
+    const result = runner.run(command)
+
+    const video = await readFile("./assets/video.mp4")
+    inputStream.write(video)
+    setTimeout(() => {
+      inputStream.destroy(inputError)
+    }, 100)
+
+    await expect(result).rejects.toBe(inputError)
+    await inputClosed
+    await outputClosed
+    expect(outputDestroySpy).toHaveBeenCalledWith(inputError)
+  })
+
+  it("should reject when a stream output errors mid-run", async () => {
+    const outputError = new Error("output stream failed")
+    const outputStream = createFailingWritable(outputError, 1)
+    const outputClosed = waitForEvent(outputStream, "close")
+    const outputDestroySpy = vi.spyOn(outputStream, "destroy")
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
+      outputs: [
+        ffmpegu.output.toStream(
+          outputStream,
+          ffmpegu.options.concat(
+            ffmpegu.options.format("mpegts"),
+            ffmpegu.options.videoCodec("libx264"),
+            ffmpegu.options.noAudio()
+          )
+        )
+      ]
+    })
+
+    outputStream.once("pipe", () => {
+      outputStream.destroy(outputError)
+    })
+
+    await expect(runner.run(command)).rejects.toBe(outputError)
+    await outputClosed
+    expect(outputDestroySpy).toHaveBeenCalled()
+  })
+
+  it("should fail clearly for an invalid input stream", async () => {
+    const outputFile = outputPath("output-empty-input.mp4")
+    await rm(outputFile, { force: true })
+
+    const inputStream = new PassThrough()
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [
+        ffmpegu.input.fromStream(inputStream, ffmpegu.options.format("mp4"))
+      ],
+      outputs: [ffmpegu.output.toFile(outputFile)]
+    })
+
+    const run = runner.run(command)
+    setTimeout(() => {
+      inputStream.end(Buffer.alloc(1))
+    }, 100)
+    const result = await run
+
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toMatch(
+      /invalid data|moov atom not found|error reading header|could not find/i
+    )
+    await expectNoUsableOutputFile(outputFile)
+  })
+
+  it("should fail clearly when stream input omits a required format", async () => {
+    const outputFile = outputPath("output-missing-input-format.wav")
+    await rm(outputFile, { force: true })
+
+    const rawPcmInput = new PassThrough()
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [ffmpegu.input.fromStream(rawPcmInput)],
+      outputs: [
+        ffmpegu.output.toFile(
+          outputFile,
+          ffmpegu.options.concat(
+            ffmpegu.options.format("wav"),
+            ffmpegu.options.audioCodec("pcm_s16le")
+          )
+        )
+      ]
+    })
+
+    const resultPromise = runner.run(command)
+    rawPcmInput.end(Buffer.alloc(44_100 * 2))
+    const result = await resultPromise
+
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toMatch(/invalid data|input|pipe/i)
+    await expectNoUsableOutputFile(outputFile)
+  })
+
+  it("should fail clearly when stream output omits a required format", async () => {
+    const outputStream = createWritableSink()
+    const outputDestroySpy = vi.spyOn(outputStream, "destroy")
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [ffmpegu.input.fromFile("./assets/video.mp4")],
+      outputs: [ffmpegu.output.toStream(outputStream)]
+    })
+
+    const result = await runner.run(command)
+
+    expect(result.code).not.toBe(0)
+    expect(result.stderr).toMatch(
+      /output format|invalid argument|unable to (find|choose)/i
+    )
+    expect(outputDestroySpy).toHaveBeenCalled()
+  })
+
   it("should run a command with input and output map", async () => {
     const input1 = ffmpegu.input.fromFile("./assets/video.mp4")
     const input2 = ffmpegu.input.fromFile("./assets/audio.mp3")
@@ -363,6 +577,40 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     expectFormatNameToContain(media2, "mp4")
     expectVideoStream(media2, { width: 640, height: 360, codecName: "h264" })
     expectNoAudioStream(media2)
+  })
+
+  it("should run a command with a PassThrough input pipeline", async () => {
+    const passThrough = new PassThrough()
+    const outputFile = outputPath("output-pass-through-input.mp4")
+
+    createReadStream("./assets/video.mp4").pipe(passThrough)
+
+    const command = ffmpegu.command({
+      global: ffmpegu.options.overwrite(),
+      inputs: [
+        ffmpegu.input.fromStream(passThrough, ffmpegu.options.format("mp4"))
+      ],
+      outputs: [
+        ffmpegu.output.toFile(
+          outputFile,
+          ffmpegu.options.concat(
+            ffmpegu.options.videoCodec("libx264"),
+            ffmpegu.options.preset("fast"),
+            ffmpegu.options.crf(23),
+            ffmpegu.options.noAudio()
+          )
+        )
+      ]
+    })
+
+    const result = await runner.run(command)
+
+    expect(result.code).toBe(0)
+
+    const media = await probeOutput(outputFile)
+    expectFormatNameToContain(media, "mp4")
+    expectVideoStream(media, { width: 640, height: 360, codecName: "h264" })
+    expectNoAudioStream(media)
   })
 
   it("should run a command with filters", async () => {

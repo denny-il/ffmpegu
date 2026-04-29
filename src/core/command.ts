@@ -1,4 +1,5 @@
 import assert from "node:assert"
+import { createReadStream, createWriteStream } from "node:fs"
 import type { Readable, Writable } from "node:stream"
 import { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguPipeHandler } from "../types/index.ts"
@@ -107,7 +108,14 @@ export class FFmpeguCommand {
         const args = await input.compile(this.refs)
         if (input.pipe) {
           const pipeHandler = await createPipeHandler(input.pipe)
-          const stream = pipeHandler.handler.createWriteStream()
+          const stream = createWriteStream(pipeHandler.path)
+          let opened = false
+          stream.once("open", () => {
+            opened = true
+          })
+          stream.once("close", () => {
+            if (opened) void pipeHandler.release()
+          })
           this.inputPipeStreams.set(input, {
             ...pipeHandler,
             destination: stream,
@@ -120,7 +128,14 @@ export class FFmpeguCommand {
         const args = await output.compile(this.refs)
         if (output.pipe) {
           const pipeHandler = await createPipeHandler(output.pipe)
-          const stream = pipeHandler.handler.createReadStream()
+          const stream = createReadStream(pipeHandler.path)
+          let opened = false
+          stream.once("open", () => {
+            opened = true
+          })
+          stream.once("close", () => {
+            if (opened) void pipeHandler.release()
+          })
           this.outputPipeStreams.set(output, {
             ...pipeHandler,
             source: stream,
@@ -159,12 +174,18 @@ export class FFmpeguCommand {
 
   protected async clean() {
     await Promise.all([
-      ...Array.from(this.inputPipeStreams.values()).map((stream) =>
-        stream.clean()
-      ),
-      ...Array.from(this.outputPipeStreams.values()).map((stream) =>
-        stream.clean()
-      )
+      ...Array.from(this.inputPipeStreams.values()).map(async (stream) => {
+        if (!stream.destination.destroyed) {
+          stream.destination.destroy()
+        }
+        await stream.clean()
+      }),
+      ...Array.from(this.outputPipeStreams.values()).map(async (stream) => {
+        if (!stream.source.destroyed) {
+          stream.source.destroy()
+        }
+        await stream.clean()
+      })
     ])
     this.inputPipeStreams.clear()
     this.outputPipeStreams.clear()

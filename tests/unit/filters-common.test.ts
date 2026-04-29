@@ -24,7 +24,7 @@ import {
   transpose,
   vflip,
   volume
-} from "../../src/filters/common.ts"
+} from "../../src/filters/index.ts"
 import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
 
 describe.sequential("Filters Common", () => {
@@ -39,7 +39,7 @@ describe.sequential("Filters Common", () => {
       fps({ fps: 30, start_time: { seconds: 1, milliseconds: 250 } }).getArgs(
         refs
       )
-    ).toEqual(["fps=fps=30:start_time=00:00:01.250"])
+    ).toEqual(["fps=fps=30:start_time=00\\:00\\:01.250"])
     expect(crop({ w: 100, h: 80, x: 1, y: 2 }).getArgs(refs)).toEqual([
       "crop=w=100:h=80:x=1:y=2"
     ])
@@ -96,7 +96,7 @@ describe.sequential("Filters Common", () => {
         start: { minutes: 1 },
         duration: { seconds: 30, milliseconds: 500 }
       }).getArgs(refs)
-    ).toEqual(["atrim=start=00:01:00.000:duration=00:00:30.500"])
+    ).toEqual(["atrim=start=00\\:01\\:00.000:duration=00\\:00\\:30.500"])
     expect(asetpts({ expr: "PTS-STARTPTS" }).getArgs(refs)).toEqual([
       "asetpts=expr=PTS-STARTPTS"
     ])
@@ -109,7 +109,9 @@ describe.sequential("Filters Common", () => {
         start_time: { seconds: 2 },
         duration: { milliseconds: 750 }
       }).getArgs(refs)
-    ).toEqual(["afade=type=in:start_time=00:00:02.000:duration=00:00:00.750"])
+    ).toEqual([
+      "afade=type=in:start_time=00\\:00\\:02.000:duration=00\\:00\\:00.750"
+    ])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([

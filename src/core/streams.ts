@@ -26,8 +26,20 @@ export async function createPipeHandler(
   pipe: FFmpeguPipe
 ): Promise<FFmpeguPipeHandler> {
   const handler = await open(pipe.path, "r+")
-  const clean = () => rm(pipe.dir, { recursive: true })
-  return { ...pipe, handler, clean }
+  let released = false
+
+  const release = async () => {
+    if (released) return
+    released = true
+    await handler.close()
+  }
+
+  const clean = async () => {
+    await release()
+    await rm(pipe.dir, { recursive: true, force: true })
+  }
+
+  return { ...pipe, handler, release, clean }
 }
 
 async function makeTemporaryPath() {

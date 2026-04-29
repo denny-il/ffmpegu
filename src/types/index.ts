@@ -18,6 +18,7 @@ export type FFmpeguPipe = {
 
 export type FFmpeguPipeHandler = FFmpeguPipe & {
   handler: FileHandle
+  release: () => Promise<void>
   clean: () => Promise<void>
 }
 
