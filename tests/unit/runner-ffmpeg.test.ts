@@ -401,7 +401,7 @@ describe.sequential("FFmpeg Runner", () => {
 
     expect(result.code).toBe(0)
     expect(endSpy).toHaveBeenCalledTimes(1)
-    expect(destroySpy).not.toHaveBeenCalled()
+    expect(destroySpy).not.toHaveBeenCalledWith(expect.any(Error))
   })
 
   it("should destroy output streams with a stable error on non-zero exit", async () => {

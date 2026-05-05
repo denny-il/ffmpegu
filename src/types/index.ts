@@ -53,6 +53,9 @@ export interface FFmpeguFFmpegProgress {
 export interface FFmpeguFFmpegRunOptions {
   onProgress?: (progress: FFmpeguFFmpegProgress) => void
   signal?: Abortable["signal"]
+  idleTimeoutMs?: number
+  closeTimeoutMs?: number
+  maxOutputBuffer?: number
 }
 
 export type FFmpeguFFprobeTags = Record<string, string>

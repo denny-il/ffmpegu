@@ -7,17 +7,24 @@ import type { FFmpeguPipe, FFmpeguPipeHandler } from "../types/index.ts"
 export async function createPipe(name: string): Promise<FFmpeguPipe> {
   const dir = await makeTemporaryPath()
   const path = join(dir, name)
-  const process = spawn("mkfifo", [path], { stdio: "ignore" })
-  await new Promise((resolve, reject) => {
-    process.on("error", reject)
-    process.on("exit", (code) => {
-      if (code !== 0) {
-        reject(new Error(`mkfifo failed with code ${code}`))
-      } else {
-        resolve(undefined)
-      }
+  try {
+    const process = spawn("mkfifo", [path], { stdio: "ignore" })
+    await new Promise((resolve, reject) => {
+      process.on("error", (error) => {
+        reject(normalizeMkfifoError(error))
+      })
+      process.on("exit", (code) => {
+        if (code !== 0) {
+          reject(new Error(`mkfifo failed with code ${code}`))
+        } else {
+          resolve(undefined)
+        }
+      })
     })
-  })
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true })
+    throw error
+  }
 
   return { dir, path }
 }
@@ -44,4 +51,16 @@ export async function createPipeHandler(
 
 async function makeTemporaryPath() {
   return await mkdtemp(join(tmpdir(), "ffmpegu-"))
+}
+
+function normalizeMkfifoError(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    if (error.code === "ENOENT") {
+      return new Error("mkfifo executable not found in PATH.", {
+        cause: error
+      })
+    }
+  }
+
+  return error
 }
