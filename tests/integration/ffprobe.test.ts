@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ffmpegu } from "../../src/index.ts";
+import { describe, expect, it } from "vitest"
+import { ffmpegu } from "../../src/index.ts"
 
 describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
   const runner = ffmpegu.createFFprobeRunner("ffprobe")

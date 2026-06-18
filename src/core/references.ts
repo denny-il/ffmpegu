@@ -8,7 +8,7 @@ export class FFmpeguReferences implements FFmpeguReferencesInterface {
 
   get(ref: FFmpeguCompilable): number {
     if (!this.has(ref)) {
-      this.#refs.set(ref, this.#refs.size)
+      throw new Error(`Reference does not exist: ${ref}`)
     }
     return this.#refs.get(ref)!
   }

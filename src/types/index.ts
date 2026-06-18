@@ -1,6 +1,6 @@
-import type { Abortable } from "node:events";
-import type { FileHandle } from "node:fs/promises";
-import type { FFmpeguArgument } from "../core/argument.ts";
+import type { Abortable } from "node:events"
+import type { FileHandle } from "node:fs/promises"
+import type { FFmpeguArgument } from "../core/argument.ts"
 
 export interface FFmpeguReferencesInterface {
   get(ref: FFmpeguCompilable): number

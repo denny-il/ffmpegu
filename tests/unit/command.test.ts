@@ -242,7 +242,9 @@ describe.sequential("Command", () => {
       clean: vi.fn()
     })
 
-    createReadStreamMock.mockReturnValueOnce(readStream as unknown as ReadStream)
+    createReadStreamMock.mockReturnValueOnce(
+      readStream as unknown as ReadStream
+    )
 
     const output = {
       destination: new PassThrough(),

@@ -10,7 +10,13 @@ const MS_IN_MINUTE = 60 * MS_IN_SECOND
 const MS_IN_HOUR = 60 * MS_IN_MINUTE
 
 export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
-  typeof value === "object" && value !== null && !("getArgs" in value)
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  ["hours", "minutes", "seconds", "milliseconds"].some(
+    (key) =>
+      key in value && typeof value[key as keyof typeof value] === "number"
+  )
 
 type ResolvedTimeOptions<T, K extends keyof T> = {
   [P in keyof T]: P extends K ? Exclude<T[P], FFmpeguTimeObject> : T[P]

@@ -4,16 +4,27 @@ import { FFmpeguOutput } from "../../src/core/output.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 
 describe.sequential("References", () => {
-  it("should auto-index new references", () => {
+  it("should return explicitly registered references", () => {
     const refs = new FFmpeguReferences()
     const input = FFmpeguInput.fromFile("/test/input.mp4")
     const output = FFmpeguOutput.toFile("/test/output.mp4")
+
+    refs.set(input, 0)
+    refs.set(output, 1)
 
     expect(refs.get(input)).toBe(0)
     expect(refs.get(output)).toBe(1)
     expect(refs.get(input)).toBe(0)
     expect(refs.has(input)).toBe(true)
     expect(refs.has(output)).toBe(true)
+  })
+
+  it("should reject unknown stream references instead of allocating on read", () => {
+    const refs = new FFmpeguReferences()
+    const input = FFmpeguInput.fromFile("/test/input.mp4")
+
+    expect(() => input.video.getArgs(refs)).toThrow(/reference/i)
+    expect(refs.has(input)).toBe(false)
   })
 
   it("should throw when setting duplicate references", () => {

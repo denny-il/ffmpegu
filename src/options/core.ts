@@ -14,8 +14,8 @@ export class FFmpeguOptions extends FFmpeguArgument {
     return new FFmpeguOptions(args)
   }
 
-  static concat(source: FFmpeguOptions, ...args: FFmpeguUserArg[]) {
-    return new FFmpeguOptions([...source.args, ...args])
+  static concat(...args: FFmpeguUserArg[]) {
+    return new FFmpeguOptions(args)
   }
 
   static merge(...args: FFmpeguOptions[]) {

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { constants } from "node:fs"
 import { access } from "node:fs/promises"
 import type { Readable } from "node:stream"
 import type { FFmpeguFFprobeJson } from "../types/index.ts"
@@ -35,7 +36,8 @@ export class FFmpeguFFprobeRunner {
     return {
       ...process,
       args,
-      result
+      result,
+      json: result
     }
   }
 
@@ -64,7 +66,7 @@ export class FFmpeguFFprobeRunner {
       path = which.stdout
     }
 
-    const ok = await access(path).then(
+    const ok = await access(path, constants.X_OK).then(
       () => true,
       () => false
     )

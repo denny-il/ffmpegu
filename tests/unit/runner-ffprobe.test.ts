@@ -1,11 +1,12 @@
-import type { ChildProcess } from "node:child_process";
-import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
-import { access } from "node:fs/promises";
-import { Readable } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
-import { FFmpeguProbeCommand } from "../../src/probe/command.ts";
-import { FFmpeguFFprobeRunner } from "../../src/probe/runner.ts";
+import type { ChildProcess } from "node:child_process"
+import { spawn } from "node:child_process"
+import { EventEmitter } from "node:events"
+import { constants } from "node:fs"
+import { access } from "node:fs/promises"
+import { Readable } from "node:stream"
+import { describe, expect, it, vi } from "vitest"
+import { FFmpeguProbeCommand } from "../../src/probe/command.ts"
+import { FFmpeguFFprobeRunner } from "../../src/probe/runner.ts"
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn()
@@ -48,6 +49,7 @@ describe.sequential("FFprobe Runner", () => {
 
     const runner = new FFmpeguFFprobeRunner("ffprobe")
     await expect(runner.validateBinary()).resolves.not.toThrow()
+    expect(accessMock).toHaveBeenCalledWith("/usr/bin/ffprobe", constants.X_OK)
   })
 
   it("should fail validation when which fails", async () => {
@@ -82,6 +84,7 @@ describe.sequential("FFprobe Runner", () => {
 
     expect(result.code).toBe(0)
     expect(result.result).toEqual({ format: { filename: "test" } })
+    expect(result).toMatchObject({ json: { format: { filename: "test" } } })
   })
 
   it("should throw on invalid JSON output", async () => {

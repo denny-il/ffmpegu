@@ -40,6 +40,7 @@ describe.sequential("Input/Output", () => {
     })
 
     const input = FFmpeguInput.fromStream(stream)
+    refs.set(input, 0)
     const args = await input.compile(refs)
 
     expect(createPipeMock).toHaveBeenCalledWith("0")
@@ -70,6 +71,7 @@ describe.sequential("Input/Output", () => {
     })
 
     const output = FFmpeguOutput.toStream(stream)
+    refs.set(output, 0)
     const args = await output.compile(refs)
 
     expect(createPipeMock).toHaveBeenCalledWith("0")
@@ -81,7 +83,7 @@ describe.sequential("Input/Output", () => {
     const refs = new FFmpeguReferences()
     const stream = new PassThrough()
 
-    refs.get(FFmpeguInput.fromFile("/test/input.mp4"))
+    refs.set(FFmpeguInput.fromFile("/test/input.mp4"), 0)
 
     createPipeMock.mockResolvedValueOnce({
       dir: "/tmp/ffmpegu",
@@ -89,6 +91,7 @@ describe.sequential("Input/Output", () => {
     })
 
     const output = FFmpeguOutput.toStream(stream)
+    refs.set(output, 1)
     const args = await output.compile(refs)
 
     expect(createPipeMock).toHaveBeenCalledWith("1")
@@ -104,6 +107,7 @@ describe.sequential("Input/Output", () => {
     createPipeMock.mockRejectedValueOnce(error)
 
     const input = FFmpeguInput.fromStream(stream)
+    refs.set(input, 0)
     await expect(input.compile(refs)).rejects.toThrow("boom")
   })
 
@@ -115,6 +119,7 @@ describe.sequential("Input/Output", () => {
     createPipeMock.mockRejectedValueOnce(error)
 
     const output = FFmpeguOutput.toStream(stream)
+    refs.set(output, 0)
 
     await expect(output.compile(refs)).rejects.toThrow("boom")
     expect(output.pipe).toBeUndefined()
