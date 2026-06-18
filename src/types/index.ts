@@ -7,8 +7,13 @@ export interface FFmpeguReferencesInterface {
   has(ref: FFmpeguCompilable): boolean
 }
 
+export type FFmpeguCompileResult = {
+  args: string[]
+  pipe?: FFmpeguPipe
+}
+
 export interface FFmpeguCompilable {
-  compile(refs: FFmpeguReferencesInterface): Promise<string[]>
+  compile(refs: FFmpeguReferencesInterface): Promise<FFmpeguCompileResult>
 }
 
 export type FFmpeguPipe = {
