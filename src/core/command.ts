@@ -24,14 +24,6 @@ export class FFmpeguCommand {
   readonly outputs: readonly FFmpeguOutput[]
 
   private readonly refs = new FFmpeguReferences()
-  private readonly inputPipeStreams = new Map<
-    FFmpeguInput,
-    FFmpeguPipeInputStream
-  >()
-  private readonly outputPipeStreams = new Map<
-    FFmpeguOutput,
-    FFmpeguPipeOutputStream
-  >()
 
   constructor(options: {
     global?: FFmpeguOptions
@@ -100,14 +92,16 @@ export class FFmpeguCommand {
 
   async compile() {
     const args: string[] = []
+    const inputStreams: FFmpeguPipeInputStream[] = []
+    const outputStreams: FFmpeguPipeOutputStream[] = []
 
     if (this.global) args.push(...this.global.getArgs(this.refs))
 
     const compilations = await Promise.allSettled([
       ...this.inputs.map(async (input) => {
-        const args = await input.compile(this.refs)
-        if (input.pipe) {
-          const pipeHandler = await createPipeHandler(input.pipe)
+        const compiled = await input.compile(this.refs)
+        if (compiled.pipe) {
+          const pipeHandler = await createPipeHandler(compiled.pipe)
           const stream = createWriteStream(pipeHandler.path)
           let opened = false
           stream.once("open", () => {
@@ -116,18 +110,18 @@ export class FFmpeguCommand {
           stream.once("close", () => {
             if (opened) void pipeHandler.release()
           })
-          this.inputPipeStreams.set(input, {
+          inputStreams.push({
             ...pipeHandler,
             destination: stream,
             source: input.source as Readable
           })
         }
-        return args
+        return compiled.args
       }),
       ...this.outputs.map(async (output) => {
-        const args = await output.compile(this.refs)
-        if (output.pipe) {
-          const pipeHandler = await createPipeHandler(output.pipe)
+        const compiled = await output.compile(this.refs)
+        if (compiled.pipe) {
+          const pipeHandler = await createPipeHandler(compiled.pipe)
           const stream = createReadStream(pipeHandler.path)
           let opened = false
           stream.once("open", () => {
@@ -136,20 +130,20 @@ export class FFmpeguCommand {
           stream.once("close", () => {
             if (opened) void pipeHandler.release()
           })
-          this.outputPipeStreams.set(output, {
+          outputStreams.push({
             ...pipeHandler,
             source: stream,
             destination: output.destination as Writable
           })
         }
-        return args
+        return compiled.args
       })
     ])
 
     const errors = compilations.filter((result) => result.status === "rejected")
 
     if (errors.length > 0) {
-      await this.clean()
+      await cleanCompiledStreams(inputStreams, outputStreams)
       throw new Error(
         `Failed to compile command: ${errors.map((e) => e.reason).join(", ")}`
       )
@@ -161,33 +155,45 @@ export class FFmpeguCommand {
       )
     )
 
-    const inputStreams = Array.from(this.inputPipeStreams.values())
-    const outputStreams = Array.from(this.outputPipeStreams.values())
+    const clean = createCompiledStreamsCleaner(inputStreams, outputStreams)
 
     return {
       args,
-      inputStreams,
-      outputStreams,
-      [Symbol.asyncDispose]: this.clean.bind(this)
+      inputStreams: [...inputStreams],
+      outputStreams: [...outputStreams],
+      [Symbol.asyncDispose]: clean
     }
   }
+}
 
-  protected async clean() {
-    await Promise.all([
-      ...Array.from(this.inputPipeStreams.values()).map(async (stream) => {
-        if (!stream.destination.destroyed) {
-          stream.destination.destroy()
-        }
-        await stream.clean()
-      }),
-      ...Array.from(this.outputPipeStreams.values()).map(async (stream) => {
-        if (!stream.source.destroyed) {
-          stream.source.destroy()
-        }
-        await stream.clean()
-      })
-    ])
-    this.inputPipeStreams.clear()
-    this.outputPipeStreams.clear()
+function createCompiledStreamsCleaner(
+  inputStreams: FFmpeguPipeInputStream[],
+  outputStreams: FFmpeguPipeOutputStream[]
+) {
+  let cleanPromise: Promise<void> | undefined
+
+  return async () => {
+    cleanPromise ??= cleanCompiledStreams(inputStreams, outputStreams)
+    await cleanPromise
   }
+}
+
+async function cleanCompiledStreams(
+  inputStreams: FFmpeguPipeInputStream[],
+  outputStreams: FFmpeguPipeOutputStream[]
+) {
+  await Promise.all([
+    ...inputStreams.map(async (stream) => {
+      if (!stream.destination.destroyed) {
+        stream.destination.destroy()
+      }
+      await stream.clean()
+    }),
+    ...outputStreams.map(async (stream) => {
+      if (!stream.source.destroyed) {
+        stream.source.destroy()
+      }
+      await stream.clean()
+    })
+  ])
 }

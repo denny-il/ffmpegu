@@ -1,8 +1,8 @@
 import type { Writable } from "node:stream"
 import type { FFmpeguOptions } from "../options/core.ts"
 import type {
+  FFmpeguCompileResult,
   FFmpeguCompilable,
-  FFmpeguPipe,
   FFmpeguReferencesInterface
 } from "../types/index.ts"
 import { createPipe } from "./streams.ts"
@@ -13,8 +13,6 @@ export type FFmpeguOutputDestination = string | Writable
  * Represents an output from an ffmpeg command
  */
 export class FFmpeguOutput implements FFmpeguCompilable {
-  #pipe?: FFmpeguPipe
-
   constructor(
     readonly destination: FFmpeguOutputDestination,
     readonly options?: FFmpeguOptions
@@ -34,11 +32,9 @@ export class FFmpeguOutput implements FFmpeguCompilable {
     return new FFmpeguOutput(stream, args)
   }
 
-  get pipe() {
-    return this.#pipe
-  }
-
-  async compile(refs: FFmpeguReferencesInterface) {
+  async compile(
+    refs: FFmpeguReferencesInterface
+  ): Promise<FFmpeguCompileResult> {
     const args: string[] = []
 
     if (this.options) args.push(...this.options.getArgs(refs))
@@ -47,10 +43,11 @@ export class FFmpeguOutput implements FFmpeguCompilable {
       args.push(this.destination)
     } else {
       const index = refs.get(this)
-      this.#pipe = await createPipe(`${index}`)
-      args.push(this.#pipe.path)
+      const pipe = await createPipe(`${index}`)
+      args.push(pipe.path)
+      return { args, pipe }
     }
 
-    return args
+    return { args }
   }
 }

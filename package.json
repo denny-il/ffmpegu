@@ -18,13 +18,18 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/denny-il/ffmpegu"
+    "url": "git+https://github.com/denny-il/ffmpegu.git"
   },
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
     "dev": "tsgo --watch",
-    "test": "$npm_execpath run test:unit && $npm_execpath run test:integration",
+    "check": "$npm_execpath run check:fmt && $npm_execpath run check:lint && $npm_execpath run check:type",
+    "check:fmt": "biome format",
+    "check:lint": "biome lint",
+    "check:type": "tsgo --noEmit",
+    "test": "$npm_execpath run test:unit && $npm_execpath run test:integration && $npm_execpath run test:package",
     "test:integration": "vitest run tests/integration",
+    "test:package": "$npm_execpath run build && vitest run tests/package",
     "test:unit": "vitest run tests/unit",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
@@ -56,6 +61,13 @@
     "darwin",
     "linux"
   ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist",
     "README.md",

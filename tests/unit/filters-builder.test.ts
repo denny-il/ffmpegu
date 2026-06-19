@@ -27,6 +27,7 @@ describe.sequential("Filters Builder", () => {
 
   it("should resolve label refs from strings and streams", () => {
     const input = FFmpeguInput.fromFile("/test/input.mp4")
+    refs.set(input, 0)
     const label = FFmpeguFilterLabelRef.create("out")
     const streamLabel = FFmpeguFilterLabelRef.create(input.video)
 

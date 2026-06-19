@@ -1,16 +1,10 @@
 import { createReadStream, createWriteStream } from "node:fs"
-import {
-  access,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat
-} from "node:fs/promises"
+import { access, mkdir, readdir, readFile, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { PassThrough, Writable } from "node:stream"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type {
+  FFmpeguFFmpegProgress,
   FFmpeguFFprobeJson,
   FFmpeguFFprobeStream
 } from "../../src/index.ts"
@@ -231,7 +225,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
   })
 
   it("should emit structured progress updates", async () => {
-    const updates: Array<{ progress: string; frame?: number }> = []
+    const updates: FFmpeguFFmpegProgress[] = []
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
@@ -252,7 +246,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
 
     const result = await runner.run(command, {
       onProgress: (progress) => {
-        updates.push({ progress: progress.progress, frame: progress.frame })
+        updates.push(progress)
       }
     })
 
@@ -260,6 +254,14 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     expect(updates.length).toBeGreaterThan(0)
     expect(updates.at(-1)).toMatchObject({ progress: "end" })
     expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
+    expect(updates.every((update) => update.raw.progress)).toBe(true)
+
+    const speedUpdate = updates.find(
+      (update) => typeof update.speed === "number"
+    )
+    if (speedUpdate?.speed !== undefined) {
+      expect(speedUpdate.speed).toBeGreaterThanOrEqual(0)
+    }
 
     const media = await probeOutput(outputPath("output-progress.mp4"))
     expectVideoStream(media, { width: 640, height: 360 })
@@ -269,6 +271,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
   it("should abort a running command via signal", async () => {
     const controller = new AbortController()
     const updates: Array<{ progress: string; frame?: number }> = []
+    let abortRequested = false
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
@@ -289,19 +292,30 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       ]
     })
 
+    const safetyAbort = setTimeout(() => {
+      controller.abort()
+    }, 10_000)
+
     const result = runner.run(command, {
       signal: controller.signal,
       onProgress: (progress) => {
         updates.push({ progress: progress.progress, frame: progress.frame })
 
-        if (updates.length === 1) {
+        if (!abortRequested && (progress.frame ?? 0) > 0) {
+          abortRequested = true
           controller.abort()
         }
       }
     })
 
-    await expect(result).rejects.toMatchObject({ name: "AbortError" })
+    try {
+      await expect(result).rejects.toMatchObject({ name: "AbortError" })
+    } finally {
+      clearTimeout(safetyAbort)
+    }
+
     expect(updates.length).toBeGreaterThan(0)
+    expect(abortRequested).toBe(true)
     expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
     expect(controller.signal.aborted).toBe(true)
   })
@@ -397,9 +411,12 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       outputs: [ffmpegu.output.toFile(outputFile)]
     })
 
-    const run = runner.run(command)
+    const run = runner.run(command, { idleTimeoutMs: 10_000 })
     setTimeout(() => {
-      inputStream.end(Buffer.alloc(1))
+      inputStream.write(Buffer.alloc(1))
+      setTimeout(() => {
+        inputStream.end()
+      }, 500)
     }, 100)
     const result = await run
 

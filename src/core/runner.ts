@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process"
+import { constants } from "node:fs"
 import { access } from "node:fs/promises"
 import type { Readable, Writable } from "node:stream"
+import { finished } from "node:stream/promises"
 import type {
   FFmpeguFFmpegProgress,
   FFmpeguFFmpegRunOptions
@@ -8,6 +10,9 @@ import type {
 import type { FFmpeguCommand } from "./command.ts"
 
 const _consumed = new WeakSet<FFmpeguCommand>()
+const _reserved = new WeakSet<FFmpeguCommand>()
+const DEFAULT_PROCESS_CLOSE_TIMEOUT_MS = 10
+const DEFAULT_MAX_OUTPUT_BUFFER = 16 * 1024
 
 export class FFmpeguFFmpegRunner {
   readonly binPath: string
@@ -17,17 +22,26 @@ export class FFmpeguFFmpegRunner {
   }
 
   async run(command: FFmpeguCommand, options: FFmpeguFFmpegRunOptions = {}) {
-    this.consumeCommand(command)
+    this.reserveCommand(command)
 
-    await using compiled = await command.compile()
+    let compiled: Awaited<ReturnType<FFmpeguCommand["compile"]>>
+    try {
+      compiled = await command.compile()
+      this.consumeCommand(command)
+    } catch (error) {
+      this.releaseCommand(command)
+      throw error
+    }
+
+    await using disposableCompiled = compiled
 
     const signal = withRuntimeSignal(options.signal)
     const runtimeStreams = [
-      ...compiled.inputStreams.map((stream) => ({
+      ...disposableCompiled.inputStreams.map((stream) => ({
         ...stream,
         ignoreDestinationError: isIgnorablePipeBridgeError
       })),
-      ...compiled.outputStreams.map((stream) => ({
+      ...disposableCompiled.outputStreams.map((stream) => ({
         ...stream,
         ignoreSourceError: isIgnorablePipeBridgeError
       }))
@@ -36,22 +50,35 @@ export class FFmpeguFFmpegRunner {
       signal.controller.abort(error)
       process?.kill()
     })
+    const idleTimeout = monitorIdleTimeout(runtimeStreams, options, (error) => {
+      signal.controller.abort(error)
+      process?.kill()
+    })
     let process: ReturnType<typeof exec> | undefined
 
     try {
-      process = exec(this.binPath, compiled.args, {
+      process = exec(this.binPath, disposableCompiled.args, {
         ...options,
         signal: signal.signal
       })
 
-      for (const streams of [compiled.inputStreams, compiled.outputStreams]) {
+      for (const streams of [
+        disposableCompiled.inputStreams,
+        disposableCompiled.outputStreams
+      ]) {
         for (const stream of streams) {
           stream.source.pipe(stream.destination)
         }
       }
 
-      const result = await Promise.race([process.result, runtimeErrors.promise])
+      const result = await Promise.race([
+        process.result,
+        runtimeErrors.promise,
+        idleTimeout.promise,
+        process.progressFailure
+      ])
       runtimeErrors.dispose()
+      idleTimeout.dispose()
 
       const { progressError, ...processResult } = result
 
@@ -59,32 +86,52 @@ export class FFmpeguFFmpegRunner {
 
       const failed = result.code !== 0
 
-      closeOutputStreams(compiled.outputStreams, failed)
+      const streamingMuxerError =
+        result.code === 0
+          ? detectStreamingMuxerIoError(result.stderr, disposableCompiled.args)
+          : undefined
+
+      if (streamingMuxerError) throw streamingMuxerError
+
+      await closeOutputStreams(disposableCompiled.outputStreams, failed)
 
       return {
         ...processResult,
-        args: compiled.args
+        args: disposableCompiled.args
       }
     } catch (error) {
       runtimeErrors.dispose()
+      idleTimeout.dispose()
+      process?.kill()
       destroyPipeBridgeStreams(
-        compiled.inputStreams,
-        compiled.outputStreams,
+        disposableCompiled.inputStreams,
+        disposableCompiled.outputStreams,
         error
       )
-      destroyOutputStreams(compiled.outputStreams, error)
-      await process?.closed
+      destroyOutputStreams(disposableCompiled.outputStreams, error)
+      await process?.waitForClose(
+        options.closeTimeoutMs ?? DEFAULT_PROCESS_CLOSE_TIMEOUT_MS
+      )
       throw error
     }
   }
 
-  private consumeCommand(command: FFmpeguCommand) {
-    if (_consumed.has(command))
+  private reserveCommand(command: FFmpeguCommand) {
+    if (_consumed.has(command) || _reserved.has(command))
       throw new Error(
         "Command has already been consumed. Create a new command instance."
       )
 
+    _reserved.add(command)
+  }
+
+  private consumeCommand(command: FFmpeguCommand) {
+    _reserved.delete(command)
     _consumed.add(command)
+  }
+
+  private releaseCommand(command: FFmpeguCommand) {
+    _reserved.delete(command)
   }
 
   async validateBinary() {
@@ -103,7 +150,7 @@ export class FFmpeguFFmpegRunner {
       path = which.stdout
     }
 
-    const ok = await access(path).then(
+    const ok = await access(path, constants.X_OK).then(
       () => true,
       () => false
     )
@@ -130,11 +177,18 @@ function exec(
     stdio: onProgress ? ["pipe", "pipe", "pipe", "pipe"] : "pipe"
   })
 
-  const stderr = stringFromReadable(process.stderr)
-  const stdout = stringFromReadable(process.stdout)
+  const maxOutputBuffer = options.maxOutputBuffer ?? DEFAULT_MAX_OUTPUT_BUFFER
+  const stderr = stringFromReadable(process.stderr, maxOutputBuffer)
+  const stdout = stringFromReadable(process.stdout, maxOutputBuffer)
   const progress = onProgress
     ? progressFromReadable(process.stdio[3] as Readable, onProgress)
     : Promise.resolve<unknown | undefined>(undefined)
+  const progressFailure = onProgress
+    ? progress.then((error) => {
+        if (error) throw error
+        return new Promise<never>(() => {})
+      })
+    : new Promise<never>(() => {})
 
   const closed = new Promise<number | null>((resolve) => {
     process.on("close", (code) => {
@@ -177,6 +231,7 @@ function exec(
 
     process.on("error", (error) => {
       processError = error
+      reject(error)
     })
 
     process.on("close", (code) => {
@@ -187,6 +242,10 @@ function exec(
   return {
     result,
     closed,
+    progressFailure,
+    waitForClose(timeoutMs: number) {
+      return waitForPromise(closed, timeoutMs)
+    },
     kill() {
       if (typeof process.kill === "function") {
         process.kill()
@@ -195,14 +254,21 @@ function exec(
   }
 }
 
-function closeOutputStreams(
+async function closeOutputStreams(
   outputStreams: Array<{ destination: Writable }>,
   failed: boolean
 ) {
-  for (const stream of outputStreams) {
-    if (failed) safeDestroy(stream.destination, new Error("FFmpegu command failed"))
-    else stream.destination.end()
-  }
+  await Promise.all(
+    outputStreams.map(async (stream) => {
+      if (failed) {
+        safeDestroy(stream.destination, new Error("FFmpegu command failed"))
+        return
+      }
+
+      stream.destination.end()
+      await finished(stream.destination)
+    })
+  )
 }
 
 function destroyOutputStreams(
@@ -287,6 +353,21 @@ function monitorStreamErrors(
     }
 
     for (const stream of streams) {
+      const sourceErrorState = getStreamError(stream.source)
+      if (sourceErrorState && !stream.ignoreSourceError?.(sourceErrorState)) {
+        queueMicrotask(() => rejectOnce(sourceErrorState))
+        return
+      }
+
+      const destinationErrorState = getStreamError(stream.destination)
+      if (
+        destinationErrorState &&
+        !stream.ignoreDestinationError?.(destinationErrorState)
+      ) {
+        queueMicrotask(() => rejectOnce(destinationErrorState))
+        return
+      }
+
       const sourceError = (error: unknown) => {
         if (stream.ignoreSourceError?.(error)) return
         rejectOnce(error)
@@ -316,6 +397,73 @@ function monitorStreamErrors(
   }
 }
 
+function monitorIdleTimeout(
+  streams: Array<{ source: Readable; destination: Writable }>,
+  options: FFmpeguFFmpegRunOptions,
+  onTimeout: (error: Error) => void
+) {
+  const idleTimeoutMs = options.idleTimeoutMs
+
+  if (!idleTimeoutMs || idleTimeoutMs <= 0 || streams.length === 0) {
+    return {
+      promise: new Promise<never>(() => {}),
+      dispose() {}
+    }
+  }
+
+  const disposers: Array<() => void> = []
+  let settled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const promise = new Promise<never>((_, reject) => {
+    const fail = () => {
+      if (settled) return
+      settled = true
+      const error = new Error(
+        `FFmpegu command idle timeout after ${idleTimeoutMs}ms.`
+      )
+      reject(error)
+      onTimeout(error)
+    }
+
+    const reset = () => {
+      if (settled) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(fail, idleTimeoutMs)
+    }
+
+    for (const stream of streams) {
+      stream.source.on("data", reset)
+      stream.destination.on("drain", reset)
+      disposers.push(() => stream.source.off("data", reset))
+      disposers.push(() => stream.destination.off("drain", reset))
+    }
+
+    reset()
+  })
+
+  return {
+    promise,
+    dispose() {
+      settled = true
+      if (timer) clearTimeout(timer)
+      for (const dispose of disposers) {
+        dispose()
+      }
+      disposers.length = 0
+    }
+  }
+}
+
+function getStreamError(stream: Readable | Writable) {
+  const errored = (stream as { errored?: unknown }).errored
+  if (errored) return errored
+
+  if (stream.destroyed) {
+    return new Error("Stream was destroyed before FFmpegu command started.")
+  }
+}
+
 function isIgnorablePipeBridgeError(error: unknown) {
   if (!error || typeof error !== "object") return false
 
@@ -335,6 +483,41 @@ function progressFromReadable(
     let buffer = ""
     let error: unknown
     let current: Record<string, string> = {}
+    let settled = false
+
+    const finish = (err?: unknown) => {
+      if (settled) return
+      settled = true
+      if (err) error = err
+      cleanup()
+      resolve(error)
+    }
+
+    const onData = (chunk: Buffer | string) => {
+      buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk)
+
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ""
+
+      for (const line of lines) {
+        flushLine(line)
+      }
+    }
+
+    const onEnd = () => {
+      if (buffer.length > 0) flushLine(buffer)
+      finish()
+    }
+
+    const onError = (err: unknown) => {
+      finish(error ?? err)
+    }
+
+    const cleanup = () => {
+      readable.off("data", onData)
+      readable.off("end", onEnd)
+      readable.off("error", onError)
+    }
 
     const flushLine = (line: string) => {
       if (error) return
@@ -356,30 +539,15 @@ function progressFromReadable(
         onProgress(parseProgress(current))
       } catch (err) {
         error = err
+        finish(err)
       }
 
       current = {}
     }
 
-    readable.on("data", (chunk) => {
-      buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk)
-
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() ?? ""
-
-      for (const line of lines) {
-        flushLine(line)
-      }
-    })
-
-    readable.on("end", () => {
-      if (buffer.length > 0) flushLine(buffer)
-      resolve(error)
-    })
-
-    readable.on("error", (err) => {
-      resolve(error ?? err)
-    })
+    readable.on("data", onData)
+    readable.on("end", onEnd)
+    readable.on("error", onError)
   })
 }
 
@@ -411,14 +579,31 @@ function parseProgressValue(key: string, value: string) {
 }
 
 async function stringFromReadable(
-  readable: Readable | null | undefined
+  readable: Readable | null | undefined,
+  maxBytes: number = DEFAULT_MAX_OUTPUT_BUFFER
 ): Promise<string> {
   if (!readable) return ""
 
   return new Promise<string>((resolve, reject) => {
     const chunks: Buffer[] = []
+    let totalBytes = 0
     readable.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      chunks.push(buffer)
+      totalBytes += buffer.length
+
+      while (totalBytes > maxBytes && chunks.length > 0) {
+        const first = chunks[0]
+        const overflow = totalBytes - maxBytes
+
+        if (first.length <= overflow) {
+          totalBytes -= first.length
+          chunks.shift()
+        } else {
+          chunks[0] = first.subarray(overflow)
+          totalBytes -= overflow
+        }
+      }
     })
     readable.on("end", () => {
       resolve(Buffer.concat(chunks).toString("utf-8").trim())
@@ -427,4 +612,39 @@ async function stringFromReadable(
       reject(err)
     })
   })
+}
+
+function detectStreamingMuxerIoError(stderr: string, args: string[]) {
+  if (!isStreamingMuxerCommand(args)) return
+  if (!/(failed|error|broken pipe|connection reset|timed out)/i.test(stderr))
+    return
+
+  return new Error("FFmpegu streaming muxer IO error.", {
+    cause: stderr
+  })
+}
+
+function isStreamingMuxerCommand(args: string[]) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "-f" && (args[i + 1] === "hls" || args[i + 1] === "dash")) {
+      return true
+    }
+
+    if (/\.(m3u8|mpd)(\?|$)/i.test(args[i])) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function waitForPromise<T>(promise: Promise<T>, timeoutMs: number) {
+  if (timeoutMs <= 0) return Promise.resolve<T | undefined>(undefined)
+
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => {
+      setTimeout(() => resolve(undefined), timeoutMs)
+    })
+  ])
 }

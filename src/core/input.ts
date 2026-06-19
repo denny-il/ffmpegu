@@ -2,8 +2,8 @@ import assert from "node:assert"
 import type { Readable } from "node:stream"
 import type { FFmpeguOptions } from "../options/core.ts"
 import type {
+  FFmpeguCompileResult,
   FFmpeguCompilable,
-  FFmpeguPipe,
   FFmpeguReferencesInterface
 } from "../types/index.ts"
 import { FFmpeguArgument } from "./argument.ts"
@@ -55,8 +55,6 @@ export class FFmpeguInput implements FFmpeguCompilable {
   readonly subtitle: FFmpeguStreamReference
   readonly data: FFmpeguStreamReference
 
-  #pipe?: FFmpeguPipe
-
   constructor(
     readonly source: FFmpeguInputSource,
     readonly options?: FFmpeguOptions
@@ -81,14 +79,12 @@ export class FFmpeguInput implements FFmpeguCompilable {
     return new FFmpeguInput(stream, args)
   }
 
-  get pipe() {
-    return this.#pipe
-  }
-
   /**
    * Async setup phase - create named pipes if needed
    */
-  async compile(inputs: FFmpeguReferencesInterface): Promise<string[]> {
+  async compile(
+    inputs: FFmpeguReferencesInterface
+  ): Promise<FFmpeguCompileResult> {
     const args: string[] = []
 
     if (this.options) args.push(...this.options.getArgs(inputs))
@@ -97,11 +93,12 @@ export class FFmpeguInput implements FFmpeguCompilable {
       args.push("-i", this.source)
     } else {
       const index = inputs.get(this)
-      this.#pipe = await createPipe(`${index}`)
-      args.push("-i", this.#pipe!.path)
+      const pipe = await createPipe(`${index}`)
+      args.push("-i", pipe.path)
+      return { args, pipe }
     }
 
-    return args
+    return { args }
   }
 }
 

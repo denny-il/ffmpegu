@@ -106,8 +106,10 @@ describe.sequential("Command", () => {
 
     const okInput = {
       source: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["-i", "/tmp/ffmpegu/0"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" }
+      })
     } as unknown as FFmpeguInput
 
     const badInput = {
@@ -140,8 +142,10 @@ describe.sequential("Command", () => {
 
     const input = {
       source,
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["-i", "/tmp/ffmpegu/0"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" }
+      })
     } as unknown as FFmpeguInput
 
     const command = FFmpeguCommand.create({ inputs: [input], outputs: [] })
@@ -177,14 +181,18 @@ describe.sequential("Command", () => {
 
     const input = {
       source: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["-i", "/tmp/ffmpegu/0"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" }
+      })
     } as unknown as FFmpeguInput
 
     const output = {
       destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["/tmp/ffmpegu/1"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" }
+      })
     } as unknown as FFmpeguOutput
 
     const command = FFmpeguCommand.create({
@@ -213,8 +221,10 @@ describe.sequential("Command", () => {
 
     const outputA = {
       destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/0"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["/tmp/ffmpegu/0"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" }
+      })
     } as unknown as FFmpeguOutput
 
     const outputB = {
@@ -242,12 +252,16 @@ describe.sequential("Command", () => {
       clean: vi.fn()
     })
 
-    createReadStreamMock.mockReturnValueOnce(readStream as unknown as ReadStream)
+    createReadStreamMock.mockReturnValueOnce(
+      readStream as unknown as ReadStream
+    )
 
     const output = {
       destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["/tmp/ffmpegu/1"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" }
+      })
     } as unknown as FFmpeguOutput
 
     const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })
@@ -256,6 +270,55 @@ describe.sequential("Command", () => {
     expect(createReadStreamMock).toHaveBeenCalledWith("/tmp/ffmpegu/1")
     expect(result.outputStreams).toHaveLength(1)
     expect(result.outputStreams[0].source).toBe(readStream)
+  })
+
+  it("should clean only streams owned by the compiled command result", async () => {
+    const firstCleanSpy = vi.fn().mockResolvedValue(undefined)
+    const secondCleanSpy = vi.fn().mockResolvedValue(undefined)
+
+    createPipeHandlerMock
+      .mockResolvedValueOnce({
+        dir: "/tmp/ffmpegu",
+        path: "/tmp/ffmpegu/1",
+        handler: {} as FileHandle,
+        release: vi.fn().mockResolvedValue(undefined),
+        clean: firstCleanSpy
+      })
+      .mockResolvedValueOnce({
+        dir: "/tmp/ffmpegu",
+        path: "/tmp/ffmpegu/2",
+        handler: {} as FileHandle,
+        release: vi.fn().mockResolvedValue(undefined),
+        clean: secondCleanSpy
+      })
+
+    createReadStreamMock
+      .mockReturnValueOnce(new PassThrough() as unknown as ReadStream)
+      .mockReturnValueOnce(new PassThrough() as unknown as ReadStream)
+
+    const output = {
+      destination: new PassThrough(),
+      compile: vi
+        .fn()
+        .mockResolvedValueOnce({
+          args: ["/tmp/ffmpegu/1"],
+          pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" }
+        })
+        .mockResolvedValueOnce({
+          args: ["/tmp/ffmpegu/2"],
+          pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/2" }
+        })
+    } as unknown as FFmpeguOutput
+
+    const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })
+
+    const firstResult = await command.compile()
+    await command.compile()
+
+    await firstResult[Symbol.asyncDispose]()
+
+    expect(firstCleanSpy).toHaveBeenCalledTimes(1)
+    expect(secondCleanSpy).not.toHaveBeenCalled()
   })
 
   it("should allow compiled command cleanup to run more than once", async () => {
@@ -275,8 +338,10 @@ describe.sequential("Command", () => {
 
     const output = {
       destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
+      compile: vi.fn().mockResolvedValue({
+        args: ["/tmp/ffmpegu/1"],
+        pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" }
+      })
     } as unknown as FFmpeguOutput
 
     const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })

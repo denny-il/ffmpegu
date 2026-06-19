@@ -10,6 +10,18 @@ describe.sequential("Options", () => {
     expect(ffmpegu.options.noOverwrite().getArgs(refs)).toEqual(["-n"])
   })
 
+  it("should accept raw args in concat as documented", () => {
+    expect(() => {
+      const options = ffmpegu.options.concat(
+        "-y",
+        ffmpegu.options.videoCodec("libx264"),
+        ffmpegu.options.noAudio()
+      )
+
+      expect(options.getArgs(refs)).toEqual(["-y", "-c:v", "libx264", "-an"])
+    }).not.toThrow()
+  })
+
   it("should format container and log options", () => {
     expect(ffmpegu.options.format("mp4").getArgs(refs)).toEqual(["-f", "mp4"])
     expect(ffmpegu.options.logLevel("warning").getArgs(refs)).toEqual([

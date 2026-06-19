@@ -130,6 +130,7 @@ describe.sequential("Filters", () => {
 
   it("should render labels from input stream references", () => {
     const input = FFmpeguInput.fromFile("/test/input.mp4")
+    refs.set(input, 0)
     const labelVideo = FFmpeguFilterLabelRef.create(input.video)
     const labelAudioTrack = FFmpeguFilterLabelRef.create(input.audio.track(1))
 

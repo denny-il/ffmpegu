@@ -1,11 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { ffmpegu } from "../../src/index.ts";
+import { describe, expect, it } from "vitest"
+import { ffmpegu } from "../../src/index.ts"
 
 describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
   const runner = ffmpegu.createFFprobeRunner("ffprobe")
 
   it("should validate ffprobe binary", async () => {
     await expect(runner.validateBinary()).resolves.not.toThrow()
+  })
+
+  it("should reject unknown ffprobe binary during validation", async () => {
+    const missingRunner = ffmpegu.createFFprobeRunner(
+      "ffmpegu-definitely-missing-ffprobe"
+    )
+
+    await expect(missingRunner.validateBinary()).rejects.toThrow(
+      "ffprobe binary not found"
+    )
   })
 
   it("should probe file and parse json", async () => {
@@ -33,6 +43,7 @@ describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
         (stream) => stream.codec_type === "audio"
       )
     ).toHaveLength(0)
+    expect(result.json).toEqual(result.result)
   })
 
   it("should surface parse errors from non-ffprobe output", async () => {
@@ -42,5 +53,16 @@ describe.sequential("FFprobe Integration", { timeout: 120_000 }, () => {
     await expect(echoRunner.run(command)).rejects.toThrow(
       "Failed to parse ffprobe JSON output"
     )
+  })
+
+  it("should return undefined json when a real process emits empty stdout", async () => {
+    const trueRunner = ffmpegu.createFFprobeRunner("true")
+    const command = ffmpegu.probe.fromFile("./assets/video.mp4")
+    const result = await trueRunner.run(command)
+
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe("")
+    expect(result.result).toBeUndefined()
+    expect(result.json).toBeUndefined()
   })
 })

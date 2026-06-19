@@ -1,14 +1,19 @@
-import type { Abortable } from "node:events";
-import type { FileHandle } from "node:fs/promises";
-import type { FFmpeguArgument } from "../core/argument.ts";
+import type { Abortable } from "node:events"
+import type { FileHandle } from "node:fs/promises"
+import type { FFmpeguArgument } from "../core/argument.ts"
 
 export interface FFmpeguReferencesInterface {
   get(ref: FFmpeguCompilable): number
   has(ref: FFmpeguCompilable): boolean
 }
 
+export type FFmpeguCompileResult = {
+  args: string[]
+  pipe?: FFmpeguPipe
+}
+
 export interface FFmpeguCompilable {
-  compile(refs: FFmpeguReferencesInterface): Promise<string[]>
+  compile(refs: FFmpeguReferencesInterface): Promise<FFmpeguCompileResult>
 }
 
 export type FFmpeguPipe = {
@@ -53,6 +58,9 @@ export interface FFmpeguFFmpegProgress {
 export interface FFmpeguFFmpegRunOptions {
   onProgress?: (progress: FFmpeguFFmpegProgress) => void
   signal?: Abortable["signal"]
+  idleTimeoutMs?: number
+  closeTimeoutMs?: number
+  maxOutputBuffer?: number
 }
 
 export type FFmpeguFFprobeTags = Record<string, string>

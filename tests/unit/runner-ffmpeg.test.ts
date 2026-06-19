@@ -1,6 +1,7 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process"
 import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
+import { constants } from "node:fs"
 import { access } from "node:fs/promises"
 import { PassThrough, Readable, Writable } from "node:stream"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -124,6 +125,7 @@ describe.sequential("FFmpeg Runner", () => {
 
     const runner = new FFmpeguFFmpegRunner("ffmpeg")
     await expect(runner.validateBinary()).resolves.not.toThrow()
+    expect(accessMock).toHaveBeenCalledWith("/usr/bin/ffmpeg", constants.X_OK)
   })
 
   it("should fail validation when which fails", async () => {
@@ -401,7 +403,7 @@ describe.sequential("FFmpeg Runner", () => {
 
     expect(result.code).toBe(0)
     expect(endSpy).toHaveBeenCalledTimes(1)
-    expect(destroySpy).not.toHaveBeenCalled()
+    expect(destroySpy).not.toHaveBeenCalledWith(expect.any(Error))
   })
 
   it("should destroy output streams with a stable error on non-zero exit", async () => {
