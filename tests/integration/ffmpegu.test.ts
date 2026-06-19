@@ -271,6 +271,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
   it("should abort a running command via signal", async () => {
     const controller = new AbortController()
     const updates: Array<{ progress: string; frame?: number }> = []
+    let abortRequested = false
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
@@ -291,19 +292,30 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       ]
     })
 
+    const safetyAbort = setTimeout(() => {
+      controller.abort()
+    }, 10_000)
+
     const result = runner.run(command, {
       signal: controller.signal,
       onProgress: (progress) => {
         updates.push({ progress: progress.progress, frame: progress.frame })
 
-        if (updates.length === 1) {
+        if (!abortRequested && (progress.frame ?? 0) > 0) {
+          abortRequested = true
           controller.abort()
         }
       }
     })
 
-    await expect(result).rejects.toMatchObject({ name: "AbortError" })
+    try {
+      await expect(result).rejects.toMatchObject({ name: "AbortError" })
+    } finally {
+      clearTimeout(safetyAbort)
+    }
+
     expect(updates.length).toBeGreaterThan(0)
+    expect(abortRequested).toBe(true)
     expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
     expect(controller.signal.aborted).toBe(true)
   })
