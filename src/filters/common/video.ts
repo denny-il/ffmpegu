@@ -1,4 +1,7 @@
-import { type FFmpeguTimeObject, resolveTimeOptions } from "../../utils.ts"
+import {
+  type FFmpeguTimeObject,
+  resolveFilterTimeOptions
+} from "../../utils.ts"
 import type { FilterArgument, FilterOptions } from "../core.ts"
 import type { FFmpeguFilterLabelRef } from "../label.ts"
 import { FFmpeguSimpleFilter } from "../simple.ts"
@@ -123,7 +126,7 @@ export type SetPtsOptions = {
 export const scale = (options: ScaleOptions = {}, labels?: FilterLabels) =>
   create("scale", options, labels)
 export const fps = (options: FpsOptions = {}, labels?: FilterLabels) =>
-  create("fps", resolveTimeOptions(options, ["start_time"]), labels)
+  create("fps", resolveFilterTimeOptions(options, ["start_time"]), labels)
 export const crop = (options: CropOptions = {}, labels?: FilterLabels) =>
   create("crop", options, labels)
 export const pad = (options: PadOptions = {}, labels?: FilterLabels) =>

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { PassThrough, Writable } from "node:stream"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import type {
+  FFmpeguFFmpegProgress,
   FFmpeguFFprobeJson,
   FFmpeguFFprobeStream
 } from "../../src/index.ts"
@@ -224,7 +225,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
   })
 
   it("should emit structured progress updates", async () => {
-    const updates: Array<{ progress: string; frame?: number }> = []
+    const updates: FFmpeguFFmpegProgress[] = []
 
     const command = ffmpegu.command({
       global: ffmpegu.options.overwrite(),
@@ -245,7 +246,7 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
 
     const result = await runner.run(command, {
       onProgress: (progress) => {
-        updates.push({ progress: progress.progress, frame: progress.frame })
+        updates.push(progress)
       }
     })
 
@@ -253,6 +254,14 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
     expect(updates.length).toBeGreaterThan(0)
     expect(updates.at(-1)).toMatchObject({ progress: "end" })
     expect(updates.some((update) => (update.frame ?? 0) > 0)).toBe(true)
+    expect(updates.every((update) => update.raw.progress)).toBe(true)
+
+    const speedUpdate = updates.find(
+      (update) => typeof update.speed === "number"
+    )
+    if (speedUpdate?.speed !== undefined) {
+      expect(speedUpdate.speed).toBeGreaterThanOrEqual(0)
+    }
 
     const media = await probeOutput(outputPath("output-progress.mp4"))
     expectVideoStream(media, { width: 640, height: 360 })

@@ -23,8 +23,9 @@
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
     "dev": "tsgo --watch",
-    "test": "$npm_execpath run test:unit && $npm_execpath run test:integration",
+    "test": "$npm_execpath run test:unit && $npm_execpath run test:integration && $npm_execpath run test:package",
     "test:integration": "vitest run tests/integration",
+    "test:package": "$npm_execpath run build && vitest run tests/package",
     "test:unit": "vitest run tests/unit",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",

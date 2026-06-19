@@ -1,4 +1,7 @@
-import { type FFmpeguTimeObject, resolveTimeOptions } from "../../utils.ts"
+import {
+  type FFmpeguTimeObject,
+  resolveFilterTimeOptions
+} from "../../utils.ts"
 import type { FilterArgument, FilterOptions } from "../core.ts"
 import type { FFmpeguFilterLabelRef } from "../label.ts"
 import { FFmpeguSimpleFilter } from "../simple.ts"
@@ -105,7 +108,7 @@ export const aresample = (
 export const atrim = (options: AtrimOptions = {}, labels?: FilterLabels) =>
   create(
     "atrim",
-    resolveTimeOptions(options, [
+    resolveFilterTimeOptions(options, [
       "start",
       "end",
       "start_time",
@@ -119,7 +122,7 @@ export const asetpts = (options: AsetPtsOptions = {}, labels?: FilterLabels) =>
 export const afade = (options: AfadeOptions = {}, labels?: FilterLabels) =>
   create(
     "afade",
-    resolveTimeOptions(options, ["start_time", "duration"]),
+    resolveFilterTimeOptions(options, ["start_time", "duration"]),
     labels
   )
 export const highpass = (
