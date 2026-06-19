@@ -399,9 +399,12 @@ describe.sequential("Integration", { timeout: 120_000 }, () => {
       outputs: [ffmpegu.output.toFile(outputFile)]
     })
 
-    const run = runner.run(command)
+    const run = runner.run(command, { idleTimeoutMs: 10_000 })
     setTimeout(() => {
-      inputStream.end(Buffer.alloc(1))
+      inputStream.write(Buffer.alloc(1))
+      setTimeout(() => {
+        inputStream.end()
+      }, 500)
     }, 100)
     const result = await run
 
