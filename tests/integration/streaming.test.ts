@@ -39,6 +39,11 @@ const live = <A, E>(
 ) => Effect.scoped(effect).pipe(Effect.provide(MediaLive))
 const opts = Options.create
 
+// Effect's output sockets can reset under slow reads on macOS/Bun.
+// Re-enable the affected cases after https://github.com/denny-il/ffmpegu/issues/3.
+const hasBunMacOutputReset =
+  process.platform === "darwin" && !!process.versions.bun
+
 const KiB = 1024
 const MiB = 1024 * KiB
 
@@ -263,41 +268,43 @@ describe("producer/consumer rate matrix", () => {
     { name: "delayed producer, delayed consumer", producer: 2, consumer: 1 }
   ] as const
 
-  it.live.each(cases)(
-    "$name: copies 4 MiB of PCM byte for byte",
-    ({ producer, consumer }) =>
-      live(
-        Effect.gen(function* () {
-          const probe = makeProbe()
-          const collector = makeCollector()
-          const progress: Array<string> = []
-          yield* run(
-            pcmCopy(
-              payloadSource(probe, {
-                total: TOTAL,
-                delay: producer > 0 ? pace(producer) : undefined
-              }),
-              collect(collector, {
-                delay: consumer > 0 ? pace(consumer) : undefined
-              })
-            ),
-            {
-              onProgress: (p) =>
-                Effect.sync(() => {
-                  progress.push(p.progress)
+  for (const { name, producer, consumer } of cases) {
+    it.live.skipIf(hasBunMacOutputReset && consumer > 0)(
+      `${name}: copies 4 MiB of PCM byte for byte`,
+      () =>
+        live(
+          Effect.gen(function* () {
+            const probe = makeProbe()
+            const collector = makeCollector()
+            const progress: Array<string> = []
+            yield* run(
+              pcmCopy(
+                payloadSource(probe, {
+                  total: TOTAL,
+                  delay: producer > 0 ? pace(producer) : undefined
+                }),
+                collect(collector, {
+                  delay: consumer > 0 ? pace(consumer) : undefined
                 })
-            }
-          )
-          expect(probe.completed).toBe(true)
-          expect(probe.pulled).toBe(TOTAL)
-          expect(probe.exits).toEqual(["success"])
-          expectExactPayload(collector, TOTAL)
-          expect(collector.finalized).toBe(1)
-          expect(progress.at(-1)).toBe("end")
-        })
-      ),
-    30_000
-  )
+              ),
+              {
+                onProgress: (p) =>
+                  Effect.sync(() => {
+                    progress.push(p.progress)
+                  })
+              }
+            )
+            expect(probe.completed).toBe(true)
+            expect(probe.pulled).toBe(TOTAL)
+            expect(probe.exits).toEqual(["success"])
+            expectExactPayload(collector, TOTAL)
+            expect(collector.finalized).toBe(1)
+            expect(progress.at(-1)).toBe("end")
+          })
+        ),
+      30_000
+    )
+  }
 })
 
 it.live(
@@ -673,7 +680,7 @@ describe("FFmpeg exits before an infinite producer ends", () => {
 })
 
 describe("multiple descriptors with asymmetric rates", () => {
-  it.live(
+  it.live.skipIf(hasBunMacOutputReset)(
     "two inputs at different byte rates and speeds into two outputs",
     () =>
       live(
