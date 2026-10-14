@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 
-describe.sequential("Stream References", () => {
+describe("Stream References", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should format stream references", () => {

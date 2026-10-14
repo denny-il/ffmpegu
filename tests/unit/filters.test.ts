@@ -7,7 +7,7 @@ import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
 import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
 import { FFmpeguFilterGraph } from "../../src/index.ts"
 
-describe.sequential("Filters", () => {
+describe("Filters", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   class DummyArgument extends FFmpeguArgument {

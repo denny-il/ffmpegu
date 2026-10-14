@@ -1,4 +1,4 @@
-import { Readable, Writable } from "node:stream"
+import { Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguCommand } from "../../src/core/command.ts"
@@ -11,9 +11,8 @@ import {
 import { FFmpeguOutput } from "../../src/core/output.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import { FFmpeguOptions } from "../../src/index.ts"
-import { FFmpeguProbeCommand } from "../../src/probe/command.ts"
 
-describe.sequential("FFmpegu", () => {
+describe("FFmpegu", { concurrent: false }, () => {
   describe("Options", () => {
     const refs = new FFmpeguReferences()
 
@@ -71,7 +70,7 @@ describe.sequential("FFmpegu", () => {
     })
 
     it("should create input from stream", () => {
-      const source = new Readable()
+      const source = Stream.make(new Uint8Array([1]))
       const input = FFmpeguInput.fromStream(source)
       expect(input.source).toBe(source)
       expect(input.options).toBeUndefined()
@@ -142,8 +141,8 @@ describe.sequential("FFmpegu", () => {
     })
 
     it("should create output from stream", () => {
-      const stream = new Writable()
-      const output = FFmpeguOutput.toStream(stream)
+      const stream = Sink.drain
+      const output = FFmpeguOutput.toSink(stream)
       expect(output.destination).toBe(stream)
       expect(output.options).toBeUndefined()
     })
@@ -186,22 +185,26 @@ describe.sequential("FFmpegu", () => {
       expect(command.global).toBeInstanceOf(FFmpeguOptions)
     })
 
-    it("should throw if input already exists", () => {
-      expect(() => {
-        new FFmpeguCommand({
-          inputs: [input, input],
-          outputs: [output]
-        })
-      }).toThrow()
+    it("should reject a command with a duplicate input on compile", () => {
+      const result = new FFmpeguCommand({
+        inputs: [input, input],
+        outputs: [output]
+      }).compile()
+
+      expect(Result.isFailure(result) && result.failure.reason).toBe(
+        "DuplicateInput"
+      )
     })
 
-    it("should throw if output already exists", () => {
-      expect(() => {
-        new FFmpeguCommand({
-          inputs: [input],
-          outputs: [output, output]
-        })
-      }).toThrow()
+    it("should reject a command with a duplicate output on compile", () => {
+      const result = new FFmpeguCommand({
+        inputs: [input],
+        outputs: [output, output]
+      }).compile()
+
+      expect(Result.isFailure(result) && result.failure.reason).toBe(
+        "DuplicateOutput"
+      )
     })
 
     it("should allow add inputs", () => {
@@ -247,40 +250,15 @@ describe.sequential("FFmpegu", () => {
       expect(newCommand.global!.args.length).toBe(1)
     })
 
-    it("should compile command to arguments", async () => {
+    it("should compile command to arguments", () => {
       const command = new FFmpeguCommand({
         inputs: [input],
         outputs: [output]
       })
 
-      const { args } = await command.compile()
+      const { args } = Result.getOrThrow(command.compile())
 
       expect(args).toEqual(["-i", input.source, output.destination])
-    })
-  })
-
-  describe("Probe", () => {
-    it("should create probe command from file", () => {
-      const source = "/test/input.mp4"
-      const probe = FFmpeguProbeCommand.fromFile(source)
-
-      expect(probe).toBeInstanceOf(FFmpeguProbeCommand)
-      expect(probe.input).toBe(source)
-    })
-
-    it("should compile probe command to arguments", async () => {
-      const probe = FFmpeguProbeCommand.fromFile("/test/input.mp4")
-      const args = await probe.compile()
-
-      expect(args).toEqual([
-        "-hide_banner",
-        "-of",
-        "json",
-        "-show_format",
-        "-show_streams",
-        "-i",
-        "/test/input.mp4"
-      ])
     })
   })
 })

@@ -1,193 +1,300 @@
-import assert from "node:assert"
-import { createReadStream, createWriteStream } from "node:fs"
-import type { Readable, Writable } from "node:stream"
+import * as Result from "effect/Result"
+import type * as Sink from "effect/Sink"
+import type * as Stream from "effect/Stream"
+import { CommandError } from "../errors.ts"
 import { FFmpeguOptions } from "../options/core.ts"
-import type { FFmpeguPipeHandler } from "../types/index.ts"
 import type { FFmpeguInput } from "./input.ts"
 import type { FFmpeguOutput } from "./output.ts"
-import { FFmpeguReferences } from "./references.ts"
-import { createPipeHandler } from "./streams.ts"
+import { CommandReferences, ForeignReference } from "./references.ts"
 
-export type FFmpeguPipeInputStream = FFmpeguPipeHandler & {
-  destination: Writable
-  source: Readable
+/** File descriptor reserved for `-progress`; set up only when progress is requested. */
+export const PROGRESS_FD = 3
+/** First file descriptor assigned to stream inputs and sink outputs. */
+export const FIRST_STREAM_FD = 4
+
+export interface CompiledInputStream<E, R> {
+  readonly fd: number
+  readonly source: Stream.Stream<Uint8Array, E, R>
 }
 
-export type FFmpeguPipeOutputStream = FFmpeguPipeHandler & {
-  source: Readable
-  destination: Writable
+export interface CompiledOutputStream<E, R> {
+  readonly fd: number
+  readonly sink: Sink.Sink<void, Uint8Array, never, E, R>
 }
 
-export class FFmpeguCommand {
-  readonly global?: FFmpeguOptions
-  readonly inputs: readonly FFmpeguInput[]
-  readonly outputs: readonly FFmpeguOutput[]
+/**
+ * Deterministic execution plan of a command. `args` reference stream inputs
+ * and sink outputs as `pipe:<fd>`; the runner owns those descriptors.
+ */
+export interface CompiledCommand<E, R> {
+  readonly args: ReadonlyArray<string>
+  readonly inputStreams: ReadonlyArray<CompiledInputStream<E, R>>
+  readonly outputStreams: ReadonlyArray<CompiledOutputStream<E, R>>
+}
 
-  private readonly refs = new FFmpeguReferences()
-  private readonly inputPipeStreams = new Map<
-    FFmpeguInput,
-    FFmpeguPipeInputStream
-  >()
-  private readonly outputPipeStreams = new Map<
-    FFmpeguOutput,
-    FFmpeguPipeOutputStream
-  >()
+type AnyInput = FFmpeguInput<any, any>
+type AnyOutput = FFmpeguOutput<any, any>
 
-  constructor(options: {
-    global?: FFmpeguOptions
-    inputs: FFmpeguInput[]
-    outputs: FFmpeguOutput[]
-  }) {
+type InputError<I> = I extends FFmpeguInput<infer E, infer _R> ? E : never
+type InputContext<I> = I extends FFmpeguInput<infer _E, infer R> ? R : never
+type OutputError<O> = O extends FFmpeguOutput<infer E, infer _R> ? E : never
+type OutputContext<O> = O extends FFmpeguOutput<infer _E, infer R> ? R : never
+
+export interface FFmpeguCommandOptions<E, R> {
+  readonly global?: FFmpeguOptions | undefined
+  readonly inputs?: ReadonlyArray<FFmpeguInput<E, R>> | undefined
+  readonly outputs?: ReadonlyArray<FFmpeguOutput<E, R>> | undefined
+}
+
+/**
+ * Immutable description of an ffmpeg invocation:
+ * `[global options] ([input options] -i input)* ([output options] output)*`.
+ *
+ * `E` and `R` are the unions of the error and requirement types of all stream
+ * inputs and sink outputs.
+ */
+export class FFmpeguCommand<E = never, R = never> {
+  readonly global: FFmpeguOptions | undefined
+  readonly inputs: ReadonlyArray<FFmpeguInput<E, R>>
+  readonly outputs: ReadonlyArray<FFmpeguOutput<E, R>>
+
+  constructor(options: FFmpeguCommandOptions<E, R> = {}) {
     this.global = options.global
-    this.inputs = [...options.inputs]
-    this.outputs = [...options.outputs]
-
-    for (let i = 0; i < this.inputs.length; i++) {
-      const input = this.inputs[i]
-      assert(
-        !this.refs.has(input),
-        `Input[${i}] already exists in command. Consider creating a new Input instance.`
-      )
-      this.refs.set(input, i)
-    }
-
-    for (let i = 0; i < this.outputs.length; i++) {
-      const output = this.outputs[i]
-      assert(
-        !this.refs.has(output),
-        `Output[${i}] already exists in command. Consider creating a new Output instance.`
-      )
-      this.refs.set(output, i + this.inputs.length)
-    }
+    this.inputs = [...(options.inputs ?? [])]
+    this.outputs = [...(options.outputs ?? [])]
   }
 
-  static create(options: {
-    global?: FFmpeguOptions
-    inputs?: FFmpeguInput[]
-    outputs?: FFmpeguOutput[]
-  }) {
-    return new FFmpeguCommand({
-      global: options.global,
-      inputs: options.inputs ?? [],
-      outputs: options.outputs ?? []
+  /**
+   * Create a command, inferring `E`/`R` as the union over all inputs and
+   * outputs, including heterogeneous arrays.
+   */
+  static make<
+    const I extends ReadonlyArray<AnyInput> = readonly [],
+    const O extends ReadonlyArray<AnyOutput> = readonly []
+  >(options: {
+    readonly global?: FFmpeguOptions | undefined
+    readonly inputs?: I | undefined
+    readonly outputs?: O | undefined
+  }): FFmpeguCommand<
+    InputError<I[number]> | OutputError<O[number]>,
+    InputContext<I[number]> | OutputContext<O[number]>
+  > {
+    return new FFmpeguCommand(options)
+  }
+
+  /** Alias of {@link FFmpeguCommand.make}. */
+  static create = FFmpeguCommand.make
+
+  /** Compiled argv of a command without runtime-owned flags. */
+  static toArgs(
+    command: FFmpeguCommand<any, any>
+  ): Result.Result<ReadonlyArray<string>, CommandError> {
+    return Result.map(command.compile(), (compiled) => compiled.args)
+  }
+
+  withGlobal(options: FFmpeguOptions): FFmpeguCommand<E, R> {
+    return new FFmpeguCommand<E, R>({
+      inputs: this.inputs,
+      outputs: this.outputs,
+      global: this.global ? FFmpeguOptions.merge(this.global, options) : options
     })
   }
 
-  // Immutable updates
-  withGlobal(args: FFmpeguOptions): FFmpeguCommand {
-    return new FFmpeguCommand({
-      inputs: [...this.inputs],
-      outputs: [...this.outputs],
-      global: this.global ? FFmpeguOptions.merge(this.global, args) : args
-    })
-  }
-
-  withInput(input: FFmpeguInput): FFmpeguCommand {
-    return new FFmpeguCommand({
+  withInput<E2, R2>(
+    input: FFmpeguInput<E2, R2>
+  ): FFmpeguCommand<E | E2, R | R2> {
+    return new FFmpeguCommand<E | E2, R | R2>({
       global: this.global,
       inputs: [...this.inputs, input],
-      outputs: [...this.outputs]
+      outputs: this.outputs
     })
   }
 
-  withOutput(output: FFmpeguOutput): FFmpeguCommand {
-    return new FFmpeguCommand({
+  withOutput<E2, R2>(
+    output: FFmpeguOutput<E2, R2>
+  ): FFmpeguCommand<E | E2, R | R2> {
+    return new FFmpeguCommand<E | E2, R | R2>({
       global: this.global,
-      inputs: [...this.inputs],
+      inputs: this.inputs,
       outputs: [...this.outputs, output]
     })
   }
 
-  async compile() {
+  /**
+   * Validate and render the command. Pure: no resources are created and
+   * stream sources/sinks are not touched.
+   */
+  compile(): Result.Result<CompiledCommand<E, R>, CommandError> {
+    const indices = new Map<object, number>()
+    for (const [index, input] of this.inputs.entries()) {
+      if (indices.has(input)) {
+        return fail(
+          "DuplicateInput",
+          `Input[${index}] is already part of the command as Input[${indices.get(input)}]. Create a separate input instead.`
+        )
+      }
+      indices.set(input, index)
+    }
+
+    const outputs = new Map<object, number>()
+    for (const [index, output] of this.outputs.entries()) {
+      if (outputs.has(output)) {
+        return fail(
+          "DuplicateOutput",
+          `Output[${index}] is already part of the command as Output[${outputs.get(output)}]. Create a separate output instead.`
+        )
+      }
+      outputs.set(output, index)
+    }
+
+    const refs = new CommandReferences(indices)
     const args: string[] = []
+    const inputStreams: Array<CompiledInputStream<E, R>> = []
+    const outputStreams: Array<CompiledOutputStream<E, R>> = []
+    let fd = FIRST_STREAM_FD
 
-    if (this.global) args.push(...this.global.getArgs(this.refs))
+    try {
+      if (this.global) {
+        const error = pushOptions(args, this.global, refs, "global options")
+        if (error) return Result.fail(error)
+      }
 
-    const compilations = await Promise.allSettled([
-      ...this.inputs.map(async (input) => {
-        const args = await input.compile(this.refs)
-        if (input.pipe) {
-          const pipeHandler = await createPipeHandler(input.pipe)
-          const stream = createWriteStream(pipeHandler.path)
-          let opened = false
-          stream.once("open", () => {
-            opened = true
-          })
-          stream.once("close", () => {
-            if (opened) void pipeHandler.release()
-          })
-          this.inputPipeStreams.set(input, {
-            ...pipeHandler,
-            destination: stream,
-            source: input.source as Readable
-          })
+      for (const [index, input] of this.inputs.entries()) {
+        const at = `Input[${index}]`
+        if (input.options) {
+          const error = pushOptions(args, input.options, refs, `${at} options`)
+          if (error) return Result.fail(error)
         }
-        return args
-      }),
-      ...this.outputs.map(async (output) => {
-        const args = await output.compile(this.refs)
-        if (output.pipe) {
-          const pipeHandler = await createPipeHandler(output.pipe)
-          const stream = createReadStream(pipeHandler.path)
-          let opened = false
-          stream.once("open", () => {
-            opened = true
-          })
-          stream.once("close", () => {
-            if (opened) void pipeHandler.release()
-          })
-          this.outputPipeStreams.set(output, {
-            ...pipeHandler,
-            source: stream,
-            destination: output.destination as Writable
-          })
+        if (typeof input.source === "string") {
+          const error = validateInputPath(input.source, at)
+          if (error) return Result.fail(error)
+          args.push("-i", input.source)
+        } else {
+          inputStreams.push({ fd, source: input.source })
+          args.push("-i", `pipe:${fd++}`)
         }
-        return args
-      })
-    ])
+      }
 
-    const errors = compilations.filter((result) => result.status === "rejected")
-
-    if (errors.length > 0) {
-      await this.clean()
-      throw new Error(
-        `Failed to compile command: ${errors.map((e) => e.reason).join(", ")}`
+      for (const [index, output] of this.outputs.entries()) {
+        const at = `Output[${index}]`
+        if (output.options) {
+          const error = pushOptions(args, output.options, refs, `${at} options`)
+          if (error) return Result.fail(error)
+        }
+        if (typeof output.destination === "string") {
+          const error = validateOutputPath(output.destination, at)
+          if (error) return Result.fail(error)
+          args.push(output.destination)
+        } else {
+          outputStreams.push({ fd, sink: output.destination })
+          args.push(`pipe:${fd++}`)
+        }
+      }
+    } catch (cause) {
+      if (cause instanceof ForeignReference) {
+        return fail(
+          "ForeignReference",
+          "A stream reference points to an input that is not part of the command. Add the input to the command or reference one of its inputs.",
+          cause
+        )
+      }
+      return fail(
+        "InvalidArgument",
+        "Failed to render command arguments",
+        cause
       )
     }
 
-    args.push(
-      ...compilations.flatMap(
-        (v) => (v as PromiseFulfilledResult<string[]>).value
-      )
-    )
+    return Result.succeed({ args, inputStreams, outputStreams })
+  }
+}
 
-    const inputStreams = Array.from(this.inputPipeStreams.values())
-    const outputStreams = Array.from(this.outputPipeStreams.values())
+const fail = (
+  reason: CommandError["reason"],
+  message: string,
+  cause?: unknown
+) => Result.fail(new CommandError({ reason, message, cause }))
 
-    return {
-      args,
-      inputStreams,
-      outputStreams,
-      [Symbol.asyncDispose]: this.clean.bind(this)
+/**
+ * Matches argv tokens that would address the child's own file descriptors
+ * (optionally behind nested protocols such as `async:pipe:3`). Those
+ * descriptors are allocated by the runner, so user-provided paths and option
+ * values must not name them.
+ */
+const RESERVED_DESCRIPTOR =
+  /^(?:[a-z][a-z0-9+.-]*:)*(?:pipe|fd):|^\/dev\/(?:fd\/\d|std(?:in|out|err)$)|^\/proc\/(?:self|thread-self|\d+)\/fd\//i
+
+const reservedPath = (what: string, value: string) =>
+  new CommandError({
+    reason: "ReservedPath",
+    message: `${what} uses "${value}", which addresses a file descriptor owned by ffmpegu. Use Input.fromStream/Output.toSink for piped data.`
+  })
+
+/**
+ * Options owned by the compiler and runner, with the hint shown when a user
+ * option sets them:
+ * - `-i` declares an input; inputs added outside `inputs` would shift the
+ *   positional indices that stream references resolve to.
+ * - `-progress` would redirect the progress report away from the runner.
+ * - `-stdin` would re-enable interaction on a stdin the runner does not
+ *   provide.
+ */
+const ENGINE_OPTIONS: ReadonlyMap<string, string> = new Map([
+  ["-i", "Declare inputs with Input.fromFile or Input.fromStream."],
+  ["-progress", "Pass onProgress to run instead."],
+  ["-stdin", "The runner never provides stdin."]
+])
+
+/**
+ * ffmpeg resolves an option by the name before its first `:`, so stream
+ * specifiers (`-progress:v`) do not change which option is set.
+ */
+const optionName = (token: string) => {
+  const separator = token.indexOf(":")
+  return separator === -1 ? token : token.slice(0, separator)
+}
+
+function pushOptions(
+  args: string[],
+  options: FFmpeguOptions,
+  refs: CommandReferences,
+  what: string
+): CommandError | undefined {
+  const rendered = options.getArgs(refs)
+  for (const token of rendered) {
+    if (RESERVED_DESCRIPTOR.test(token)) return reservedPath(what, token)
+    const hint = token.startsWith("-")
+      ? ENGINE_OPTIONS.get(optionName(token))
+      : undefined
+    if (hint !== undefined) {
+      return new CommandError({
+        reason: "ReservedOption",
+        message: `${what} set "${token}", which is managed by ffmpegu. ${hint}`
+      })
     }
   }
+  args.push(...rendered)
+  return undefined
+}
 
-  protected async clean() {
-    await Promise.all([
-      ...Array.from(this.inputPipeStreams.values()).map(async (stream) => {
-        if (!stream.destination.destroyed) {
-          stream.destination.destroy()
-        }
-        await stream.clean()
-      }),
-      ...Array.from(this.outputPipeStreams.values()).map(async (stream) => {
-        if (!stream.source.destroyed) {
-          stream.source.destroy()
-        }
-        await stream.clean()
-      })
-    ])
-    this.inputPipeStreams.clear()
-    this.outputPipeStreams.clear()
+function validateInputPath(path: string, what: string) {
+  // "-" is stdin, which the runner does not provide.
+  if (path === "-" || RESERVED_DESCRIPTOR.test(path)) {
+    return reservedPath(what, path)
   }
+  return undefined
+}
+
+function validateOutputPath(path: string, what: string) {
+  if (path === "-" || RESERVED_DESCRIPTOR.test(path)) {
+    return reservedPath(what, path)
+  }
+  // Output names are positional, so ffmpeg would parse them as options.
+  if (path.startsWith("-")) {
+    return new CommandError({
+      reason: "InvalidArgument",
+      message: `${what} path "${path}" starts with "-" and would be parsed as an option. Use "./${path}" instead.`
+    })
+  }
+  return undefined
 }

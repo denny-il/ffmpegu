@@ -1,39 +1,23 @@
-import {
-  createReadStream,
-  createWriteStream,
-  type ReadStream,
-  type WriteStream
-} from "node:fs"
-import type { FileHandle } from "node:fs/promises"
-import { PassThrough } from "node:stream"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Effect, Result, Sink, Stream } from "effect"
+import { describe, expect, it } from "vitest"
+import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguCommand } from "../../src/core/command.ts"
 import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguOutput } from "../../src/core/output.ts"
-import { createPipeHandler } from "../../src/core/streams.ts"
+import type { CommandError } from "../../src/errors.ts"
+import { filters, options } from "../../src/index.ts"
 import { FFmpeguOptions } from "../../src/options/core.ts"
 
-vi.mock("../../src/core/streams.ts", () => ({
-  createPipeHandler: vi.fn()
-}))
+const compileError = (command: FFmpeguCommand<any, any>): CommandError => {
+  const result = command.compile()
+  if (Result.isSuccess(result)) {
+    throw new Error(`Expected compile to fail, got ${result.success.args}`)
+  }
+  return result.failure
+}
 
-vi.mock("node:fs", () => ({
-  createReadStream: vi.fn(),
-  createWriteStream: vi.fn()
-}))
-
-describe.sequential("Command", () => {
-  const createPipeHandlerMock = vi.mocked(createPipeHandler)
-  const createReadStreamMock = vi.mocked(createReadStream)
-  const createWriteStreamMock = vi.mocked(createWriteStream)
-
-  beforeEach(() => {
-    createPipeHandlerMock.mockReset()
-    createReadStreamMock.mockReset()
-    createWriteStreamMock.mockReset()
-  })
-
-  it("should compile args in order", async () => {
+describe("Command", () => {
+  it("should compile args in order", () => {
     const input = FFmpeguInput.fromFile("/test/input.mp4")
     const output = FFmpeguOutput.toFile("/test/output.mp4")
     const command = FFmpeguCommand.create({
@@ -42,7 +26,7 @@ describe.sequential("Command", () => {
       outputs: [output]
     })
 
-    const { args } = await command.compile()
+    const { args } = Result.getOrThrow(command.compile())
 
     expect(args).toEqual(["-y", "-i", "/test/input.mp4", "/test/output.mp4"])
   })
@@ -57,18 +41,20 @@ describe.sequential("Command", () => {
     const withGlobal = withOutput.withGlobal(FFmpeguOptions.create("-vn"))
 
     expect(base).not.toBe(withInput)
+    expect(base.inputs).toEqual([])
     expect(withInput.inputs).toEqual([input])
     expect(withInput.outputs).toEqual([])
 
     expect(withOutput.inputs).toEqual([input])
     expect(withOutput.outputs).toEqual([output])
 
-    expect(
-      withGlobal.global!.getArgs({
-        get: () => 0,
-        has: () => true
-      })
-    ).toEqual(["-vn"])
+    expect(withOutput.global).toBeUndefined()
+    expect(Result.getOrThrow(withGlobal.compile()).args).toEqual([
+      "-vn",
+      "-i",
+      "/test/input.mp4",
+      "/test/output.mp4"
+    ])
   })
 
   it("should merge global options when adding", () => {
@@ -80,211 +66,369 @@ describe.sequential("Command", () => {
 
     const next = command.withGlobal(FFmpeguOptions.create("-vn"))
 
-    expect(command.global!.getArgs({ get: () => 0, has: () => true })).toEqual([
-      "-y"
+    expect(Result.getOrThrow(command.compile()).args).toEqual(["-y"])
+    expect(Result.getOrThrow(next.compile()).args).toEqual(["-y", "-vn"])
+  })
+
+  it("should assign pipe descriptors from 4 to streams in input then output order", () => {
+    const sourceA = Stream.make(new Uint8Array([1]))
+    const sourceB = Stream.make(new Uint8Array([2]))
+    const sinkA = Sink.drain
+    const sinkB = Sink.forEach((chunk: Uint8Array) => Effect.log(chunk.length))
+
+    const command = FFmpeguCommand.make({
+      inputs: [
+        FFmpeguInput.fromStream(sourceA, options.format("mp4")),
+        FFmpeguInput.fromFile("/test/b.mp4"),
+        FFmpeguInput.fromStream(sourceB)
+      ],
+      outputs: [
+        FFmpeguOutput.toSink(sinkA, options.format("nut")),
+        FFmpeguOutput.toFile("/test/out.mkv"),
+        FFmpeguOutput.toSink(sinkB)
+      ]
+    })
+
+    const compiled = Result.getOrThrow(command.compile())
+
+    expect(compiled.args).toEqual([
+      "-f",
+      "mp4",
+      "-i",
+      "pipe:4",
+      "-i",
+      "/test/b.mp4",
+      "-i",
+      "pipe:5",
+      "-f",
+      "nut",
+      "pipe:6",
+      "/test/out.mkv",
+      "pipe:7"
     ])
-    expect(next.global!.getArgs({ get: () => 0, has: () => true })).toEqual([
+    expect(compiled.inputStreams).toEqual([
+      { fd: 4, source: sourceA },
+      { fd: 5, source: sourceB }
+    ])
+    expect(compiled.outputStreams).toEqual([
+      { fd: 6, sink: sinkA },
+      { fd: 7, sink: sinkB }
+    ])
+  })
+
+  it("should keep arbitrary argument ordering and resolve stream references", () => {
+    const video = FFmpeguInput.fromFile("/test/video.mp4")
+    const audio = FFmpeguInput.fromFile("/test/audio.wav", options.startTime(2))
+    const graph = filters
+      .builder()
+      .chain(
+        filters.scale(
+          { w: 320, h: 180 },
+          {
+            inputs: [filters.label(video.video)],
+            outputs: [filters.label("v")]
+          }
+        )
+      )
+      .build()
+
+    const command = FFmpeguCommand.make({
+      global: options.merge(options.overwrite(), options.filterComplex(graph)),
+      inputs: [video, audio],
+      outputs: [
+        FFmpeguOutput.toFile(
+          "/test/out.mp4",
+          options.merge(
+            options.map("[v]"),
+            options.map(audio.audio.track(0)),
+            options.custom(["-c:a", "aac"], "-shortest")
+          )
+        )
+      ]
+    })
+
+    expect(Result.getOrThrow(command.compile()).args).toEqual([
       "-y",
-      "-vn"
+      "-filter_complex",
+      "[0:v]scale=w=320:h=180[v]",
+      "-i",
+      "/test/video.mp4",
+      "-ss",
+      "2",
+      "-i",
+      "/test/audio.wav",
+      "-map",
+      "[v]",
+      "-map",
+      "1:a:0",
+      "-c:a",
+      "aac",
+      "-shortest",
+      "/test/out.mp4"
     ])
   })
 
-  it("should clean pipe handlers on compile failure", async () => {
-    const cleanSpy = vi.fn()
-
-    createPipeHandlerMock.mockResolvedValue({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/0",
-      handler: {} as FileHandle,
-      release: vi.fn().mockResolvedValue(undefined),
-      clean: cleanSpy
+  it("should pass file paths, URLs and pseudo inputs through verbatim", () => {
+    const command = FFmpeguCommand.make({
+      inputs: [
+        FFmpeguInput.fromFile(
+          "testsrc=size=32x32:rate=1",
+          options.format("lavfi")
+        ),
+        FFmpeguInput.fromFile("https://example.com/a.m3u8"),
+        FFmpeguInput.fromFile("-starts-with-dash.mp4")
+      ],
+      outputs: [FFmpeguOutput.toFile("rtmp://example.com/live/key")]
     })
 
-    createWriteStreamMock.mockReturnValueOnce(
-      new PassThrough() as unknown as WriteStream
-    )
-
-    const okInput = {
-      source: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
-    } as unknown as FFmpeguInput
-
-    const badInput = {
-      source: new PassThrough(),
-      compile: vi.fn().mockRejectedValue(new Error("compile failed"))
-    } as unknown as FFmpeguInput
-
-    const command = FFmpeguCommand.create({
-      inputs: [okInput, badInput],
-      outputs: []
-    })
-
-    await expect(command.compile()).rejects.toThrow("compile failed")
-    expect(cleanSpy).toHaveBeenCalled()
+    expect(Result.getOrThrow(command.compile()).args).toEqual([
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=32x32:rate=1",
+      "-i",
+      "https://example.com/a.m3u8",
+      "-i",
+      "-starts-with-dash.mp4",
+      "rtmp://example.com/live/key"
+    ])
   })
 
-  it("should collect input pipe streams with source and destination", async () => {
-    const source = new PassThrough()
-    const destination = new PassThrough() as unknown as WriteStream
-
-    createPipeHandlerMock.mockResolvedValueOnce({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/0",
-      handler: {} as FileHandle,
-      release: vi.fn().mockResolvedValue(undefined),
-      clean: vi.fn()
-    })
-
-    createWriteStreamMock.mockReturnValueOnce(destination)
-
-    const input = {
-      source,
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
-    } as unknown as FFmpeguInput
-
-    const command = FFmpeguCommand.create({ inputs: [input], outputs: [] })
-    const result = await command.compile()
-
-    expect(result.args).toEqual(["-i", "/tmp/ffmpegu/0"])
-    expect(result.inputStreams).toHaveLength(1)
-    expect(createWriteStreamMock).toHaveBeenCalledWith("/tmp/ffmpegu/0")
-    expect(result.inputStreams[0]).toMatchObject({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/0",
-      source,
-      destination
-    })
-  })
-
-  it("should clean created handlers when output pipe handler creation fails", async () => {
-    const inputCleanSpy = vi.fn()
-
-    createPipeHandlerMock
-      .mockResolvedValueOnce({
-        dir: "/tmp/ffmpegu",
-        path: "/tmp/ffmpegu/0",
-        handler: {} as FileHandle,
-        release: vi.fn().mockResolvedValue(undefined),
-        clean: inputCleanSpy
+  it("should be deterministic and leave sources and sinks untouched", () => {
+    let pulled = false
+    const source = Stream.fromEffect(
+      Effect.sync(() => {
+        pulled = true
+        return new Uint8Array([1])
       })
-      .mockRejectedValueOnce(new Error("output handler failed"))
-
-    createWriteStreamMock.mockReturnValueOnce(
-      new PassThrough() as unknown as WriteStream
     )
-
-    const input = {
-      source: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["-i", "/tmp/ffmpegu/0"])
-    } as unknown as FFmpeguInput
-
-    const output = {
-      destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
-    } as unknown as FFmpeguOutput
-
-    const command = FFmpeguCommand.create({
-      inputs: [input],
-      outputs: [output]
+    const command = FFmpeguCommand.make({
+      inputs: [FFmpeguInput.fromStream(source)],
+      outputs: [FFmpeguOutput.toSink(Sink.drain)]
     })
 
-    await expect(command.compile()).rejects.toThrow("output handler failed")
-    expect(inputCleanSpy).toHaveBeenCalledTimes(1)
+    const first = Result.getOrThrow(command.compile())
+    const second = Result.getOrThrow(command.compile())
+
+    expect(second).toEqual(first)
+    expect(pulled).toBe(false)
   })
 
-  it("should clean earlier output handlers when a later output compile fails", async () => {
-    const outputCleanSpy = vi.fn()
-
-    createPipeHandlerMock.mockResolvedValueOnce({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/0",
-      handler: {} as FileHandle,
-      release: vi.fn().mockResolvedValue(undefined),
-      clean: outputCleanSpy
+  it("should reject references to inputs outside the command", () => {
+    const own = FFmpeguInput.fromFile("/test/own.mp4")
+    const foreign = FFmpeguInput.fromFile("/test/foreign.mp4")
+    const command = FFmpeguCommand.make({
+      inputs: [own],
+      outputs: [
+        FFmpeguOutput.toFile("/test/out.mp4", options.map(foreign.video))
+      ]
     })
 
-    createReadStreamMock.mockReturnValueOnce(
-      new PassThrough() as unknown as ReadStream
-    )
-
-    const outputA = {
-      destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/0" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/0"])
-    } as unknown as FFmpeguOutput
-
-    const outputB = {
-      destination: new PassThrough(),
-      compile: vi.fn().mockRejectedValue(new Error("second output failed"))
-    } as unknown as FFmpeguOutput
-
-    const command = FFmpeguCommand.create({
-      inputs: [],
-      outputs: [outputA, outputB]
-    })
-
-    await expect(command.compile()).rejects.toThrow("second output failed")
-    expect(outputCleanSpy).toHaveBeenCalledTimes(1)
+    expect(compileError(command).reason).toBe("ForeignReference")
+    // Compiling again must not have registered the foreign input.
+    expect(compileError(command).reason).toBe("ForeignReference")
   })
 
-  it("should collect output pipe streams", async () => {
-    const readStream = new PassThrough()
-
-    createPipeHandlerMock.mockResolvedValueOnce({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/1",
-      handler: {} as FileHandle,
-      release: vi.fn().mockResolvedValue(undefined),
-      clean: vi.fn()
+  it("should reject foreign references nested in filter graphs", () => {
+    const foreign = FFmpeguInput.fromFile("/test/foreign.mp4")
+    const command = FFmpeguCommand.make({
+      global: options.filterComplex(
+        filters.graph(
+          filters.chain(
+            filters.hflip({}, { inputs: [filters.label(foreign.video)] })
+          )
+        )
+      ),
+      inputs: [FFmpeguInput.fromFile("/test/own.mp4")]
     })
 
-    createReadStreamMock.mockReturnValueOnce(readStream as unknown as ReadStream)
-
-    const output = {
-      destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
-    } as unknown as FFmpeguOutput
-
-    const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })
-    const result = await command.compile()
-
-    expect(createReadStreamMock).toHaveBeenCalledWith("/tmp/ffmpegu/1")
-    expect(result.outputStreams).toHaveLength(1)
-    expect(result.outputStreams[0].source).toBe(readStream)
+    expect(compileError(command).reason).toBe("ForeignReference")
   })
 
-  it("should allow compiled command cleanup to run more than once", async () => {
-    const cleanSpy = vi.fn().mockResolvedValue(undefined)
+  it("should reject duplicate inputs and outputs", () => {
+    const input = FFmpeguInput.fromStream(Stream.empty)
+    const output = FFmpeguOutput.toSink(Sink.drain)
 
-    createPipeHandlerMock.mockResolvedValueOnce({
-      dir: "/tmp/ffmpegu",
-      path: "/tmp/ffmpegu/1",
-      handler: {} as FileHandle,
-      release: vi.fn().mockResolvedValue(undefined),
-      clean: cleanSpy
+    expect(
+      compileError(FFmpeguCommand.make({ inputs: [input, input] })).reason
+    ).toBe("DuplicateInput")
+    expect(
+      compileError(FFmpeguCommand.make({ inputs: [input] }).withInput(input))
+        .reason
+    ).toBe("DuplicateInput")
+    expect(
+      compileError(FFmpeguCommand.make({ outputs: [output, output] })).reason
+    ).toBe("DuplicateOutput")
+  })
+
+  it.each([
+    [
+      "input path",
+      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("pipe:4")] })
+    ],
+    [
+      "stdin input",
+      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("-")] })
+    ],
+    [
+      "fd protocol",
+      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("fd:3")] })
+    ],
+    [
+      "nested protocol",
+      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("async:pipe:5")] })
+    ],
+    [
+      "stdout output",
+      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-")] })
+    ],
+    [
+      "dev fd output",
+      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("/dev/fd/3")] })
+    ],
+    [
+      "proc fd output",
+      FFmpeguCommand.make({
+        outputs: [FFmpeguOutput.toFile("/proc/self/fd/4")]
+      })
+    ],
+    [
+      "option value",
+      FFmpeguCommand.make({
+        global: options.custom(["-attach", "pipe:3"])
+      })
+    ],
+    [
+      "raw input option",
+      FFmpeguCommand.make({ global: options.custom("-f", "pipe:0") })
+    ]
+  ])("should reject runner-owned descriptors (%s)", (_, command) => {
+    expect(compileError(command).reason).toBe("ReservedPath")
+  })
+
+  it.each([
+    [
+      "-progress to a file",
+      options.custom(["-progress", "/tmp/p.txt"]),
+      "onProgress"
+    ],
+    [
+      "-progress with a specifier",
+      options.custom(["-progress:v", "/tmp/p.txt"]),
+      "onProgress"
+    ],
+    ["-stdin", options.custom("-stdin"), "stdin"],
+    [
+      "raw -i",
+      options.custom(["-f", "lavfi"], ["-i", "testsrc=size=32x32"]),
+      "Input.fromFile"
+    ],
+    [
+      "raw -i with a specifier",
+      options.custom(["-i:v", "in.mp4"]),
+      "Input.fromFile"
+    ]
+  ])("should reject runner-owned options (%s)", (_, global, hint) => {
+    const error = compileError(FFmpeguCommand.make({ global }))
+    expect(error.reason).toBe("ReservedOption")
+    expect(error.message).toContain(hint)
+  })
+
+  it("should reject a raw -i that would shift declared input indices", () => {
+    const declared = FFmpeguInput.fromFile("declared.mp4")
+    const command = FFmpeguCommand.make({
+      inputs: [declared],
+      outputs: [FFmpeguOutput.toFile("out.mp4", options.map(declared.video))]
     })
 
-    createReadStreamMock.mockReturnValueOnce(
-      new PassThrough() as unknown as ReadStream
+    for (const at of ["global", "input", "output"] as const) {
+      const injected = options.custom(["-f", "lavfi"], ["-i", "testsrc"])
+      const variant =
+        at === "global"
+          ? command.withGlobal(injected)
+          : at === "input"
+            ? FFmpeguCommand.make({
+                inputs: [
+                  FFmpeguInput.fromFile("declared.mp4", injected),
+                  declared
+                ],
+                outputs: command.outputs
+              })
+            : command.withOutput(FFmpeguOutput.toFile("other.mp4", injected))
+      expect(compileError(variant).reason).toBe("ReservedOption")
+    }
+  })
+
+  it("should allow option values and benign flags that look similar", () => {
+    const command = FFmpeguCommand.make({
+      global: options.custom("-nostdin", "-nostats", "-hide_banner"),
+      inputs: [FFmpeguInput.fromFile("in.mp4")],
+      outputs: [
+        FFmpeguOutput.toFile(
+          "out.mp4",
+          options.merge(
+            options.metadata("title", "-i"),
+            options.custom(["-map", "0:v:0"])
+          )
+        )
+      ]
+    })
+
+    expect(Result.getOrThrow(command.compile()).args).toEqual([
+      "-nostdin",
+      "-nostats",
+      "-hide_banner",
+      "-i",
+      "in.mp4",
+      "-metadata",
+      "title=-i",
+      "-map",
+      "0:v:0",
+      "out.mp4"
+    ])
+  })
+
+  it("should reject output paths that would parse as options", () => {
+    const error = compileError(
+      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-out.mp4")] })
     )
 
-    const output = {
-      destination: new PassThrough(),
-      pipe: { dir: "/tmp/ffmpegu", path: "/tmp/ffmpegu/1" },
-      compile: vi.fn().mockResolvedValue(["/tmp/ffmpegu/1"])
-    } as unknown as FFmpeguOutput
+    expect(error.reason).toBe("InvalidArgument")
+    expect(error.message).toContain("./-out.mp4")
+  })
 
-    const command = FFmpeguCommand.create({ inputs: [], outputs: [output] })
-    const result = await command.compile()
+  it("should report failures of custom arguments as CommandError", () => {
+    const boom = new Error("boom")
+    class Broken extends FFmpeguArgument {
+      getArgs(): string[] {
+        throw boom
+      }
+    }
+    const error = compileError(
+      FFmpeguCommand.make({ global: options.custom(new Broken()) })
+    )
 
-    await expect(result[Symbol.asyncDispose]()).resolves.toBeUndefined()
-    await expect(result[Symbol.asyncDispose]()).resolves.toBeUndefined()
+    expect(error.reason).toBe("InvalidArgument")
+    expect(error.cause).toBe(boom)
+  })
 
-    expect(cleanSpy).toHaveBeenCalledTimes(1)
+  it("should expose compiled args through toArgs", () => {
+    const command = FFmpeguCommand.make({
+      inputs: [FFmpeguInput.fromFile("/test/in.mp4")],
+      outputs: [FFmpeguOutput.toSink(Sink.drain)]
+    })
+
+    expect(Result.getOrThrow(FFmpeguCommand.toArgs(command))).toEqual([
+      "-i",
+      "/test/in.mp4",
+      "pipe:4"
+    ])
+    expect(
+      Result.isFailure(
+        FFmpeguCommand.toArgs(
+          FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-")] })
+        )
+      )
+    ).toBe(true)
   })
 })

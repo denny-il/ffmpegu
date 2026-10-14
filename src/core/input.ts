@@ -1,43 +1,48 @@
-import assert from "node:assert"
-import type { Readable } from "node:stream"
+import type * as Stream from "effect/Stream"
 import type { FFmpeguOptions } from "../options/core.ts"
-import type {
-  FFmpeguCompilable,
-  FFmpeguPipe,
-  FFmpeguReferencesInterface
-} from "../types/index.ts"
+import type { FFmpeguReferencesInterface } from "../types/index.ts"
 import { FFmpeguArgument } from "./argument.ts"
 import { StreamType } from "./enums.ts"
-import { createPipe } from "./streams.ts"
 
-export type FFmpeguInputSource = string | Readable
+/**
+ * A file path, URL or ffmpeg pseudo input (e.g. `lavfi` sources), passed to
+ * `-i` verbatim, or a byte stream fed to ffmpeg through a dedicated pipe.
+ */
+export type FFmpeguInputSource<E, R> = string | Stream.Stream<Uint8Array, E, R>
+
+/** Any input, regardless of its stream error and requirement types. */
+export type FFmpeguAnyInput = FFmpeguInput<unknown, unknown>
 
 export class FFmpeguStreamTrackReference extends FFmpeguArgument {
   constructor(
-    readonly input: FFmpeguInput,
+    readonly input: FFmpeguAnyInput,
     readonly streamType: StreamType,
     readonly index: number
   ) {
-    assert(index >= 0, `Stream index must be non-negative, got: ${index}`)
+    if (!Number.isInteger(index) || index < 0) {
+      throw new RangeError(
+        `Stream index must be a non-negative integer, got: ${index}`
+      )
+    }
     super()
   }
 
-  getArgs(inputs: FFmpeguReferencesInterface): string[] {
-    const index = inputs.get(this.input)
+  getArgs(refs: FFmpeguReferencesInterface): string[] {
+    const index = refs.get(this.input)
     return [`${index}:${getStreamType(this.streamType)}:${this.index}`]
   }
 }
 
 export class FFmpeguStreamReference extends FFmpeguArgument {
   constructor(
-    readonly input: FFmpeguInput,
+    readonly input: FFmpeguAnyInput,
     readonly streamType: StreamType
   ) {
     super()
   }
 
-  getArgs(inputs: FFmpeguReferencesInterface): string[] {
-    const index = inputs.get(this.input)
+  getArgs(refs: FFmpeguReferencesInterface): string[] {
+    const index = refs.get(this.input)
     return [`${index}:${getStreamType(this.streamType)}`]
   }
 
@@ -47,18 +52,19 @@ export class FFmpeguStreamReference extends FFmpeguArgument {
 }
 
 /**
- * Represents an input to an ffmpeg command
+ * Represents an input to an ffmpeg command.
+ *
+ * Inputs are plain descriptions: stream sources are only run when a command
+ * using them runs, and are run again on every run.
  */
-export class FFmpeguInput implements FFmpeguCompilable {
+export class FFmpeguInput<E = never, R = never> {
   readonly video: FFmpeguStreamReference
   readonly audio: FFmpeguStreamReference
   readonly subtitle: FFmpeguStreamReference
   readonly data: FFmpeguStreamReference
 
-  #pipe?: FFmpeguPipe
-
   constructor(
-    readonly source: FFmpeguInputSource,
+    readonly source: FFmpeguInputSource<E, R>,
     readonly options?: FFmpeguOptions
   ) {
     this.video = new FFmpeguStreamReference(this, StreamType.VIDEO)
@@ -68,40 +74,20 @@ export class FFmpeguInput implements FFmpeguCompilable {
   }
 
   /**
-   * Create an input from a file path
+   * Create an input from a file path, URL or pseudo input name.
    */
-  static fromFile(filePath: string, args?: FFmpeguOptions): FFmpeguInput {
-    return new FFmpeguInput(filePath, args)
+  static fromFile(filePath: string, options?: FFmpeguOptions): FFmpeguInput {
+    return new FFmpeguInput(filePath, options)
   }
 
   /**
-   * Create an input from a readable stream
+   * Create an input fed from a byte stream.
    */
-  static fromStream(stream: Readable, args?: FFmpeguOptions): FFmpeguInput {
-    return new FFmpeguInput(stream, args)
-  }
-
-  get pipe() {
-    return this.#pipe
-  }
-
-  /**
-   * Async setup phase - create named pipes if needed
-   */
-  async compile(inputs: FFmpeguReferencesInterface): Promise<string[]> {
-    const args: string[] = []
-
-    if (this.options) args.push(...this.options.getArgs(inputs))
-
-    if (typeof this.source === "string") {
-      args.push("-i", this.source)
-    } else {
-      const index = inputs.get(this)
-      this.#pipe = await createPipe(`${index}`)
-      args.push("-i", this.#pipe!.path)
-    }
-
-    return args
+  static fromStream<E, R>(
+    stream: Stream.Stream<Uint8Array, E, R>,
+    options?: FFmpeguOptions
+  ): FFmpeguInput<E, R> {
+    return new FFmpeguInput(stream, options)
   }
 }
 

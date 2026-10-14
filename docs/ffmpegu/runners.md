@@ -1,68 +1,58 @@
-# Runners
+# Execution services
 
-Runners execute compiled commands.
+`run(command, options?)` requires `FFmpeg`; `probe(path)` requires `FFprobe`. Provide their live Layers with Node or Bun platform services. Custom binaries can be configured with `FFmpeg.layer({ binary: "/path/to/ffmpeg" })` and `FFprobe.layer({ binary: "/path/to/ffprobe" })`.
 
-## FFmpeg Runner
+Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-- `ffmpegu.createFFmpegRunner(binPath?)`
-- `ffmpegu.runner` (default)
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
 
-```ts
-const runner = ffmpegu.createFFmpegRunner("ffmpeg")
-await runner.validateBinary()
-const result = await runner.run(command)
-
-console.log(result.code)
-console.log(result.args)
-console.log(result.stdout)
-console.log(result.stderr)
-```
-
-### Progress updates
-
-Pass `onProgress` to receive parsed key/value updates from FFmpeg's `-progress`
-stream while the command is running:
+## Progress
 
 ```ts
-const runner = ffmpegu.createFFmpegRunner("ffmpeg")
-
-const result = await runner.run(command, {
-	onProgress(progress) {
-		console.log(progress.progress)
-		console.log(progress.frame)
-		console.log(progress.out_time)
-		console.log(progress.speed)
-	}
+const execution = run(command, {
+  onProgress: (progress) =>
+    Effect.logDebug("Encoding", {
+      frame: progress.frame,
+      state: progress.progress
+    })
 })
-
-console.log(result.code)
 ```
 
-Progress values are emitted as structured objects with a `raw` map containing the
-original FFmpeg values.
+The callback returns an Effect. Progress parsing and callback execution are separated by a bounded queue retaining the latest update, so a slow callback does not stop media processing. Updates may be coalesced. Successful completion waits for pending callback work. Callback failure fails the run; callbacks are interrupted on run failure/cancellation. A callback that never completes keeps the run pending: apply your own timeout if needed.
 
-### Cancellation
+The library only reports parsed updates. It does not fabricate `progress=end` for a killed process or missing/malformed progress. Numeric `N/A` values become `undefined`; original strings remain in `raw`.
 
-Pass an `AbortSignal` to stop a running FFmpeg command:
+## Cancellation
 
 ```ts
-const controller = new AbortController()
+import { Effect, Fiber } from "effect"
 
-const result = runner.run(command, {
-	signal: controller.signal
+const program = Effect.gen(function* () {
+  const fiber = yield* Effect.forkChild(run(command))
+  // Other application work happens here.
+  yield* Fiber.interrupt(fiber)
 })
-
-controller.abort()
-await result // rejects with AbortError
 ```
 
-## FFprobe Runner
+Use `forkScoped` when the operation should belong to a surrounding scope. `Effect.timeout` also interrupts the run and performs cleanup. The library never detaches a process or starts a hidden runtime. Applications may use `NodeRuntime.runMain`, `BunRuntime.runMain`, or their existing managed runtime at the boundary.
 
-- `ffmpegu.createFFprobeRunner(binPath?)`
-- `ffmpegu.probeRunner` (default)
+Cleanup waits for caller-owned stream, sink, and callback finalizers. As with other scoped Effects, a finalizer that never completes can prevent cancellation from completing; `forceKillAfter` bounds process termination, not arbitrary application finalizers.
+
+## Configuration and testing
+
+Both services offer `layerConfig` for application-owned configuration:
 
 ```ts
-const runner = ffmpegu.createFFprobeRunner("ffprobe")
-const result = await runner.run(ffmpegu.probe.fromFile("./input.mp4"))
-console.log(result.json)
+import { Config } from "effect"
+import { FFmpeg } from "ffmpegu"
+
+const FFmpegLive = FFmpeg.layerConfig(
+  Config.all({
+    binary: Config.String("FFMPEG_PATH").pipe(Config.withDefault("ffmpeg"))
+  })
+)
 ```
+
+A configuration provider can be replaced in tests. Byte limits must be non-negative safe integers; invalid programmatic settings are defects during Layer construction. No binary is started until an execution Effect runs.
+
+For deterministic tests, supply a fake `ChildProcessSpawner` to the live service Layer and use `@effect/vitest`'s `it.effect`. Real process tests use `it.live` so process shutdown and platform timers advance normally. Applications can also provide a fake `FFmpeg` or `FFprobe` service when testing higher-level workflows without testing process behavior.
