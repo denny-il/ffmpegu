@@ -70,6 +70,9 @@ describe("process helpers", () => {
       isClosedByReader(platformError("fromWritable(fd4)", "ECONNRESET"))
     )
     assert.isTrue(
+      isClosedByReader(platformError("fromWritable(fd4)", "ENOTCONN"))
+    )
+    assert.isTrue(
       isClosedByReader(
         platformError("fromWritable(fd4)", "ERR_STREAM_DESTROYED")
       )

@@ -602,7 +602,8 @@ describe("FFmpeg exits before an infinite producer ends", () => {
       live(
         Effect.gen(function* () {
           const FRAME = 32 * 24 * 3
-          for (let attempt = 0; attempt < 5; attempt++) {
+          // Exercise late input writes after exit; macOS may report ENOTCONN.
+          for (let attempt = 0; attempt < 20; attempt++) {
             const probe = makeProbe()
             const collector = makeCollector()
             yield* run(

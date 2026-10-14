@@ -177,7 +177,12 @@ describe("FFmpeg", () => {
           inputs: [Input.fromStream(endless(finalized))],
           outputs: [Output.toFile("out.mp4")]
         })
-        for (const code of ["EPIPE", "ECONNRESET", "ERR_STREAM_DESTROYED"]) {
+        for (const code of [
+          "EPIPE",
+          "ECONNRESET",
+          "ENOTCONN",
+          "ERR_STREAM_DESTROYED"
+        ]) {
           const fiber = yield* Effect.forkChild(ffmpeg.run(command))
           const process = yield* next
           yield* process.awaitWrite(4)
@@ -237,7 +242,8 @@ describe("FFmpeg", () => {
   it.effect("preserves source errors unchanged, even platform errors", () =>
     Effect.gen(function* () {
       const { ffmpeg, next } = yield* setup()
-      const sourceError = platformError("readFile", "ENOENT")
+      // Closed-input codes are only ignored for our descriptor writes.
+      const sourceError = platformError("readFile", "ENOTCONN")
       const command = Command.make({
         inputs: [
           Input.fromStream(

@@ -76,6 +76,8 @@ export const firstFailure = <E>(
 const EXPECTED_CLOSE_CODES: ReadonlySet<unknown> = new Set([
   "EPIPE",
   "ECONNRESET",
+  // macOS can report a disconnected child-process socket as ENOTCONN.
+  "ENOTCONN",
   "ERR_STREAM_DESTROYED"
 ])
 
