@@ -31,6 +31,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
       - run: pnpm run test:${{ matrix.runtime }} --coverage
+      - name: Compare descriptor handling on Node
+        if: failure() && matrix.os == 'macos-latest' && matrix.runtime == 'bun'
+        timeout-minutes: 5
+        run: node scripts/diagnose-extra-fds.mjs --trials 20 --ffmpeg "$(command -v ffmpeg)"
+      - name: Diagnose macOS Bun descriptor failures
+        if: failure() && matrix.os == 'macos-latest' && matrix.runtime == 'bun'
+        timeout-minutes: 5
+        run: bun scripts/diagnose-extra-fds.mjs --trials 20 --ffmpeg "$(command -v ffmpeg)"
       - run: pnpm run test:package
         env:
           FFMPEGU_PACKAGE_RUNTIME: ${{ matrix.runtime }}
