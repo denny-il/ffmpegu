@@ -405,24 +405,10 @@ describe("FFmpeg", () => {
     () =>
       Effect.gen(function* () {
         const { ffmpeg, next } = yield* setup()
-        const sourceError = new Error("source error")
         const outputDefect = new Error("output cleanup defect")
         const consuming = yield* Deferred.make<void>()
-        const spawned = yield* Deferred.make<FakeProcess>()
         const command = Command.make({
-          inputs: [
-            Input.fromStream(
-              // Fails right after the process exited, before the runner stops it.
-              Stream.fromEffect(
-                Deferred.await(consuming).pipe(
-                  Effect.andThen(Deferred.await(spawned)),
-                  Effect.flatMap((process) => process.exit(0)),
-                  Effect.andThen(Effect.fail(sourceError)),
-                  Effect.uninterruptible
-                )
-              )
-            )
-          ],
+          inputs: [Input.fromStream(Stream.make(bytes(1)))],
           outputs: [
             Output.toSink(
               Sink.forEach(() =>
@@ -436,14 +422,19 @@ describe("FFmpeg", () => {
         })
         const fiber = yield* Effect.forkChild(ffmpeg.run(command))
         const process = yield* next
-        yield* Deferred.succeed(spawned, process)
+        // A write is in flight when the process exits, and then fails.
+        yield* process.holdInput(4)
+        yield* process.awaitWriteAttempt(4)
         yield* process.emit(5, bytes(1))
+        yield* Deferred.await(consuming)
+        yield* process.closeInput(4, "EIO")
+        yield* process.exit(0)
+        yield* process.releaseInput(4)
 
         const reasons = describeCause(yield* Fiber.await(fiber))
-        assert.deepStrictEqual(reasons, [
-          ["Fail", sourceError],
-          ["Die", outputDefect]
-        ])
+        assert.strictEqual(reasons.length, 2)
+        assert.instanceOf(reasons[0]?.[1], PipeError)
+        assert.deepStrictEqual(reasons[1], ["Die", outputDefect])
       })
   )
 

@@ -4,7 +4,7 @@
 
 Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe may need this escalation, so cancellation can take the configured grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
 
 ## Progress
 

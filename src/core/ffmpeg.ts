@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Queue from "effect/Queue"
 import * as ChildProcess from "effect/process/ChildProcess"
 import {
   type ChildProcessHandle,
@@ -341,79 +342,144 @@ const execute = (
 /**
  * Write a caller stream into an input descriptor.
  *
- * The descriptor's sink also observes failures of its upstream, so caller
- * errors are tagged before entering it and untagged afterwards: only errors
- * raised by the library-owned sink itself are classified, and caller errors
- * keep their identity (even if they are `PlatformError`s). All mapping is
- * cause-level, so composite causes keep their defects. The reader closing its
- * end is not an error by itself: the exit code decides the outcome.
+ * The source and the descriptor run in separate fibers joined by a one-chunk
+ * queue:
+ * - the producer runs the caller stream into the queue; it is only ever
+ *   stopped by plain fiber interruption, which keeps defects raised by the
+ *   source's finalizers in its exit (`Stream.interruptWhen` would drop them);
+ * - the consumer writes the queue into the library-owned sink, so only sink
+ *   failures are classified and caller errors never pass through it. Ending
+ *   the queue ends the descriptor, so a process blocked on reading sees EOF.
+ *
+ * Closing stops the producer and ends the queue; the consumer then flushes
+ * what was queued and ends the descriptor, which completes once the end is
+ * flushed or the pipe breaks. The reader closing its end is not an error by
+ * itself: the exit code decides the outcome. All waiting is interruptible;
+ * collecting and combining the fibers' exits is not, so every failure and
+ * cleanup defect is reported.
  */
 const feedInput = (
   handle: ChildProcessHandle,
   { fd, source }: CompiledInputStream<unknown, unknown>,
   close: Deferred.Deferred<void>
 ) =>
-  Effect.suspend(() => {
-    // `Stream.interruptWhen` ends the stream without reporting defects raised
-    // by the source's finalizers while it is stopped; they are recorded here.
-    let stopReasons: ReadonlyArray<Cause.Reason<unknown>> = []
-    const stoppable = source.pipe(
-      Stream.onExit((exit) =>
-        Effect.sync(() => {
-          if (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
-            stopReasons = failureReasons(exit)
-          }
-        })
-      ),
-      mapStreamErrors((error) => new SourceFailure(error)),
-      // Ends the source (and the descriptor) instead of abandoning it.
-      Stream.interruptWhen(Deferred.await(close))
-    )
-    const sink = handle
-      .getInputFd(fd)
-      .pipe(
-        Sink.catchCause((cause) =>
-          Effect.failCause(
-            Cause.map(cause, (error: unknown) =>
-              error instanceof SourceFailure
-                ? error
-                : isClosedByReader(error)
-                  ? new InputClosed()
-                  : new PipeError({ fd, direction: "input", cause: error })
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.bounded<Uint8Array, Cause.Done>(1)
+      // Started immediately so that a source is always running (and owns its
+      // resources) by the time the feeder can be stopped.
+      const producer = yield* Effect.forkChild(
+        Effect.interruptible(
+          Stream.runForEach(source, (chunk) => Queue.offer(queue, chunk)).pipe(
+            Effect.andThen(Queue.end(queue))
+          )
+        ),
+        { startImmediately: true }
+      )
+      const consumer = yield* Effect.forkChild(
+        Effect.interruptible(
+          Stream.run(
+            Stream.fromQueue(queue),
+            handle.getInputFd(fd).pipe(
+              Sink.catchCause((cause) =>
+                Effect.failCause(
+                  Cause.map(cause, (error) =>
+                    isClosedByReader(error)
+                      ? new InputClosed()
+                      : new PipeError({
+                          fd,
+                          direction: "input",
+                          cause: error
+                        })
+                  )
+                )
+              )
             )
           )
         )
       )
-    // Interruption (e.g. by a sibling feeder failing) is only allowed while
-    // running, so the reconstruction below always merges `stopReasons`.
-    return Effect.uninterruptibleMask((restore) =>
-      restore(Stream.run(stoppable, sink)).pipe(
-        Effect.exit,
-        Effect.flatMap((exit) => {
-          const reasons = Exit.isSuccess(exit)
-            ? []
-            : Cause.map(exit.cause, (error) =>
-                error instanceof SourceFailure ? error.error : error
-              ).reasons.filter(
-                (reason) =>
-                  !(
-                    reason._tag === "Fail" &&
-                    reason.error instanceof InputClosed
-                  )
-              )
-          const all = uniqueReasons([...reasons, ...stopReasons])
-          return all.length === 0
-            ? Effect.void
-            : Effect.failCause(Cause.fromReasons(all))
-        })
-      )
-    )
-  })
+      const consumerReasons = (exit: Exit.Exit<unknown, unknown>) =>
+        failureReasons(exit).filter(
+          (reason) =>
+            !(reason._tag === "Fail" && reason.error instanceof InputClosed)
+        )
+      const done = (
+        first: ReadonlyArray<Cause.Reason<unknown>>,
+        producerExit: Exit.Exit<unknown, unknown>,
+        consumerExit: Exit.Exit<unknown, unknown>
+      ) => {
+        const reasons = uniqueReasons([
+          ...first,
+          ...failureReasons(producerExit),
+          ...consumerReasons(consumerExit)
+        ])
+        return reasons.length === 0
+          ? Effect.void
+          : Effect.failCause(Cause.fromReasons(reasons))
+      }
 
-/** Private markers; caller errors can never be instances of them. */
-class SourceFailure {
-  constructor(readonly error: unknown) {}
-}
+      const producerFailed = Fiber.await(producer).pipe(
+        Effect.flatMap((exit) =>
+          Exit.isSuccess(exit) ? Effect.never : Effect.succeed(exit)
+        )
+      )
+      const waited = yield* Effect.exit(
+        restore(
+          Effect.raceFirst(
+            Fiber.await(consumer).pipe(Effect.as("written" as const)),
+            Effect.raceFirst(
+              producerFailed.pipe(Effect.as("failed" as const)),
+              Deferred.await(close).pipe(Effect.as("closed" as const))
+            )
+          )
+        )
+      )
+
+      if (Exit.isFailure(waited)) {
+        // The feeder itself was interrupted (run cancelled, sibling failed).
+        return yield* done(
+          waited.cause.reasons,
+          yield* settle(producer),
+          yield* settle(consumer)
+        )
+      }
+      switch (waited.value) {
+        case "written":
+          // Source ended and everything was written, or the descriptor
+          // failed or was closed by the reader.
+          return yield* done(
+            [],
+            yield* settle(producer),
+            yield* Fiber.await(consumer)
+          )
+        case "failed": {
+          // All reasons: a source interrupting itself interrupts the run.
+          const producerExit = yield* Fiber.await(producer)
+          return yield* done(
+            Exit.isFailure(producerExit) ? producerExit.cause.reasons : [],
+            producerExit,
+            yield* settle(consumer)
+          )
+        }
+        case "closed": {
+          const producerExit = yield* settle(producer)
+          yield* Queue.end(queue)
+          const consumerExit = yield* Effect.exit(
+            restore(Fiber.await(consumer))
+          )
+          return yield* Exit.isSuccess(consumerExit)
+            ? done([], producerExit, consumerExit.value)
+            : done(
+                consumerExit.cause.reasons,
+                producerExit,
+                yield* settle(consumer)
+              )
+        }
+      }
+    })
+  )
+
+/** Private marker; caller errors can never be instances of it. */
 class InputClosed {}
 
 /**

@@ -68,4 +68,4 @@ vp env exec -- pnpm run test:bun
 vp env exec -- pnpm run test:package
 ```
 
-Both runtime commands execute the same Vitest 5 suite with `@effect/vitest`. Integration tests require FFmpeg/FFprobe. CI covers Node/Bun on Linux/macOS. `test:package` builds on the existing `dist` output: run `build` or `check` first.
+Both runtime commands execute the same Vitest 5 suite with `@effect/vitest`. Integration and package tests require FFmpeg/FFprobe. CI covers Node/Bun on Linux/macOS. `test:package` installs the built tarball into a temporary consumer, checks its declarations, and transfers real media through the public API on both runtimes. It uses the existing `dist` output: run `build` or `check` first.

@@ -18,21 +18,25 @@ try {
     join(temporary, "package.json"),
     JSON.stringify({ private: true, type: "module" })
   )
-  const effectVersion = JSON.parse(
-    readFileSync(join(root, "node_modules/effect/package.json"), "utf8")
-  ).version
+  const installedVersion = (name) =>
+    JSON.parse(
+      readFileSync(join(root, "node_modules", name, "package.json"), "utf8")
+    ).version
   execute("pnpm", [
     "add",
     "--ignore-scripts",
     "--save-exact",
     tarball,
-    `effect@${effectVersion}`
+    ...["effect", "@effect/platform-node", "@effect/platform-bun"].map(
+      (name) => `${name}@${installedVersion(name)}`
+    )
   ])
   writeFileSync(
     join(temporary, "smoke.mjs"),
     `
 import assert from 'node:assert/strict'
-import { Effect, Result } from 'effect'
+import { createHash } from 'node:crypto'
+import { Effect, Layer, Result, Sink, Stream } from 'effect'
 import { Command, Input, Output, Options, FFmpeg, FFprobe, run, probe } from 'ffmpegu'
 const input = Input.fromFile('input.mp4')
 const command = Command.make({ inputs: [input], outputs: [Output.toFile('output.mp4', Options.create({map: input.video}))] })
@@ -43,7 +47,35 @@ assert.equal(typeof FFmpeg.layer, 'function')
 assert.equal(typeof FFprobe.layer, 'function')
 const expected = process.env.FFMPEGU_PACKAGE_RUNTIME
 if (expected) assert.equal(process.versions.bun ? 'bun' : 'node', expected)
-console.log('Installed package imports successfully on ' + (process.versions.bun ? 'Bun' : 'Node'))
+const platform = process.versions.bun
+  ? (await import('@effect/platform-bun')).BunServices.layer
+  : (await import('@effect/platform-node')).NodeServices.layer
+const media = Layer.mergeAll(FFmpeg.layer(), FFprobe.layer()).pipe(Layer.provide(platform))
+const payload = Uint8Array.from({ length: 1024 * 1024 }, (_, i) => (i * 31 + (i >>> 8)) & 255)
+const chunks = Array.from({ length: 16 }, (_, i) => payload.subarray(i * 65536, (i + 1) * 65536))
+const hash = createHash('sha256')
+let received = 0
+let finalProgress
+const source = Input.fromStream(Stream.fromIterable(chunks), Options.create({ f: 's16le', ar: 48000, ac: 2 }))
+const transfer = Command.make({
+  global: Options.create('-y'),
+  inputs: [source],
+  outputs: [
+    Output.toSink(Sink.forEach(bytes => Effect.sync(() => { received += bytes.length; hash.update(bytes) })),
+      Options.create({ map: source.audio, f: 's16le', 'c:a': 'copy' })),
+    Output.toFile('output.wav', Options.create({ map: source.audio, f: 'wav', 'c:a': 'copy' }))
+  ]
+})
+await Effect.runPromise(Effect.gen(function* () {
+  yield* run(transfer, { onProgress: p => Effect.sync(() => { finalProgress = p.progress }) })
+  const metadata = yield* probe('output.wav')
+  assert.equal(metadata.streams[0]?.codec_name, 'pcm_s16le')
+  assert.equal(metadata.streams[0]?.channels, 2)
+}).pipe(Effect.provide(media), Effect.timeout('15 seconds')))
+assert.equal(received, payload.length)
+assert.equal(hash.digest('hex'), createHash('sha256').update(payload).digest('hex'))
+assert.equal(finalProgress, 'end')
+console.log('Installed package transferred 1 MiB byte-for-byte, wrote and probed WAV, and completed progress on ' + (process.versions.bun ? 'Bun' : 'Node'))
 `
   )
   writeFileSync(
