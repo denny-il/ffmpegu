@@ -9,7 +9,7 @@ class DummyArgument extends FFmpeguArgument {
   }
 }
 
-describe.sequential("Options Core", () => {
+describe("Options Core", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should resolve string args", () => {

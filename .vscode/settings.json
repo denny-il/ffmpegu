@@ -1,28 +1,28 @@
 {
-  "[typescript]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[json]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[jsonc]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[jsoncl]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[yaml]": {
-    "editor.defaultFormatter": "biomejs.biome", 
-  },
-  "[html]": {
-    "editor.defaultFormatter": "biomejs.biome"
-  },
-  "chat.tools.terminal.autoApprove": {
-    "pnpm": true,
-    "ffprobe": true,
-    "printf": true
-  }
+	"[typescript]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[javascript]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[json]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[jsonc]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[jsoncl]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[yaml]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"[html]": {
+		"editor.defaultFormatter": "oxc.oxc-vscode"
+	},
+	"chat.tools.terminal.autoApprove": {
+		"pnpm": true,
+		"ffprobe": true,
+		"printf": true
+	}
 }

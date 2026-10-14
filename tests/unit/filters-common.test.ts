@@ -27,7 +27,7 @@ import {
 } from "../../src/filters/index.ts"
 import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
 
-describe.sequential("Filters Common", () => {
+describe("Filters Common", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should build video filters", () => {

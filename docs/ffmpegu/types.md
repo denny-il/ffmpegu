@@ -1,31 +1,17 @@
-# Types
+# Types and errors
 
-FFmpeg/FFprobe types are exported for type-safe parsing and progress handling:
+`Command<E, R>` tracks errors and services required by its input streams and output sinks. `run` adds the FFmpeg service and execution errors, plus any errors/services required by `onProgress`. File-only commands have no stream requirements.
 
-- `FFmpeguFFmpegProgress`
-- `FFmpeguFFmpegRunOptions`
-- `FFmpeguFFprobeJson`
-- `FFmpeguFFprobeFormat`
-- `FFmpeguFFprobeStream`
+`Progress` contains parsed progress fields and the original `raw` values. `RunResult` contains the executed `args` and bounded `stderr` diagnostics. `ProbeResult` exposes validated streams and optional format metadata, preserving unknown fields.
 
-```ts
-import type { FFmpeguFFmpegProgress, FFmpeguFFprobeJson } from "ffmpegu"
+Library failures are tagged errors suitable for `Effect.catchTag`:
 
-const result = await ffmpegu.createFFprobeRunner("ffprobe").run(
-  ffmpegu.probe.fromFile("./input.mp4")
-)
+- `CommandError`: invalid references, descriptor conflicts, or invalid command structure.
+- `SpawnError`: binary startup failed.
+- `ExitError`: nonzero or abnormal termination, with bounded stderr and the original cause when available.
+- `PipeError`: I/O on a library-owned descriptor failed.
+- `OutputError`: an output sink completed before EOF.
+- `ProbeOutputError`: probe output exceeded the configured byte limit.
+- `ProbeDecodeError`: output is not valid probe data.
 
-const json = result.result as FFmpeguFFprobeJson
-
-const updates: FFmpeguFFmpegProgress[] = []
-await ffmpegu.createFFmpegRunner("ffmpeg").run(command, {
-  onProgress(progress) {
-    updates.push(progress)
-  }
-})
-
-const controller = new AbortController()
-await ffmpegu.createFFmpegRunner("ffmpeg").run(command, {
-  signal: controller.signal
-})
-```
+Caller-defined input, output, and callback errors keep their original identity and type. Interruption stays interruption. Defects remain defects; they are not converted into ordinary domain failures. Output files may be partial after either failure or interruption, so automatic retry is deliberately absent.

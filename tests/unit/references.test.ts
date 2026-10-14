@@ -3,7 +3,7 @@ import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguOutput } from "../../src/core/output.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 
-describe.sequential("References", () => {
+describe("References", { concurrent: false }, () => {
   it("should auto-index new references", () => {
     const refs = new FFmpeguReferences()
     const input = FFmpeguInput.fromFile("/test/input.mp4")

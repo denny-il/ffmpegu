@@ -1,25 +1,11 @@
-import type { Abortable } from "node:events";
-import type { FileHandle } from "node:fs/promises";
-import type { FFmpeguArgument } from "../core/argument.ts";
+import type { FFmpeguArgument } from "../core/argument.ts"
 
+/**
+ * Resolves command-owned objects (inputs) to their positional ffmpeg index.
+ */
 export interface FFmpeguReferencesInterface {
-  get(ref: FFmpeguCompilable): number
-  has(ref: FFmpeguCompilable): boolean
-}
-
-export interface FFmpeguCompilable {
-  compile(refs: FFmpeguReferencesInterface): Promise<string[]>
-}
-
-export type FFmpeguPipe = {
-  dir: string
-  path: string
-}
-
-export type FFmpeguPipeHandler = FFmpeguPipe & {
-  handler: FileHandle
-  release: () => Promise<void>
-  clean: () => Promise<void>
+  get(ref: object): number
+  has(ref: object): boolean
 }
 
 export type FFmpeguPrimitiveUserArgValue = string | FFmpeguArgument
@@ -34,91 +20,32 @@ export type FFmpeguUserArg =
   | [string, FFmpeguUserArgValue?]
   | Record<string, FFmpeguUserArgValue>
 
-export interface FFmpeguFFmpegProgress {
-  frame?: number
-  fps?: number
-  bitrate?: string
-  total_size?: number
-  out_time_us?: number
-  out_time_ms?: number
-  out_time?: string
-  dup_frames?: number
-  drop_frames?: number
-  speed?: number
-  progress: string
-  raw: Record<string, string>
-  [key: string]: number | string | Record<string, string> | undefined
+/**
+ * One `-progress` block reported by ffmpeg.
+ *
+ * Typed fields are parsed from `raw`; values ffmpeg reports as `N/A`, or that
+ * are not finite numbers, are left `undefined`. `raw` keeps every key of the
+ * block with its original string value.
+ */
+export interface Progress {
+  /** `"continue"` while running, `"end"` for ffmpeg's final block. */
+  readonly progress: string
+  readonly frame?: number
+  readonly fps?: number
+  readonly bitrate?: string
+  readonly total_size?: number
+  readonly out_time_us?: number
+  readonly out_time_ms?: number
+  readonly out_time?: string
+  readonly dup_frames?: number
+  readonly drop_frames?: number
+  readonly speed?: number
+  readonly raw: Readonly<Record<string, string>>
 }
 
-export interface FFmpeguFFmpegRunOptions {
-  onProgress?: (progress: FFmpeguFFmpegProgress) => void
-  signal?: Abortable["signal"]
-}
-
-export type FFmpeguFFprobeTags = Record<string, string>
-export type FFmpeguFFprobeDisposition = Record<string, number>
-
-export interface FFmpeguFFprobeStream {
-  index: number
-  codec_name?: string
-  codec_long_name?: string
-  profile?: string
-  codec_type?: string
-  codec_tag_string?: string
-  codec_tag?: string
-  width?: number
-  height?: number
-  coded_width?: number
-  coded_height?: number
-  has_b_frames?: number
-  sample_aspect_ratio?: string
-  display_aspect_ratio?: string
-  pix_fmt?: string
-  level?: number
-  color_range?: string
-  color_space?: string
-  color_transfer?: string
-  color_primaries?: string
-  chroma_location?: string
-  field_order?: string
-  refs?: number
-  is_avc?: string
-  nal_length_size?: string
-  id?: string
-  r_frame_rate?: string
-  avg_frame_rate?: string
-  time_base?: string
-  start_pts?: number
-  start_time?: string
-  duration_ts?: number
-  duration?: string
-  bit_rate?: string
-  bits_per_raw_sample?: string
-  nb_frames?: string
-  extradata_size?: number
-  disposition?: FFmpeguFFprobeDisposition
-  tags?: FFmpeguFFprobeTags
-  [key: string]: unknown
-}
-
-export interface FFmpeguFFprobeFormat {
-  filename?: string
-  nb_streams?: number
-  nb_programs?: number
-  nb_stream_groups?: number
-  format_name?: string
-  format_long_name?: string
-  start_time?: string
-  duration?: string
-  size?: string
-  bit_rate?: string
-  probe_score?: number
-  tags?: FFmpeguFFprobeTags
-  [key: string]: unknown
-}
-
-export interface FFmpeguFFprobeJson {
-  streams?: FFmpeguFFprobeStream[]
-  format?: FFmpeguFFprobeFormat
-  [key: string]: unknown
+export interface RunResult {
+  /** Full argv passed to the binary, including runner-owned flags. */
+  readonly args: ReadonlyArray<string>
+  /** Bounded tail of stderr, see `stderrTailBytes`. */
+  readonly stderr: string
 }

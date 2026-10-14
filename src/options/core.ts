@@ -19,7 +19,7 @@ export class FFmpeguOptions extends FFmpeguArgument {
   }
 
   static merge(...args: FFmpeguOptions[]) {
-    return new FFmpeguOptions([...args.flatMap((arg) => arg.args)])
+    return new FFmpeguOptions(args.flatMap((arg) => arg.args))
   }
 
   getArgs(refs: FFmpeguReferencesInterface): string[] {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import { ffmpegu } from "../../src/index.ts"
 
-describe.sequential("Options", () => {
+describe("Options", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should format overwrite options", () => {

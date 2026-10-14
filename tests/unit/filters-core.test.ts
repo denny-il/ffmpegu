@@ -9,7 +9,7 @@ class DummyArgument extends FFmpeguArgument {
   }
 }
 
-describe.sequential("Filters Core", () => {
+describe("Filters Core", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should escape special characters in values", () => {

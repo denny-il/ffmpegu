@@ -1,56 +1,40 @@
-import type { Writable } from "node:stream"
+import type * as Sink from "effect/Sink"
 import type { FFmpeguOptions } from "../options/core.ts"
-import type {
-  FFmpeguCompilable,
-  FFmpeguPipe,
-  FFmpeguReferencesInterface
-} from "../types/index.ts"
-import { createPipe } from "./streams.ts"
-
-export type FFmpeguOutputDestination = string | Writable
 
 /**
- * Represents an output from an ffmpeg command
+ * A file path or URL passed to ffmpeg verbatim, or a sink receiving the bytes
+ * ffmpeg writes to a dedicated pipe.
  */
-export class FFmpeguOutput implements FFmpeguCompilable {
-  #pipe?: FFmpeguPipe
+export type FFmpeguOutputDestination<E, R> =
+  | string
+  | Sink.Sink<void, Uint8Array, never, E, R>
 
+/**
+ * Represents an output of an ffmpeg command.
+ *
+ * A sink must consume the whole output: completing early fails the run with
+ * `OutputError` (`SinkEndedEarly`).
+ */
+export class FFmpeguOutput<E = never, R = never> {
   constructor(
-    readonly destination: FFmpeguOutputDestination,
+    readonly destination: FFmpeguOutputDestination<E, R>,
     readonly options?: FFmpeguOptions
   ) {}
 
   /**
-   * Create an output to a file path
+   * Create an output to a file path or URL.
    */
-  static toFile(filePath: string, args?: FFmpeguOptions) {
-    return new FFmpeguOutput(filePath, args)
+  static toFile(filePath: string, options?: FFmpeguOptions): FFmpeguOutput {
+    return new FFmpeguOutput(filePath, options)
   }
 
   /**
-   * Create an output to a writable stream
+   * Create an output written into a sink.
    */
-  static toStream(stream: Writable, args?: FFmpeguOptions) {
-    return new FFmpeguOutput(stream, args)
-  }
-
-  get pipe() {
-    return this.#pipe
-  }
-
-  async compile(refs: FFmpeguReferencesInterface) {
-    const args: string[] = []
-
-    if (this.options) args.push(...this.options.getArgs(refs))
-
-    if (typeof this.destination === "string") {
-      args.push(this.destination)
-    } else {
-      const index = refs.get(this)
-      this.#pipe = await createPipe(`${index}`)
-      args.push(this.#pipe.path)
-    }
-
-    return args
+  static toSink<E, R>(
+    sink: Sink.Sink<void, Uint8Array, never, E, R>,
+    options?: FFmpeguOptions
+  ): FFmpeguOutput<E, R> {
+    return new FFmpeguOutput(sink, options)
   }
 }

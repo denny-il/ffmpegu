@@ -1,146 +1,55 @@
-# Inputs & Outputs
+# Inputs and outputs
 
-## Inputs
+`Input.fromFile(path, options?)` and `Output.toFile(path, options?)` pass paths directly to FFmpeg. They preserve seeking and FFmpeg's protocol support. A fake Effect FileSystem does not intercept I/O performed inside FFmpeg itself; use a fake process service for isolated tests.
 
-- `ffmpegu.input.fromFile(path)`
-- `ffmpegu.input.fromStream(readable, options?)`
+`Input.fromStream(stream, options?)` accepts an Effect `Stream<Uint8Array, E, R>`. `Output.toSink(sink, options?)` accepts `Sink<void, Uint8Array, never, E, R>`. Both preserve their error and service types in the resulting command.
 
-```ts
-const input = ffmpegu.input.fromFile("./input.mp4")
-const inputStream = ffmpegu.input.fromStream(stream, ffmpegu.options.custom(["-f", "mp4"]))
-```
-
-Stream references are available for mapping:
-
-- `input.video`, `input.audio`, `input.subtitle`, `input.data`
-- `input.video.track(n)`, `input.audio.track(n)`
-
-## Stream piping (named pipes)
-
-When you pass Node.js streams, `ffmpegu` uses named pipes under the hood. This allows multiple input/output streams in a single command without fighting over `stdin`/`stdout`.
-
-Key points:
-
-- Each stream input/output gets its own named pipe.
-- The pipes are created during command compilation and cleaned up afterwards.
-- The streams are one-shot: once consumed by FFmpeg, they can’t be reused.
-
-Example:
+## Effect FileSystem
 
 ```ts
-import { createReadStream, createWriteStream } from "node:fs"
+import { Effect, FileSystem } from "effect"
+import { Command, Input, Options, Output, run } from "ffmpegu"
 
-const inputStream = createReadStream("./input.mp4")
-const input = ffmpegu.input.fromStream(
-	inputStream,
-	ffmpegu.options.custom(["-f", "mp4"])
-)
-
-const outputStream = createWriteStream("./output.mp4")
-const output = ffmpegu.output.toStream(
-	outputStream,
-	ffmpegu.options.concat(
-		["-f", "mp4"],
-		["-movflags", "frag_keyframe+empty_moov"],
-		["-c", "copy"]
-	)
-)
-
-const command = ffmpegu.command({
-	global: ffmpegu.options.custom("-y"),
-	inputs: [input],
-	outputs: [output]
+const program = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  return yield* run(
+    Command.make({
+      inputs: [
+        Input.fromStream(
+          fs.stream("audio.pcm"),
+          Options.create({
+            f: "s16le",
+            ar: 48000,
+            ac: 2
+          })
+        )
+      ],
+      outputs: [
+        Output.toSink(
+          fs.sink("audio.ogg"),
+          Options.create({
+            f: "ogg",
+            "c:a": "libopus"
+          })
+        )
+      ]
+    })
+  )
 })
-
-const runner = ffmpegu.createFFmpegRunner("ffmpeg")
-await runner.run(command)
 ```
 
-### Multiple stream inputs
+Provide both `FFmpeg` and the matching platform services to this program. FileSystem adapters acquire resources during execution and participate in scoped cleanup.
 
-```ts
-import { createReadStream } from "node:fs"
+## Node stream adapters
 
-const videoStream = createReadStream("./video.mp4")
-const audioStream = createReadStream("./audio.mp3")
+Use `NodeStream.fromReadable` and `NodeSink.fromWritable` from `@effect/platform-node` at your application boundary. Their `evaluate` functions should acquire fresh streams per execution. Follow the adapter's ownership contract for externally owned streams; a borrowed stream is not automatically replayable.
 
-const videoInput = ffmpegu.input.fromStream(
-	videoStream,
-	ffmpegu.options.custom(["-f", "mp4"])
-)
-const audioInput = ffmpegu.input.fromStream(
-	audioStream,
-	ffmpegu.options.custom(["-f", "mp3"])
-)
+## Completion and format requirements
 
-const output = ffmpegu.output.toFile(
-	"./output.mp4",
-	ffmpegu.options.concat(
-		ffmpegu.options.map(videoInput.video),
-		ffmpegu.options.map(audioInput.audio),
-		ffmpegu.options.videoCodec("libx264"),
-		ffmpegu.options.audioCodec("aac")
-	)
-)
+A successful output sink must consume through EOF and finish its own writes. Early success is an `OutputError` with reason `SinkEndedEarly`; the engine does not silently discard the remaining media. If a sink produces an irrelevant result, explicitly map it to `void` with `Sink.map(sink, () => undefined)`.
 
-const command = ffmpegu.command({
-	global: ffmpegu.options.custom("-y"),
-	inputs: [videoInput, audioInput],
-	outputs: [output]
-})
+Pipes are not seekable. Specify raw input formats and output muxers explicitly. For MP4 output through a sink, use a streaming-compatible layout such as `movflags: "frag_keyframe+empty_moov"`; ordinary seekable MP4 files should use `Output.toFile`.
 
-await ffmpegu.createFFmpegRunner("ffmpeg").run(command)
-```
+When FFmpeg finishes early, such as with `-t`, pending input feeders are interrupted and their resources released. Caller-originated stream errors are preserved. Partial file outputs are not removed automatically.
 
-### Multiple stream outputs
-
-```ts
-import { createReadStream, createWriteStream } from "node:fs"
-
-const inputStream = createReadStream("./input.mp4")
-const input = ffmpegu.input.fromStream(
-	inputStream,
-	ffmpegu.options.custom(["-f", "mp4"])
-)
-
-const outputStream1 = createWriteStream("./output-1.mp4")
-const outputStream2 = createWriteStream("./output-2.mp4")
-
-const output1 = ffmpegu.output.toStream(
-	outputStream1,
-	ffmpegu.options.concat(
-		ffmpegu.options.map(input.video),
-		["-f", "mp4"],
-		["-movflags", "frag_keyframe+empty_moov"],
-		["-c", "copy"]
-	)
-)
-
-const output2 = ffmpegu.output.toStream(
-	outputStream2,
-	ffmpegu.options.concat(
-		ffmpegu.options.map(input.video),
-		["-f", "mp4"],
-		["-movflags", "frag_keyframe+empty_moov"],
-		["-c", "copy"]
-	)
-)
-
-const command = ffmpegu.command({
-	global: ffmpegu.options.custom("-y"),
-	inputs: [input],
-	outputs: [output1, output2]
-})
-
-await ffmpegu.createFFmpegRunner("ffmpeg").run(command)
-```
-
-## Outputs
-
-- `ffmpegu.output.toFile(path, options?)`
-- `ffmpegu.output.toStream(writable, options?)`
-
-```ts
-const output = ffmpegu.output.toFile("./output.mp4")
-const outputStream = ffmpegu.output.toStream(stream, ffmpegu.options.custom(["-f", "mp4"]))
-```
+`-t` limits media duration, not elapsed execution time. FFmpeg may still wait for a stalled producer to send more bytes or end the stream; use `Effect.timeout` when the application needs an execution deadline.

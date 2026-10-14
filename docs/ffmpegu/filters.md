@@ -41,10 +41,16 @@ const graph = ffmpegu.filters.graph(
     ffmpegu.filters.custom("split", { outputs: 2 }, [], [labelA, labelB])
   ),
   ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 640, h: 360 }, { inputs: [labelA], outputs: [out1] })
+    ffmpegu.filters.scale(
+      { w: 640, h: 360 },
+      { inputs: [labelA], outputs: [out1] }
+    )
   ),
   ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 320, h: 180 }, { inputs: [labelB], outputs: [out2] })
+    ffmpegu.filters.scale(
+      { w: 320, h: 180 },
+      { inputs: [labelB], outputs: [out2] }
+    )
   )
 )
 
@@ -70,10 +76,16 @@ const graph = ffmpegu.filters.graph(
     ffmpegu.filters.custom("split", { outputs: 2 }, [], [labelA, labelB])
   ),
   ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 640, h: 360 }, { inputs: [labelA], outputs: [out1] })
+    ffmpegu.filters.scale(
+      { w: 640, h: 360 },
+      { inputs: [labelA], outputs: [out1] }
+    )
   ),
   ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 320, h: 180 }, { inputs: [labelB], outputs: [out2] })
+    ffmpegu.filters.scale(
+      { w: 320, h: 180 },
+      { inputs: [labelB], outputs: [out2] }
+    )
   )
 )
 
@@ -104,7 +116,10 @@ const command = ffmpegu.command({
 ## Labeled outputs to streams
 
 ```ts
-import { createWriteStream } from "node:fs"
+import { FileSystem } from "effect"
+
+// Inside Effect.gen with platform services provided:
+const fs = yield * FileSystem.FileSystem
 
 const outLabel = ffmpegu.filters.label("out")
 const graph = ffmpegu.filters.graph(
@@ -113,9 +128,9 @@ const graph = ffmpegu.filters.graph(
   )
 )
 
-const outStream = createWriteStream("./out.mp4")
-const output = ffmpegu.output.toStream(
-  outStream,
+const outSink = fs.sink("./out.mp4")
+const output = ffmpegu.output.toSink(
+  outSink,
   ffmpegu.options.concat(
     ffmpegu.options.filterComplex(graph),
     ffmpegu.options.map(outLabel),
@@ -135,7 +150,10 @@ const outLabel = ffmpegu.filters.label("scaled")
 
 const graph = ffmpegu.filters.graph(
   ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 320, h: 180 }, { inputs: [inputVideo], outputs: [outLabel] })
+    ffmpegu.filters.scale(
+      { w: 320, h: 180 },
+      { inputs: [inputVideo], outputs: [outLabel] }
+    )
   )
 )
 ```

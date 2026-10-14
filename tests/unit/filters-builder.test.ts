@@ -5,7 +5,7 @@ import { FFmpeguFilterBuilder } from "../../src/filters/builder.ts"
 import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
 import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
 
-describe.sequential("Filters Builder", () => {
+describe("Filters Builder", { concurrent: false }, () => {
   const refs = new FFmpeguReferences()
 
   it("should build a graph from chained filters", () => {
