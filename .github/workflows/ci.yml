@@ -39,6 +39,10 @@ jobs:
         if: failure() && matrix.os == 'macos-latest' && matrix.runtime == 'bun'
         timeout-minutes: 5
         run: bun scripts/diagnose-extra-fds.mjs --trials 20 --ffmpeg "$(command -v ffmpeg)"
+      - name: Test experimental Effect descriptor half-close
+        if: failure() && matrix.os == 'macos-latest' && matrix.runtime == 'bun'
+        timeout-minutes: 8
+        run: node scripts/diagnose-effect-descriptors.mjs
       - run: pnpm run test:package
         env:
           FFMPEGU_PACKAGE_RUNTIME: ${{ matrix.runtime }}
