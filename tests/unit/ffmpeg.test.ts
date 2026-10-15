@@ -246,11 +246,7 @@ describe("FFmpeg", () => {
       // Closed-input codes are only ignored for our descriptor writes.
       const sourceError = platformError("readFile", "ENOTCONN")
       const command = Command.make({
-        inputs: [
-          Input.fromStream(
-            Stream.concat(Stream.make(bytes(1)), Stream.fail(sourceError))
-          )
-        ],
+        inputs: [Input.fromStream(Stream.fail(sourceError))],
         outputs: [Output.toFile("out.mp4")]
       })
       const fiber = yield* Effect.forkChild(ffmpeg.run(command))
@@ -259,6 +255,26 @@ describe("FFmpeg", () => {
       const error = yield* Fiber.join(fiber).pipe(Effect.flip)
       assert.strictEqual(error, sourceError)
       assert.strictEqual((yield* process.kills).length, 1)
+    })
+  )
+
+  it.effect("ends the descriptor of a failed source", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const sourceError = new Error("source failed")
+      const command = Command.make({
+        inputs: [Input.fromStream(Stream.fail(sourceError))],
+        outputs: [Output.toFile("out.mp4")]
+      })
+      const fiber = yield* Effect.forkChild(ffmpeg.run(command))
+      const process = yield* next
+
+      assert.strictEqual(
+        yield* Fiber.join(fiber).pipe(Effect.flip),
+        sourceError
+      )
+      // ffmpeg sees EOF rather than waiting for more input.
+      assert.isTrue(yield* process.inputEnded(4))
     })
   )
 

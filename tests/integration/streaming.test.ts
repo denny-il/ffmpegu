@@ -572,6 +572,88 @@ describe("cancellation", () => {
   )
 })
 
+it.live(
+  "a failing producer stops ffmpeg blocked reading it without the SIGKILL grace",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Far beyond the bound below: termination must not wait for it.
+        const ffmpeg = yield* pidTrackingFFmpeg("15 seconds")
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const probe = makeProbe()
+        const sourceError = new Error("source failed")
+        // A file output never blocks ffmpeg, which drains the payload and
+        // then waits to read more when the producer fails.
+        const source = Stream.concat(
+          payloadSource(probe, { total: 1 * MiB }),
+          Stream.fromEffect(
+            Effect.sleep("200 millis").pipe(
+              Effect.andThen(Effect.fail(sourceError))
+            )
+          )
+        )
+        const started = Date.now()
+        const error = yield* run(
+          Command.make({
+            inputs: [Input.fromStream(source, opts(PCM))],
+            outputs: [Output.toFile(`${dir}/out.raw`, opts(PCM_COPY))]
+          })
+        ).pipe(Effect.flip, Effect.provide(ffmpeg.layer))
+        expect(Date.now() - started).toBeLessThan(3_000)
+        expect(error).toBe(sourceError)
+        const [pid] = yield* ffmpeg.pids
+        expect(isAlive(pid!)).toBe(false)
+      })
+    ).pipe(Effect.provide(PlatformLive)),
+  20_000
+)
+
+it.live(
+  "a producer interrupting itself interrupts the run while a sibling cleans up",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ffmpeg = yield* pidTrackingFFmpeg()
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        // Probing stops early, so ffmpeg reads both inputs right away.
+        const pcm = opts({ ...PCM, probesize: 32, analyzeduration: 0 })
+        // Once ffmpeg consumed it, the mapped input interrupts itself; the
+        // other one is still being cleaned up when ffmpeg could finish.
+        const mapped = Input.fromStream(
+          Stream.concat(
+            payloadSource(makeProbe(), { total: 192_000 }),
+            Stream.fromEffect(
+              Effect.sleep("200 millis").pipe(Effect.andThen(Effect.interrupt))
+            )
+          ),
+          pcm
+        )
+        const sibling = Input.fromStream(
+          Stream.concat(
+            payloadSource(makeProbe(), { total: 192_000 }),
+            Stream.never
+          ).pipe(Stream.ensuring(Effect.sleep("500 millis"))),
+          pcm
+        )
+        const exit = yield* run(
+          Command.make({
+            inputs: [mapped, sibling],
+            outputs: [
+              Output.toFile(
+                `${dir}/out.raw`,
+                opts({ map: mapped.audio, ...PCM_COPY })
+              )
+            ]
+          })
+        ).pipe(Effect.exit, Effect.provide(ffmpeg.layer))
+        expectInterruptedOnly(exit)
+      })
+    ).pipe(Effect.provide(PlatformLive)),
+  20_000
+)
+
 describe("FFmpeg exits before an infinite producer ends", () => {
   it.live(
     "-t trims PCM sample-exactly and stops the producer without EPIPE",
@@ -912,9 +994,9 @@ describe("stream outputs", () => {
   it.live("fails with a producer error unchanged after partial output", () =>
     withPlatform(
       Effect.gen(function* () {
-        // The failed producer's pipe is never ended, so ffmpeg (blocked
-        // reading it) only stops through the SIGKILL escalation.
-        const ffmpeg = yield* pidTrackingFFmpeg()
+        // Far beyond the bound below: termination must not wait for it.
+        const ffmpeg = yield* pidTrackingFFmpeg("15 seconds")
+        const started = Date.now()
         const probe = makeProbe()
         const collector = makeCollector()
         const sourceError = new Error("source failed")
@@ -931,6 +1013,7 @@ describe("stream outputs", () => {
           pcmStream(source),
           collect(collector, { reached: { bytes: 1 * MiB, signal: reached } })
         ).pipe(Effect.flip, Effect.provide(ffmpeg.layer))
+        expect(Date.now() - started).toBeLessThan(3_000)
         expect(error).toBe(sourceError)
         expect(collector.received).toBeGreaterThanOrEqual(1 * MiB)
         expectPayloadPrefix(collector)
