@@ -65,13 +65,13 @@
 	},
 	"devDependencies": {
 		"@ai-sdk/google": "^4.0.95",
-		"@effect/platform-bun": "4.0.4",
-		"@effect/platform-node": "4.0.4",
-		"@effect/vitest": "4.0.4",
+		"@effect/platform-bun": "4.0.5",
+		"@effect/platform-node": "4.0.5",
+		"@effect/vitest": "4.0.5",
 		"@types/node": "^26.6.5",
 		"@vitest/coverage-v8": "5.0.4",
 		"ai": "^7.0.140",
-		"effect": "~4.0.4",
+		"effect": "~4.0.5",
 		"htmlparser2": "^12.0.0",
 		"oxfmt": "0.73.0",
 		"oxlint": "1.88.0",
@@ -79,7 +79,7 @@
 		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
-		"effect": "~4.0.4"
+		"effect": "~4.0.5"
 	},
 	"engines": {
 		"node": ">=24.0.0"
