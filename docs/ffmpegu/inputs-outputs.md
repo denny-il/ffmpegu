@@ -52,6 +52,6 @@ A successful output sink must consume through EOF and finish its own writes. Ear
 
 Pipes are not seekable. Specify raw input formats and output muxers explicitly. For MP4 output through a sink, use a streaming-compatible layout such as `movflags: "frag_keyframe+empty_moov"`; ordinary seekable MP4 files should use `Output.toFile`.
 
-When FFmpeg finishes early, such as with `-t`, pending input feeders are interrupted and their resources released. Caller-originated stream errors are preserved. Partial file outputs are not removed automatically.
+When FFmpeg finishes early, such as with `-t`, pending input feeders are interrupted and their resources released. Caller-originated stream errors are preserved. When an input stream fails, its pipe is still ended, so FFmpeg sees the end of that input and stops promptly instead of waiting out `forceKillAfter`; the run fails with the stream's error, even though FFmpeg may finalize file outputs with partial content. Partial file outputs are not removed automatically.
 
 `-t` limits media duration, not elapsed execution time. FFmpeg may still wait for a stalled producer to send more bytes or end the stream; use `Effect.timeout` when the application needs an execution deadline.

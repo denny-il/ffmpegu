@@ -595,10 +595,34 @@ const feedInput = (
         case "failed": {
           // All reasons: a source interrupting itself interrupts the run.
           const producerExit = yield* Fiber.await(producer)
+          const consumerExit = yield* settle(consumer)
+          // The interrupted consumer leaves the descriptor open, and ffmpeg
+          // blocked reading it does not act on SIGTERM, so stopping would
+          // wait out `forceKillAfter`. Ending it gives ffmpeg EOF. The end
+          // waits for buffered writes to flush, which ffmpeg may never read,
+          // so it runs in the background for the rest of the run instead of
+          // delaying the failure. Started immediately, so the end is requested
+          // even if the run is torn down right after.
+          //
+          // Not for a source that interrupted itself: EOF could let ffmpeg
+          // exit successfully before the interruption is observed, and
+          // interruptions are dropped once ffmpeg exited (see
+          // `failureReasons`), turning the run into a success.
+          if (
+            Exit.isFailure(producerExit) &&
+            !Cause.hasInterruptsOnly(producerExit.cause)
+          ) {
+            yield* Effect.forkScoped(
+              Effect.interruptible(
+                Effect.ignore(Stream.run(Stream.empty, handle.getInputFd(fd)))
+              ),
+              { startImmediately: true }
+            )
+          }
           return yield* done(
             Exit.isFailure(producerExit) ? producerExit.cause.reasons : [],
             producerExit,
-            yield* settle(consumer)
+            consumerExit
           )
         }
         case "closed": {
