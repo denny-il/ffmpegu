@@ -4,6 +4,8 @@
 
 `Input.fromStream(stream, options?)` accepts an Effect `Stream<Uint8Array, E, R>`. `Output.toSink(sink, options?)` accepts `Sink<void, Uint8Array, never, E, R>`. Both preserve their error and service types in the resulting command.
 
+`Output.toStream(options?)` marks the output read by `stream(command)` (see [runners](runners.md#streaming-output)) instead of being written to a file or sink.
+
 ## Effect FileSystem
 
 ```ts

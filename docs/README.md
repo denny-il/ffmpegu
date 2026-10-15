@@ -62,7 +62,7 @@ For Bun, substitute `BunServices` and `BunRuntime` from `@effect/platform-bun`. 
 | `createFFmpegRunner(path)`           | `FFmpeg.layer({ binary: path })`                        |
 | `runner.run(command)`                | `run(command)` or the `FFmpeg` service's `run`          |
 | `createFFprobeRunner(path).run(...)` | `probe(path)` with `FFprobe.layer(...)`                 |
-| `output.toStream(writable)`          | `Output.toSink(effectSink)`                             |
+| `output.toStream(writable)`          | `Output.toSink(effectSink)` or `Output.toStream()`      |
 | Node `Readable` input                | Effect `Stream`, optionally using a platform adapter    |
 | `{ signal }` cancellation            | Fiber interruption or `Effect.timeout`                  |
 | Synchronous `onProgress` callback    | Callback returning `Effect<void, E, R>`                 |

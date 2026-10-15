@@ -17,6 +17,7 @@ import * as Ref from "effect/Ref"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
 import {
+  CommandError,
   ExitError,
   type FFmpegError,
   OutputError,
@@ -74,6 +75,17 @@ export interface FFmpegService {
     command: FFmpeguCommand<E, R>,
     options?: RunOptions<PE, PR>
   ) => Effect.Effect<RunResult, FFmpegError | E | PE, R | PR>
+  /**
+   * Run a command with exactly one `Output.toStream` output, emitting that
+   * output's bytes as the consumer pulls them. The stream ends once the
+   * output reached EOF and ffmpeg exited successfully; it fails like `run`
+   * after the chunks already emitted. Ending consumption early terminates
+   * ffmpeg and releases the inputs.
+   */
+  readonly stream: <E, R, PE = never, PR = never>(
+    command: FFmpeguCommand<E, R>,
+    options?: RunOptions<PE, PR>
+  ) => Stream.Stream<Uint8Array, FFmpegError | E | PE, R | PR>
 }
 
 export class FFmpeg extends Context.Service<FFmpeg, FFmpegService>()(
@@ -98,6 +110,15 @@ export const run = <E, R, PE = never, PR = never>(
   options?: RunOptions<PE, PR>
 ): Effect.Effect<RunResult, FFmpegError | E | PE, FFmpeg | R | PR> =>
   FFmpeg.use((ffmpeg) => ffmpeg.run(command, options))
+
+/** Stream a command's output with the `FFmpeg` service from the context. */
+export const stream = <E, R, PE = never, PR = never>(
+  command: FFmpeguCommand<E, R>,
+  options?: RunOptions<PE, PR>
+): Stream.Stream<Uint8Array, FFmpegError | E | PE, FFmpeg | R | PR> =>
+  Stream.unwrap(
+    FFmpeg.use((ffmpeg) => Effect.succeed(ffmpeg.stream(command, options)))
+  )
 
 interface Settings {
   readonly binary: string
@@ -126,13 +147,109 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
     options?: RunOptions<unknown, unknown>
   ) {
     const compiled = yield* Effect.fromResult(command.compile())
-    return yield* execute(spawner, settings, compiled, options?.onProgress)
+    if (compiled.streamOutputFds.length > 0) {
+      return yield* new CommandError({
+        reason: "StreamOutput",
+        message:
+          "The command has an Output.toStream output, which run cannot consume. Use stream(command) instead."
+      })
+    }
+    return yield* execute(
+      spawner,
+      settings,
+      compiled,
+      options?.onProgress,
+      undefined
+    )
   })
+
+  const stream = (
+    command: FFmpeguCommand<unknown, unknown>,
+    options?: RunOptions<unknown, unknown>
+  ) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const compiled = yield* Effect.fromResult(command.compile())
+        const fds = compiled.streamOutputFds
+        if (fds.length !== 1) {
+          return yield* new CommandError({
+            reason: "StreamOutput",
+            message:
+              fds.length === 0
+                ? "The command has no Output.toStream output to stream."
+                : `The command has ${fds.length} Output.toStream outputs; stream reads exactly one. Write the others to files or sinks.`
+          })
+        }
+        // A single chunk in flight: the forwarder waits for the consumer to
+        // take each chunk, so ffmpeg's writes are paced through the pipe. The
+        // queue only carries chunks; it ends with the run, whose outcome the
+        // consumer then reads from the run itself.
+        const queue = yield* Queue.bounded<Uint8Array, Cause.Done>(1)
+        // Set once the consumer has read the run's outcome.
+        const observed = yield* Ref.make(false)
+        // A consumer that stops before reading the outcome interrupts the run
+        // (if still running), which terminates ffmpeg and releases the
+        // inputs. Failures and cleanup defects it reports have no other
+        // observer, so they fail the stream, as they would fail a cancelled
+        // `run`. Forked and guarded without an interruption point in between,
+        // so that no run escapes the finalizer; the run stays interruptible.
+        const running = yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const fiber = yield* execute(
+              spawner,
+              settings,
+              compiled,
+              options?.onProgress,
+              { fd: fds[0]!, queue }
+            ).pipe(
+              Effect.withSpan("ffmpegu/FFmpeg.stream"),
+              Effect.onExit(() => Queue.end(queue)),
+              Effect.interruptible,
+              Effect.forkScoped
+            )
+            yield* Effect.addFinalizer(() =>
+              Effect.gen(function* () {
+                if (yield* Ref.get(observed)) return
+                const reasons = failureReasons(yield* settle(fiber))
+                if (reasons.length > 0) {
+                  // Finalizers have no typed error channel; see `execute`.
+                  yield* Effect.failCause(
+                    Cause.fromReasons(reasons)
+                  ) as Effect.Effect<never>
+                }
+              })
+            )
+            return fiber
+          })
+        )
+        const outcome = Effect.uninterruptibleMask((restore) =>
+          restore(Fiber.await(running)).pipe(
+            Effect.tap(Ref.set(observed, true)),
+            Effect.flatMap((exit) =>
+              Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause)
+            )
+          )
+        )
+        return Stream.concat(
+          Stream.fromQueue(queue),
+          Stream.drain(Stream.fromEffect(outcome))
+        )
+      })
+    )
 
   // The implementation is checked against `unknown` error/requirement types;
   // callers get their own `E`/`R` back, which `execute` passes through.
-  return FFmpeg.of({ run: run as FFmpegService["run"] })
+  return FFmpeg.of({
+    run: run as FFmpegService["run"],
+    stream: stream as FFmpegService["stream"]
+  })
 })
+
+/** Destination of an `Output.toStream` output: the queue behind the stream. */
+interface StreamTarget {
+  readonly fd: number
+  readonly queue: Queue.Enqueue<Uint8Array, Cause.Done>
+}
 
 const execute = (
   spawner: ChildProcessSpawner["Service"],
@@ -140,7 +257,8 @@ const execute = (
   compiled: CompiledCommand<unknown, unknown>,
   onProgress:
     | ((progress: Progress) => Effect.Effect<void, unknown, unknown>)
-    | undefined
+    | undefined,
+  target: StreamTarget | undefined
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -163,6 +281,9 @@ const execute = (
       for (const { fd } of compiled.outputStreams) {
         additionalFds[ChildProcess.fdName(fd)] = { type: "output" }
       }
+      if (target) {
+        additionalFds[ChildProcess.fdName(target.fd)] = { type: "output" }
+      }
 
       // Media only travels over dedicated descriptors; stdin/stdout are unused.
       const handle = yield* spawner
@@ -183,6 +304,7 @@ const execute = (
 
       const stderr = new ByteTail(settings.stderrTailBytes)
       const closeInputs = yield* Deferred.make<void>()
+      const draining = yield* Deferred.make<void>()
 
       const stderrFiber = yield* Effect.forkScoped(
         drainToTail(handle.stderr, 2, stderr)
@@ -207,7 +329,15 @@ const execute = (
           { concurrency: "unbounded", discard: true }
         )
       )
-      const fibers = [stderrFiber, inputsFiber, pumpsFiber] as const
+      const forwardFiber = yield* Effect.forkScoped(
+        target ? forwardOutput(handle, target, draining) : Effect.void
+      )
+      const fibers = [
+        stderrFiber,
+        inputsFiber,
+        pumpsFiber,
+        forwardFiber
+      ] as const
 
       // Inputs are always stopped by closing them rather than by interrupting
       // the feeders: the source is interrupted and the descriptor ended, so a
@@ -217,14 +347,16 @@ const execute = (
       const stopInputs = Deferred.succeed(closeInputs, undefined).pipe(
         Effect.andThen(Fiber.await(inputsFiber))
       )
-      // Abandons the run: output readers and the progress callback stop,
-      // inputs are closed, and a still-running process is terminated with the
-      // configured SIGKILL escalation.
+      // Abandons the run: output readers and the progress callback stop, a
+      // stream output is drained (see `forwardOutput`), inputs are closed,
+      // and a still-running process is terminated with the configured SIGKILL
+      // escalation.
       const abandon = Effect.gen(function* () {
         const running = yield* Effect.orElseSucceed(
           handle.isRunning,
           () => false
         )
+        yield* Deferred.succeed(draining, undefined)
         yield* Fiber.interrupt(pumpsFiber)
         yield* Effect.all(
           [
@@ -302,7 +434,10 @@ const execute = (
         // Outputs are not awaited for a failed process; stderr is, for the
         // diagnostics. The exit is reported first, along with any genuine
         // failure of the other tasks.
-        const pumpsExit = yield* settle(pumpsFiber)
+        const outputExits = yield* Effect.forEach(
+          [pumpsFiber, forwardFiber],
+          settle
+        )
         const stderrExit = yield* Fiber.await(stderrFiber)
         const exitError = new ExitError({
           exitCode: exit.exitCode,
@@ -311,19 +446,24 @@ const execute = (
         })
         return yield* failWith(
           [Cause.makeFailReason(exitError), ...exit.reasons],
-          [inputsExit, pumpsExit, stderrExit]
+          [inputsExit, ...outputExits, stderrExit]
         )
       }
 
       if (failureReasons(inputsExit).length > 0) {
-        const others = yield* Effect.forEach([pumpsFiber, stderrFiber], settle)
+        const others = yield* Effect.forEach(
+          [pumpsFiber, forwardFiber, stderrFiber],
+          settle
+        )
         return yield* failWith([], [inputsExit, ...others])
       }
 
       // Remaining output, the last progress update and stderr are still in
-      // flight; they stay supervised until they complete.
+      // flight; they stay supervised until they complete. A stream output
+      // completes as its consumer takes the rest.
+      const remaining = [pumpsFiber, forwardFiber, stderrFiber] as const
       const drained = yield* Effect.exit(
-        Effect.forEach([pumpsFiber, stderrFiber], Fiber.join, {
+        Effect.forEach(remaining, Fiber.join, {
           concurrency: "unbounded",
           discard: true
         })
@@ -332,7 +472,7 @@ const execute = (
         if (Cause.hasInterruptsOnly(drained.cause)) {
           return yield* Effect.failCause(drained.cause)
         }
-        const exits = yield* Effect.forEach([pumpsFiber, stderrFiber], settle)
+        const exits = yield* Effect.forEach(remaining, settle)
         return yield* failWith(failureReasons(drained), exits)
       }
       return { args, stderr: stderr.text() } satisfies RunResult
@@ -504,6 +644,38 @@ const drainOutput = (
       return yield* new OutputError({ reason: "SinkEndedEarly", fd })
     }
   })
+
+/**
+ * Read a stream output descriptor into the queue behind the stream returned
+ * by `stream`, one chunk at a time.
+ *
+ * Once the run is abandoned (the consumer stopped, or the run failed) chunks
+ * are discarded instead of interrupting the reader: a pipe nobody reads
+ * stays full, and ffmpeg blocked writing to it does not act on SIGTERM, so
+ * termination would wait out `forceKillAfter`. Draining unblocks it.
+ */
+const forwardOutput = (
+  handle: ChildProcessHandle,
+  { fd, queue }: StreamTarget,
+  draining: Deferred.Deferred<void>
+) =>
+  handle.getOutputFd(fd).pipe(
+    mapStreamErrors(
+      (cause) => new PipeError({ fd, direction: "output", cause })
+    ),
+    // Once draining, nothing is offered anymore: a later chunk reaching the
+    // consumer after discarded ones would leave a gap in its output.
+    Stream.runForEach((chunk) =>
+      Effect.flatMap(Deferred.isDone(draining), (done) =>
+        done
+          ? Effect.void
+          : Effect.raceFirst(
+              Queue.offer(queue, chunk),
+              Deferred.await(draining)
+            )
+      )
+    )
+  )
 
 /**
  * Parse the progress descriptor and hand updates to the callback through a

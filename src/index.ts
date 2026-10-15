@@ -30,6 +30,7 @@ export {
   type FFmpegOptions,
   type FFmpegService,
   run,
+  stream,
   type RunOptions
 } from "./core/ffmpeg.ts"
 export {

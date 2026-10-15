@@ -4,12 +4,12 @@ import type * as Stream from "effect/Stream"
 import { CommandError } from "../errors.ts"
 import { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguInput } from "./input.ts"
-import type { FFmpeguOutput } from "./output.ts"
+import { type FFmpeguOutput, STREAM_DESTINATION } from "./output.ts"
 import { CommandReferences, ForeignReference } from "./references.ts"
 
 /** File descriptor reserved for `-progress`; set up only when progress is requested. */
 export const PROGRESS_FD = 3
-/** First file descriptor assigned to stream inputs and sink outputs. */
+/** First file descriptor assigned to stream inputs and piped outputs. */
 export const FIRST_STREAM_FD = 4
 
 export interface CompiledInputStream<E, R> {
@@ -23,13 +23,17 @@ export interface CompiledOutputStream<E, R> {
 }
 
 /**
- * Deterministic execution plan of a command. `args` reference stream inputs
- * and sink outputs as `pipe:<fd>`; the runner owns those descriptors.
+ * Deterministic execution plan of a command. `args` reference stream inputs,
+ * sink outputs and stream outputs as `pipe:<fd>`; the runner owns those
+ * descriptors.
  */
 export interface CompiledCommand<E, R> {
   readonly args: ReadonlyArray<string>
   readonly inputStreams: ReadonlyArray<CompiledInputStream<E, R>>
+  /** Sink outputs. */
   readonly outputStreams: ReadonlyArray<CompiledOutputStream<E, R>>
+  /** Descriptors of `Output.toStream` outputs, in output order. */
+  readonly streamOutputFds: ReadonlyArray<number>
 }
 
 type AnyInput = FFmpeguInput<any, any>
@@ -151,6 +155,7 @@ export class FFmpeguCommand<E = never, R = never> {
     const args: string[] = []
     const inputStreams: Array<CompiledInputStream<E, R>> = []
     const outputStreams: Array<CompiledOutputStream<E, R>> = []
+    const streamOutputFds: Array<number> = []
     let fd = FIRST_STREAM_FD
 
     try {
@@ -185,6 +190,9 @@ export class FFmpeguCommand<E = never, R = never> {
           const error = validateOutputPath(output.destination, at)
           if (error) return Result.fail(error)
           args.push(output.destination)
+        } else if (output.destination === STREAM_DESTINATION) {
+          streamOutputFds.push(fd)
+          args.push(`pipe:${fd++}`)
         } else {
           outputStreams.push({ fd, sink: output.destination })
           args.push(`pipe:${fd++}`)
@@ -205,7 +213,12 @@ export class FFmpeguCommand<E = never, R = never> {
       )
     }
 
-    return Result.succeed({ args, inputStreams, outputStreams })
+    return Result.succeed({
+      args,
+      inputStreams,
+      outputStreams,
+      streamOutputFds
+    })
   }
 }
 
@@ -227,7 +240,7 @@ const RESERVED_DESCRIPTOR =
 const reservedPath = (what: string, value: string) =>
   new CommandError({
     reason: "ReservedPath",
-    message: `${what} uses "${value}", which addresses a file descriptor owned by ffmpegu. Use Input.fromStream/Output.toSink for piped data.`
+    message: `${what} uses "${value}", which addresses a file descriptor owned by ffmpegu. Use Input.fromStream/Output.toSink/Output.toStream for piped data.`
   })
 
 /**
