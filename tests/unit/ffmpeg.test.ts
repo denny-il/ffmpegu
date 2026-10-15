@@ -27,7 +27,8 @@ import {
   type Progress,
   run,
   type RunOptions,
-  SpawnError
+  SpawnError,
+  stream
 } from "../../src/index.ts"
 import {
   type FakeProcess,
@@ -1089,6 +1090,344 @@ describe("FFmpeg progress", () => {
         sourceError
       )
       assert.isTrue(yield* Ref.get(interrupted))
+    })
+  )
+})
+
+describe("FFmpeg.stream", () => {
+  /** Runs the stream in a fiber, recording the chunks it emits. */
+  const consume = <E>(output: Stream.Stream<Uint8Array, E>) =>
+    Effect.gen(function* () {
+      const received = yield* Ref.make<Array<Array<number>>>([])
+      const fiber = yield* Effect.forkChild(
+        Stream.runForEach(output, (chunk) =>
+          Ref.update(received, (all) => [...all, [...chunk]])
+        )
+      )
+      return { fiber, received: Ref.get(received) }
+    })
+
+  it.effect("emits the stream output and ends after a successful exit", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const sinkReceived = yield* Ref.make<Array<number>>([])
+      const command = Command.make({
+        inputs: [Input.fromStream(Stream.make(bytes(1)))],
+        outputs: [
+          Output.toSink(
+            Sink.forEach((chunk: Uint8Array) =>
+              Ref.update(sinkReceived, (all) => [...all, ...chunk])
+            )
+          ),
+          Output.toStream()
+        ]
+      })
+      const { fiber, received } = yield* consume(ffmpeg.stream(command))
+      const process = yield* next
+
+      assert.deepStrictEqual(process.args, [
+        "-nostdin",
+        "-i",
+        "pipe:4",
+        "pipe:5",
+        "pipe:6"
+      ])
+      assert.deepStrictEqual(process.command.options.additionalFds, {
+        fd4: { type: "input" },
+        fd5: { type: "output" },
+        fd6: { type: "output" }
+      })
+      yield* process.emit(5, bytes(9))
+      yield* process.emit(6, bytes(1, 2), bytes(3))
+      yield* process.endOutput(6)
+      yield* received.pipe(
+        Effect.repeat({ until: (chunks) => chunks.length === 2 })
+      )
+      // Output EOF alone does not end the stream: the exit decides.
+      assert.isUndefined(fiber.pollUnsafe())
+
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(yield* received, [[1, 2], [3]])
+      assert.deepStrictEqual(yield* Ref.get(sinkReceived), [9])
+      assert.isTrue(yield* process.released)
+    })
+  )
+
+  it.effect("fails with the exit error after the emitted chunks", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const command = Command.make({
+        inputs: [Input.fromFile("in.mp4")],
+        outputs: [Output.toStream()]
+      })
+      const { fiber, received } = yield* consume(ffmpeg.stream(command))
+      const process = yield* next
+
+      yield* process.emit(4, bytes(1), bytes(2))
+      yield* received.pipe(
+        Effect.repeat({ until: (chunks) => chunks.length === 2 })
+      )
+      yield* process.emit(2, "boom")
+      yield* process.exit(1)
+
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.exitCode, 1)
+      assert.strictEqual(error.stderr, "boom")
+      assert.deepStrictEqual(yield* received, [[1], [2]])
+    })
+  )
+
+  it.effect("fails with a caller input error unchanged and kills ffmpeg", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const sourceError = new Error("source failed")
+      const failSource = yield* Deferred.make<void>()
+      const command = Command.make({
+        inputs: [
+          Input.fromStream(
+            Stream.fromEffect(
+              Deferred.await(failSource).pipe(
+                Effect.andThen(Effect.fail(sourceError))
+              )
+            )
+          )
+        ],
+        outputs: [Output.toStream()]
+      })
+      const { fiber, received } = yield* consume(ffmpeg.stream(command))
+      const process = yield* next
+
+      yield* process.emit(5, bytes(1))
+      yield* received.pipe(
+        Effect.repeat({ until: (chunks) => chunks.length === 1 })
+      )
+      yield* Deferred.succeed(failSource, undefined)
+
+      assert.strictEqual(
+        yield* Fiber.join(fiber).pipe(Effect.flip),
+        sourceError
+      )
+      assert.strictEqual((yield* process.kills).length, 1)
+    })
+  )
+
+  it.effect("fails on output read errors", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const command = Command.make({
+        inputs: [Input.fromFile("in.mp4")],
+        outputs: [Output.toStream()]
+      })
+      const { fiber } = yield* consume(ffmpeg.stream(command))
+      const process = yield* next
+
+      yield* process.failOutput(4)
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, PipeError)
+      assert.strictEqual(error.fd, 4)
+      assert.strictEqual(error.direction, "output")
+    })
+  )
+
+  it.effect(
+    "terminates ffmpeg and stops inputs when consumption ends early",
+    () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup()
+        const finalized = yield* Ref.make(false)
+        const command = Command.make({
+          inputs: [Input.fromStream(endless(finalized))],
+          outputs: [Output.toStream()]
+        })
+        const fiber = yield* Effect.forkChild(
+          Stream.runCollect(Stream.take(ffmpeg.stream(command), 1))
+        )
+        const process = yield* next
+        yield* process.emit(5, bytes(1), bytes(2))
+
+        const chunks = yield* Fiber.join(fiber)
+        assert.deepStrictEqual(
+          chunks.map((chunk) => [...chunk]),
+          [[1]]
+        )
+        assert.strictEqual((yield* process.kills).length, 1)
+        assert.isTrue(yield* Ref.get(finalized))
+        assert.isTrue(yield* process.released)
+      })
+  )
+
+  describe("reports cleanup defects of a run stopped early", () => {
+    const defect = new Error("cleanup defect")
+    const command = (started: Deferred.Deferred<void>) =>
+      Command.make({
+        inputs: [
+          Input.fromStream(
+            Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(
+              Stream.flatMap(() => Stream.never),
+              Stream.ensuring(Effect.die(defect))
+            )
+          )
+        ],
+        outputs: [Output.toStream()]
+      })
+
+    it.effect("by Stream.take", () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup()
+        const started = yield* Deferred.make<void>()
+        const fiber = yield* Effect.forkChild(
+          Stream.runDrain(Stream.take(ffmpeg.stream(command(started)), 1))
+        )
+        const process = yield* next
+        yield* Deferred.await(started)
+        yield* process.emit(5, bytes(1))
+
+        const exit = yield* Fiber.await(fiber)
+        assert.deepStrictEqual(describeCause(exit), [["Die", defect]])
+      })
+    )
+
+    // The run already ended, but its outcome is still behind a chunk the
+    // consumer holds when it stops.
+    const heldAfterRunEnded = Effect.fnUntraced(function* (
+      stop: (
+        output: Stream.Stream<Uint8Array, unknown>
+      ) => Stream.Stream<Uint8Array, unknown>
+    ) {
+      const { ffmpeg, next } = yield* setup()
+      const held = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const command = Command.make({
+        inputs: [
+          // Ends, with a dying finalizer, once the consumer holds a chunk.
+          Input.fromStream(
+            Stream.fromEffect(Deferred.await(held)).pipe(
+              Stream.drain,
+              Stream.ensuring(Effect.die(defect))
+            )
+          )
+        ],
+        outputs: [Output.toStream()]
+      })
+      const fiber = yield* Effect.forkChild(
+        ffmpeg.stream(command).pipe(
+          Stream.tap(() =>
+            Deferred.succeed(held, undefined).pipe(
+              Effect.andThen(Deferred.await(release))
+            )
+          ),
+          stop,
+          Stream.runDrain
+        )
+      )
+      const process = yield* next
+      yield* process.emit(5, bytes(1))
+      yield* Deferred.await(held)
+      yield* process.released.pipe(Effect.repeat({ until: (done) => done }))
+      return { fiber, release }
+    })
+
+    it.effect("by Stream.take after the run ended", () =>
+      Effect.gen(function* () {
+        const { fiber, release } = yield* heldAfterRunEnded(Stream.take(1))
+        yield* Deferred.succeed(release, undefined)
+        const exit = yield* Fiber.await(fiber)
+        assert.deepStrictEqual(describeCause(exit), [["Die", defect]])
+      })
+    )
+
+    it.effect("by interruption after the run ended", () =>
+      Effect.gen(function* () {
+        const { fiber } = yield* heldAfterRunEnded((output) => output)
+        const exit = yield* Fiber.interrupt(fiber).pipe(
+          Effect.andThen(Fiber.await(fiber))
+        )
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause))
+        assert.deepStrictEqual(
+          describeCause(exit).filter(([tag]) => tag !== "Interrupt"),
+          [["Die", defect]]
+        )
+      })
+    )
+
+    it.effect("by interruption", () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup()
+        const started = yield* Deferred.make<void>()
+        const fiber = yield* Effect.forkChild(
+          Stream.runDrain(ffmpeg.stream(command(started)))
+        )
+        yield* next
+        yield* Deferred.await(started)
+
+        const exit = yield* Fiber.interrupt(fiber).pipe(
+          Effect.andThen(Fiber.await(fiber))
+        )
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause))
+        assert.deepStrictEqual(
+          describeCause(exit).filter(([tag]) => tag !== "Interrupt"),
+          [["Die", defect]]
+        )
+      })
+    )
+  })
+
+  it.effect("requires exactly one stream output", () =>
+    Effect.gen(function* () {
+      const { ffmpeg } = yield* setup(
+        {},
+        { spawnError: platformError("spawn") }
+      )
+      const input = Input.fromFile("in.mp4")
+      for (const outputs of [
+        [Output.toFile("out.mp4")],
+        [Output.toStream(), Output.toStream()]
+      ]) {
+        const error = yield* Stream.runDrain(
+          ffmpeg.stream(Command.make({ inputs: [input], outputs }))
+        ).pipe(Effect.flip)
+        assert.instanceOf(error, CommandError)
+        assert.strictEqual(error.reason, "StreamOutput")
+      }
+    })
+  )
+
+  it.effect("is rejected by run", () =>
+    Effect.gen(function* () {
+      const { ffmpeg } = yield* setup(
+        {},
+        { spawnError: platformError("spawn") }
+      )
+      const error = yield* ffmpeg
+        .run(
+          Command.make({
+            inputs: [Input.fromFile("in.mp4")],
+            outputs: [Output.toStream()]
+          })
+        )
+        .pipe(Effect.flip)
+      assert.instanceOf(error, CommandError)
+      assert.strictEqual(error.reason, "StreamOutput")
+    })
+  )
+
+  it.effect("is available from the context", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const command = Command.make({
+        inputs: [Input.fromFile("in.mp4")],
+        outputs: [Output.toStream()]
+      })
+      const { fiber, received } = yield* consume(
+        stream(command).pipe(Stream.provide(layer))
+      )
+      const process = yield* next
+      yield* process.emit(4, bytes(5))
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(yield* received, [[5]])
     })
   )
 })

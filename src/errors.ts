@@ -12,7 +12,8 @@ export class CommandError extends Schema.TaggedError<CommandError>()(
       "ForeignReference",
       "ReservedPath",
       "ReservedOption",
-      "InvalidArgument"
+      "InvalidArgument",
+      "StreamOutput"
     ]),
     message: Schema.String,
     cause: Schema.optional(Schema.Unknown)

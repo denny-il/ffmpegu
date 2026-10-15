@@ -2,12 +2,22 @@ import type * as Sink from "effect/Sink"
 import type { FFmpeguOptions } from "../options/core.ts"
 
 /**
- * A file path or URL passed to ffmpeg verbatim, or a sink receiving the bytes
- * ffmpeg writes to a dedicated pipe.
+ * Destination of an output read as the stream returned by `stream`; see
+ * {@link FFmpeguOutput.toStream}.
+ */
+export const STREAM_DESTINATION: unique symbol = Symbol.for(
+  "ffmpegu/StreamDestination"
+)
+
+/**
+ * A file path or URL passed to ffmpeg verbatim, a sink receiving the bytes
+ * ffmpeg writes to a dedicated pipe, or {@link STREAM_DESTINATION} for a
+ * pipe read as a stream.
  */
 export type FFmpeguOutputDestination<E, R> =
   | string
   | Sink.Sink<void, Uint8Array, never, E, R>
+  | typeof STREAM_DESTINATION
 
 /**
  * Represents an output of an ffmpeg command.
@@ -36,5 +46,13 @@ export class FFmpeguOutput<E = never, R = never> {
     options?: FFmpeguOptions
   ): FFmpeguOutput<E, R> {
     return new FFmpeguOutput(sink, options)
+  }
+
+  /**
+   * Create an output read as the stream returned by `stream(command)`, which
+   * requires exactly one such output. `run` rejects commands containing one.
+   */
+  static toStream(options?: FFmpeguOptions): FFmpeguOutput {
+    return new FFmpeguOutput(STREAM_DESTINATION, options)
   }
 }

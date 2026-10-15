@@ -30,7 +30,8 @@ import {
   Input,
   Options,
   Output,
-  run
+  run,
+  stream
 } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
@@ -352,7 +353,9 @@ it.live(
  * `exec`s the real ffmpeg from `PATH`, so the recorded PID is the ffmpeg
  * process itself.
  */
-const pidTrackingFFmpeg = Effect.gen(function* () {
+const pidTrackingFFmpeg = Effect.fnUntraced(function* (
+  forceKillAfter: Duration.Input = "250 millis"
+) {
   const fs = yield* FileSystem.FileSystem
   const dir = yield* fs.makeTempDirectoryScoped()
   const binary = `${dir}/ffmpeg-pid`
@@ -367,7 +370,7 @@ const pidTrackingFFmpeg = Effect.gen(function* () {
     .readFileString(pidFile)
     .pipe(Effect.map((text) => text.split("\n").filter(Boolean).map(Number)))
   return {
-    layer: FFmpeg.layer({ binary, forceKillAfter: "250 millis" }),
+    layer: FFmpeg.layer({ binary, forceKillAfter }),
     pids
   }
 })
@@ -418,7 +421,7 @@ describe("cancellation", () => {
     () =>
       withPlatform(
         Effect.gen(function* () {
-          const ffmpeg = yield* pidTrackingFFmpeg
+          const ffmpeg = yield* pidTrackingFFmpeg()
           const probe = makeProbe()
           const collector = makeCollector()
           const flowing = yield* Deferred.make<void>()
@@ -464,7 +467,7 @@ describe("cancellation", () => {
     () =>
       withPlatform(
         Effect.gen(function* () {
-          const ffmpeg = yield* pidTrackingFFmpeg
+          const ffmpeg = yield* pidTrackingFFmpeg()
           const probe = makeProbe()
           const collector = makeCollector()
           const held = yield* Deferred.make<void>()
@@ -500,7 +503,7 @@ describe("cancellation", () => {
     () =>
       withPlatform(
         Effect.gen(function* () {
-          const ffmpeg = yield* pidTrackingFFmpeg
+          const ffmpeg = yield* pidTrackingFFmpeg()
           const probe = makeProbe()
           const collector = makeCollector()
           const flowing = yield* Deferred.make<void>()
@@ -537,7 +540,7 @@ describe("cancellation", () => {
     () =>
       withPlatform(
         Effect.gen(function* () {
-          const ffmpeg = yield* pidTrackingFFmpeg
+          const ffmpeg = yield* pidTrackingFFmpeg()
           // Interrupt points from "before spawn completes" to "mid-stream".
           const delays = [0, 1, 2, 5, 10, 20, 50, 100, 200]
           for (const millis of delays) {
@@ -775,5 +778,165 @@ describe("multiple descriptors with asymmetric rates", () => {
         })
       ),
     30_000
+  )
+})
+
+describe("stream outputs", () => {
+  const pcmStream = <E>(source: Stream.Stream<Uint8Array, E>) =>
+    stream(
+      Command.make({
+        inputs: [Input.fromStream(source, opts(PCM))],
+        outputs: [Output.toStream(opts(PCM_COPY))]
+      })
+    )
+
+  const withPlatform = <A, E>(
+    effect: Effect.Effect<
+      A,
+      E,
+      FileSystem.FileSystem | Scope.Scope | Layer.Success<typeof PlatformLive>
+    >
+  ) => Effect.scoped(effect).pipe(Effect.provide(PlatformLive))
+
+  for (const consumer of [0, 1]) {
+    it.live.skipIf(hasBunMacOutputReset && consumer > 0)(
+      `${consumer > 0 ? "delayed" : "fast"} consumer: copies 4 MiB of PCM byte for byte`,
+      () =>
+        live(
+          Effect.gen(function* () {
+            const TOTAL = 4 * MiB
+            const probe = makeProbe()
+            const collector = makeCollector()
+            yield* Stream.run(
+              pcmStream(payloadSource(probe, { total: TOTAL })),
+              collect(collector, {
+                delay: consumer > 0 ? pace(consumer) : undefined
+              })
+            )
+            expect(probe.exits).toEqual(["success"])
+            expectExactPayload(collector, TOTAL)
+          })
+        ),
+      30_000
+    )
+  }
+
+  it.live(
+    "a consumer that stops pulling backpressures a fast producer",
+    () =>
+      live(
+        Effect.gen(function* () {
+          const TOTAL = 32 * MiB
+          const probe = makeProbe()
+          const collector = makeCollector()
+          const held = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const fiber = yield* Effect.forkChild(
+            Stream.run(
+              pcmStream(payloadSource(probe, { total: TOTAL })),
+              collect(collector, { hold: { afterBytes: 1, held, release } })
+            )
+          )
+          yield* Deferred.await(held)
+          const stalledAt = yield* awaitQuiescent(() => probe.pulled)
+          expect(probe.completed).toBe(false)
+          expect(stalledAt).toBeLessThan(TOTAL)
+
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(fiber)
+          expect(probe.exits).toEqual(["success"])
+          expectExactPayload(collector, TOTAL)
+        })
+      ),
+    30_000
+  )
+
+  it.live(
+    "ending consumption early terminates ffmpeg and stops the producer",
+    () =>
+      withPlatform(
+        Effect.gen(function* () {
+          const ffmpeg = yield* pidTrackingFFmpeg()
+          const probe = makeProbe()
+          const chunks = yield* pcmStream(payloadSource(probe)).pipe(
+            Stream.take(3),
+            Stream.runCollect,
+            Effect.provide(ffmpeg.layer)
+          )
+          expect(chunks).toHaveLength(3)
+          expect(firstMismatch(chunks)).toBe(-1)
+          expect(probe.exits).toEqual(["interrupted"])
+          const [pid] = yield* ffmpeg.pids
+          expect(isAlive(pid!)).toBe(false)
+        })
+      ),
+    20_000
+  )
+
+  it.live(
+    "interrupting a stalled consumer terminates ffmpeg without the SIGKILL grace",
+    () =>
+      withPlatform(
+        Effect.gen(function* () {
+          // Far beyond the bound below: termination must not wait for it.
+          const ffmpeg = yield* pidTrackingFFmpeg("15 seconds")
+          const probe = makeProbe()
+          const collector = makeCollector()
+          const held = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+          const fiber = yield* Effect.forkChild(
+            Stream.run(
+              pcmStream(payloadSource(probe)),
+              collect(collector, { hold: { afterBytes: 1, held, release } })
+            ).pipe(Effect.provide(ffmpeg.layer))
+          )
+          yield* Deferred.await(held)
+          // ffmpeg is now blocked writing to the full output pipe.
+          yield* awaitQuiescent(() => probe.pulled)
+          const [pid] = yield* ffmpeg.pids
+          expect(isAlive(pid!)).toBe(true)
+
+          const started = Date.now()
+          const exit = yield* cancel(fiber)
+          expect(Date.now() - started).toBeLessThan(3_000)
+          expectInterruptedOnly(exit)
+          expect(probe.exits).toEqual(["interrupted"])
+          expect(collector.finalized).toBe(1)
+          expectPayloadPrefix(collector)
+          expect(isAlive(pid!)).toBe(false)
+        })
+      ),
+    20_000
+  )
+
+  it.live("fails with a producer error unchanged after partial output", () =>
+    withPlatform(
+      Effect.gen(function* () {
+        // The failed producer's pipe is never ended, so ffmpeg (blocked
+        // reading it) only stops through the SIGKILL escalation.
+        const ffmpeg = yield* pidTrackingFFmpeg()
+        const probe = makeProbe()
+        const collector = makeCollector()
+        const sourceError = new Error("source failed")
+        const reached = yield* Deferred.make<void>()
+        const source = Stream.concat(
+          payloadSource(probe, { total: 2 * MiB }),
+          Stream.fromEffect(
+            Deferred.await(reached).pipe(
+              Effect.andThen(Effect.fail(sourceError))
+            )
+          )
+        )
+        const error = yield* Stream.run(
+          pcmStream(source),
+          collect(collector, { reached: { bytes: 1 * MiB, signal: reached } })
+        ).pipe(Effect.flip, Effect.provide(ffmpeg.layer))
+        expect(error).toBe(sourceError)
+        expect(collector.received).toBeGreaterThanOrEqual(1 * MiB)
+        expectPayloadPrefix(collector)
+        const [pid] = yield* ffmpeg.pids
+        expect(isAlive(pid!)).toBe(false)
+      })
+    )
   )
 })

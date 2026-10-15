@@ -70,7 +70,7 @@ describe("Command", () => {
     expect(Result.getOrThrow(next.compile()).args).toEqual(["-y", "-vn"])
   })
 
-  it("should assign pipe descriptors from 4 to streams in input then output order", () => {
+  it("should assign pipe descriptors from 4 to piped inputs then outputs in order", () => {
     const sourceA = Stream.make(new Uint8Array([1]))
     const sourceB = Stream.make(new Uint8Array([2]))
     const sinkA = Sink.drain
@@ -84,6 +84,7 @@ describe("Command", () => {
       ],
       outputs: [
         FFmpeguOutput.toSink(sinkA, options.format("nut")),
+        FFmpeguOutput.toStream(options.format("s16le")),
         FFmpeguOutput.toFile("/test/out.mkv"),
         FFmpeguOutput.toSink(sinkB)
       ]
@@ -103,8 +104,11 @@ describe("Command", () => {
       "-f",
       "nut",
       "pipe:6",
+      "-f",
+      "s16le",
+      "pipe:7",
       "/test/out.mkv",
-      "pipe:7"
+      "pipe:8"
     ])
     expect(compiled.inputStreams).toEqual([
       { fd: 4, source: sourceA },
@@ -112,8 +116,9 @@ describe("Command", () => {
     ])
     expect(compiled.outputStreams).toEqual([
       { fd: 6, sink: sinkA },
-      { fd: 7, sink: sinkB }
+      { fd: 8, sink: sinkB }
     ])
+    expect(compiled.streamOutputFds).toEqual([7])
   })
 
   it("should keep arbitrary argument ordering and resolve stream references", () => {

@@ -1,10 +1,30 @@
 # Execution services
 
-`run(command, options?)` requires `FFmpeg`; `probe(path)` requires `FFprobe`. Provide their live Layers with Node or Bun platform services. Custom binaries can be configured with `FFmpeg.layer({ binary: "/path/to/ffmpeg" })` and `FFprobe.layer({ binary: "/path/to/ffprobe" })`.
+`run(command, options?)` and `stream(command, options?)` require `FFmpeg`; `probe(path)` requires `FFprobe`. Provide their live Layers with Node or Bun platform services. Custom binaries can be configured with `FFmpeg.layer({ binary: "/path/to/ffmpeg" })` and `FFprobe.layer({ binary: "/path/to/ffprobe" })`.
 
 Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe may need this escalation, so cancellation can take the configured grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output sink pipe may need this escalation, so cancellation can take the configured grace period; stream outputs are drained during termination instead. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
+
+## Streaming output
+
+`stream(command, options?)` runs a command with exactly one `Output.toStream` output and returns its bytes as a `Stream<Uint8Array, FFmpegError | E, FFmpeg | R>`. Other outputs can still be files or sinks; `run` rejects commands with a stream output.
+
+```ts
+import { Stream } from "effect"
+import { Command, Input, Options, Output, stream } from "ffmpegu"
+
+const pcm = stream(
+  Command.make({
+    inputs: [Input.fromStream(source, Options.create({ f: "webm" }))],
+    outputs: [Output.toStream(Options.create({ f: "s16le", ac: 1, ar: 16000 }))]
+  })
+)
+```
+
+FFmpeg starts when the stream is first pulled and runs again on every consumption. Its output is paced by the consumer: one chunk is handed over at a time, and a consumer that stops pulling fills the pipe, blocks FFmpeg and, through it, the input feeders. The stream ends once the output reached EOF and FFmpeg exited successfully; failures (nonzero exit, input errors, pipe errors) fail it after the chunks already emitted, as `run` would report them.
+
+Ending consumption early (`Stream.take`, interruption, closing its scope) terminates FFmpeg and releases the inputs. The output pipe keeps being drained meanwhile, so FFmpeg blocked on a full pipe can act on SIGTERM instead of waiting out `forceKillAfter`.
 
 ## Progress
 

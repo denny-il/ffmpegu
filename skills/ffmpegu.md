@@ -6,12 +6,13 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 
 ## Execution model
 
-- Named exports: `Command`, `Input`, `Output`, `Options`, `FFmpeg`, `FFprobe`, `run`, `probe`, `options`, `filters`.
+- Named exports: `Command`, `Input`, `Output`, `Options`, `FFmpeg`, `FFprobe`, `run`, `stream`, `probe`, `options`, `filters`.
 - Pure builders also remain accessible through `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, and `ffmpegu.filters`.
 - `Command.make({ global?, inputs?, outputs? })`, `withInput`, `withOutput`, `withGlobal` preserve error and service types.
 - `Input.fromFile(path, options?)`; `Input.fromStream(Stream<Uint8Array,E,R>, options?)`.
-- `Output.toFile(path, options?)`; `Output.toSink(Sink<void,Uint8Array,never,E,R>, options?)`.
+- `Output.toFile(path, options?)`; `Output.toSink(Sink<void,Uint8Array,never,E,R>, options?)`; `Output.toStream(options?)`.
 - `run(command, { onProgress? })` returns an Effect requiring `FFmpeg`; callback returns an Effect too.
+- `stream(command, { onProgress? })` returns `Stream<Uint8Array>` of the command's single `Output.toStream` output; `run` rejects commands with one. Stopping consumption terminates FFmpeg.
 - `probe(path)` returns an Effect requiring `FFprobe`, yielding the validated metadata object directly.
 - Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration.
 - Application owns runtime execution. Use Effect fibers, interruption, and timeout for cancellation.
