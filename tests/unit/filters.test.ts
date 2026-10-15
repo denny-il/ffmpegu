@@ -40,7 +40,9 @@ describe("Filters", { concurrent: false }, () => {
       text: "hello:world"
     })
 
-    expect(filter.getArgs(refs)).toEqual(["drawtext=text=hello\\:world"])
+    expect(filter.getArgs(refs)).toEqual([
+      String.raw`drawtext=text=hello\\:world`
+    ])
   })
 
   it("should escape special characters in options", () => {
@@ -49,7 +51,7 @@ describe("Filters", { concurrent: false }, () => {
     })
 
     expect(filter.getArgs(refs)).toEqual([
-      "drawtext=text=a\\,b\\;\\[c\\]\\\\\\'d"
+      String.raw`drawtext=text=a\,b\;\[c\]\\\\\\\'d`
     ])
   })
 

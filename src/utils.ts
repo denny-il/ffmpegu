@@ -16,13 +16,16 @@ type ResolvedTimeOptions<T, K extends keyof T> = {
   [P in keyof T]: P extends K ? Exclude<T[P], FFmpeguTimeObject> : T[P]
 }
 
-export const formatTime = (t: FFmpeguTimeObject): string => {
-  const totalMilliseconds = Math.trunc(
+const timeObjectToMilliseconds = (t: FFmpeguTimeObject): number =>
+  Math.trunc(
     (t.hours ?? 0) * MS_IN_HOUR +
       (t.minutes ?? 0) * MS_IN_MINUTE +
       (t.seconds ?? 0) * MS_IN_SECOND +
       (t.milliseconds ?? 0)
   )
+
+export const formatTime = (t: FFmpeguTimeObject): string => {
+  const totalMilliseconds = timeObjectToMilliseconds(t)
   const sign = totalMilliseconds < 0 ? "-" : ""
   const absoluteMilliseconds = Math.abs(totalMilliseconds)
   const h = Math.floor(absoluteMilliseconds / MS_IN_HOUR)
@@ -34,7 +37,7 @@ export const formatTime = (t: FFmpeguTimeObject): string => {
   return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`
 }
 
-export const resolveTimeOptions = <
+export const resolveFilterTimeOptions = <
   T extends Record<string, unknown>,
   K extends keyof T
 >(
@@ -47,7 +50,10 @@ export const resolveTimeOptions = <
     const value = resolved[key]
 
     if (isTimeObject(value)) {
-      resolved[key] = formatTime(value) as ResolvedTimeOptions<T, K>[K]
+      // Filter options such as fps.start_time require seconds, not HH:MM:SS.
+      resolved[key] = String(
+        timeObjectToMilliseconds(value) / MS_IN_SECOND
+      ) as ResolvedTimeOptions<T, K>[K]
     }
   }
 
