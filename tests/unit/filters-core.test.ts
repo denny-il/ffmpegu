@@ -17,7 +17,9 @@ describe("Filters Core", { concurrent: false }, () => {
       text: "a\\b;c'd"
     })
 
-    expect(filter.getArgs(refs)).toEqual(["drawtext=text=a\\\\b\\;c\\'d"])
+    expect(filter.getArgs(refs)).toEqual([
+      String.raw`drawtext=text=a\\\\b\;c\\\'d`
+    ])
   })
 
   it("should include boolean options only when true", () => {

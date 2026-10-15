@@ -72,13 +72,9 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
    * Escape special characters in filter values according to FFmpeg filtergraph syntax
    */
   protected escapeFilterValue(value: string): string {
-    return value
-      .replace(/\\/g, "\\\\")
-      .replace(/'/g, "\\'")
-      .replace(/:/g, "\\:")
-      .replace(/,/g, "\\,")
-      .replace(/\[/g, "\\[")
-      .replace(/\]/g, "\\]")
-      .replace(/;/g, "\\;")
+    // FFmpeg parses the graph first, then each filter's option values. Escape
+    // both layers so graph parsing does not consume the option-level escapes.
+    // Arguments go directly to the process, so no shell escaping is needed.
+    return value.replace(/[\\':]/g, "\\$&").replace(/[\\'[\],;]/g, "\\$&")
   }
 }
