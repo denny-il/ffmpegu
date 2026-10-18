@@ -37,7 +37,7 @@ try {
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { Effect, Layer, Result, Sink, Stream } from 'effect'
-import { Command, Input, Output, Options, FFmpeg, FFprobe, run, probe } from 'ffmpegu'
+import { Command, Input, Output, Options, FFmpeg, FFprobe, run, probe, probeWith } from 'ffmpegu'
 const input = Input.fromFile('input.mp4')
 const command = Command.make({ inputs: [input], outputs: [Output.toFile('output.mp4', Options.create({map: input.video}))] })
 assert.equal(Result.isSuccess(command.compile()), true)
@@ -71,6 +71,9 @@ await Effect.runPromise(Effect.gen(function* () {
   const metadata = yield* probe('output.wav')
   assert.equal(metadata.streams[0]?.codec_name, 'pcm_s16le')
   assert.equal(metadata.streams[0]?.channels, 2)
+  const selected = yield* probeWith('output.wav', Options.create({ show_entries: 'stream=codec_name', protocol_whitelist: 'file', v: 'quiet' }))
+  assert.deepEqual(selected.streams, [{ codec_name: 'pcm_s16le' }])
+  assert.equal(selected.format, undefined)
 }).pipe(Effect.provide(media), Effect.timeout('15 seconds')))
 assert.equal(received, payload.length)
 assert.equal(hash.digest('hex'), createHash('sha256').update(payload).digest('hex'))
@@ -82,10 +85,12 @@ console.log('Installed package transferred 1 MiB byte-for-byte, wrote and probed
     join(temporary, "smoke.ts"),
     `
 import { Effect, Sink, Stream } from 'effect'
-import { Command, FFmpeg, Input, Output, run } from 'ffmpegu'
+import { Command, FFmpeg, FFprobe, Input, Options, Output, ProjectedProbeResult, probeWith, run } from 'ffmpegu'
 const command = Command.make({ inputs: [Input.fromStream(Stream.empty)], outputs: [Output.toSink(Sink.drain)] })
 const execution: Effect.Effect<unknown, unknown, FFmpeg> = run(command)
 void execution
+const selected: Effect.Effect<ProjectedProbeResult, unknown, FFprobe> = probeWith('input.mp4', Options.create({ show_entries: 'stream=codec_name' }))
+void selected
 `
   )
   execute(process.execPath, [

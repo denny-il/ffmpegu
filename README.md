@@ -45,6 +45,21 @@ run(command).pipe(
 
 On Bun, supply `BunServices.layer` and use `BunRuntime.runMain` from `@effect/platform-bun`. The library never starts a runtime internally.
 
+Probe format and streams with `probe("input.mp4")`, or select metadata with the same options builder:
+
+```ts
+import { Options, probeWith } from "ffmpegu"
+
+const metadata = probeWith("input.mp4", Options.create({
+  show_entries: "stream=codec_name,width,height:format=duration",
+  select_streams: "v:0",
+  protocol_whitelist: "file",
+  v: "error"
+}))
+```
+
+Explicit probe options replace the default format/stream selection. Output stays JSON; projected stream fields, including `index`, may be absent. See [FFprobe](docs/ffmpegu/ffprobe.md) for decoding, limits, and cancellation.
+
 ## Behavior
 
 - `run(command)` succeeds only after FFmpeg exits successfully and every output sink finishes.

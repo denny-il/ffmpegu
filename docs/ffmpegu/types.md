@@ -2,11 +2,11 @@
 
 `Command<E, R>` tracks errors and services required by its input streams and output sinks. `run` adds the FFmpeg service and execution errors, plus any errors/services required by `onProgress`. File-only commands have no stream requirements.
 
-`Progress` contains parsed progress fields and the original `raw` values. `RunResult` contains the executed `args` and bounded `stderr` diagnostics. `ProbeResult` exposes validated streams and optional format metadata, preserving unknown fields.
+`Progress` contains parsed progress fields and the original `raw` values. `RunResult` contains the executed `args` and bounded `stderr` diagnostics. `ProbeResult` exposes validated streams and optional format metadata, preserving unknown fields. Explicit probe options return `ProjectedProbeResult`, whose stream `index` may also be absent; the default `ProbeResult` still requires it.
 
 Library failures are tagged errors suitable for `Effect.catchTag`:
 
-- `CommandError`: invalid references, descriptor conflicts, or invalid command structure.
+- `CommandError`: invalid references, descriptor conflicts, invalid command structure, or reserved probe arguments. Included in both `FFmpegError` and `ProbeError`.
 - `SpawnError`: binary startup failed.
 - `ExitError`: nonzero or abnormal termination, with bounded stderr and the original cause when available.
 - `PipeError`: I/O on a library-owned descriptor failed.

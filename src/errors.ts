@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 
 /**
- * The command cannot be compiled into a safe ffmpeg invocation.
+ * The command cannot be compiled into a safe ffmpeg or ffprobe invocation.
  */
 export class CommandError extends Schema.TaggedError<CommandError>()(
   "CommandError",
@@ -118,6 +118,7 @@ export type FFmpegError =
   | OutputError
 
 export type ProbeError =
+  | CommandError
   | SpawnError
   | ExitError
   | PipeError
