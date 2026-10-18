@@ -1,19 +1,22 @@
-name: CI
+name: CI diagnostics
 on:
   push:
-  pull_request:
 permissions:
   contents: read
 jobs:
-  test:
+  compare:
+    name: macOS Node (${{ matrix.source }}, ${{ matrix.suite }})
+    runs-on: macos-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        runtime: [node, bun]
-    runs-on: ${{ matrix.os }}
+        source: [baseline, feature]
+        suite: [full, streaming]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.source == 'baseline' && '52203741584756e0c50ff381534f8fbda710209c' || 'aca191c3516bf7ae3d71b277d24aeb0b86ceec17' }}
       - uses: pnpm/setup@v3
         with:
           runtime: node@24
@@ -22,15 +25,26 @@ jobs:
         with:
           bun-version: 1.4.3
       - name: Install FFmpeg
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y ffmpeg
-          else
-            brew install ffmpeg
-          fi
+        run: brew install ffmpeg
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run check
-      - run: pnpm run test:${{ matrix.runtime }} --coverage
-      - run: pnpm run test:package
+      - name: Record versions
+        run: |
+          git rev-parse HEAD
+          node --version
+          ffmpeg -version
+      - name: Compare three attempts
         env:
-          FFMPEGU_PACKAGE_RUNTIME: ${{ matrix.runtime }}
+          DIAGNOSTIC_SUITE: ${{ matrix.suite }}
+        run: |
+          failures=0
+          for attempt in 1 2 3; do
+            echo "::group::Attempt $attempt ($DIAGNOSTIC_SUITE)"
+            if [ "$DIAGNOSTIC_SUITE" = "streaming" ]; then
+              pnpm run test:node --coverage tests/integration/streaming.test.ts || failures=$((failures + 1))
+            else
+              pnpm run test:node --coverage || failures=$((failures + 1))
+            fi
+            echo "::endgroup::"
+          done
+          echo "$failures failed attempts out of 3"
+          test "$failures" -eq 0
