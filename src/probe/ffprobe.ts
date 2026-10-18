@@ -4,6 +4,7 @@ import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Result from "effect/Result"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
@@ -17,6 +18,7 @@ import {
   SpawnError
 } from "../errors.ts"
 import { ByteTail } from "../core/diagnostics.ts"
+import type { FFmpeguOptions } from "../options/core.ts"
 import {
   awaitExit,
   byteLimit,
@@ -27,7 +29,8 @@ import {
   mapEffectErrors,
   mapStreamErrors
 } from "../core/process.ts"
-import { ProbeResult } from "./schema.ts"
+import { probeArgs } from "./command.ts"
+import { ProbeResult, ProjectedProbeResult } from "./schema.ts"
 
 export interface FFprobeOptions {
   /** Binary name or path. Defaults to `"ffprobe"`. */
@@ -43,6 +46,11 @@ export interface FFprobeOptions {
 export interface FFprobeService {
   /** Probe a file path or URL for its format and streams. */
   readonly probe: (input: string) => Effect.Effect<ProbeResult, ProbeError>
+  /** Explicit options replace the default format/stream selection. */
+  readonly probeWith: (
+    input: string,
+    options: FFmpeguOptions
+  ) => Effect.Effect<ProjectedProbeResult, ProbeError>
 }
 
 export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
@@ -67,9 +75,19 @@ export const probe = (
 ): Effect.Effect<ProbeResult, ProbeError, FFprobe> =>
   FFprobe.use((ffprobe) => ffprobe.probe(input))
 
+/** Probe selected metadata using the existing options builder. */
+export const probeWith = (
+  input: string,
+  options: FFmpeguOptions
+): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe> =>
+  FFprobe.use((ffprobe) => ffprobe.probeWith(input, options))
+
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ProbeResult))
+const decodeProjected = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ProjectedProbeResult)
+)
 
 const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
   const spawner = yield* ChildProcessSpawner
@@ -90,16 +108,14 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     DEFAULT_STDERR_TAIL_BYTES
   )
 
-  const probe = Effect.fn("ffmpegu/FFprobe.probe")(function* (input: string) {
-    const args = [
-      "-hide_banner",
-      "-of",
-      "json",
-      "-show_format",
-      "-show_streams",
-      "-i",
-      input
-    ]
+  const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A>(
+    input: string,
+    decodeOutput: (json: string) => Effect.Effect<A, Schema.SchemaError>,
+    options?: FFmpeguOptions
+  ) {
+    const compiled = probeArgs(input, options)
+    if (Result.isFailure(compiled)) return yield* Effect.fail(compiled.failure)
+    const args = compiled.success
     const { exit, stderr, stdout } = yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner
@@ -151,7 +167,7 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     }
 
     const json = new TextDecoder().decode(stdout.bytes())
-    return yield* decode(json).pipe(
+    return yield* decodeOutput(json).pipe(
       mapEffectErrors(
         (cause) =>
           new ProbeDecodeError({
@@ -162,5 +178,8 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     )
   })
 
-  return FFprobe.of({ probe })
+  return FFprobe.of({
+    probe: (input) => execute(input, decode),
+    probeWith: (input, options) => execute(input, decodeProjected, options)
+  })
 })

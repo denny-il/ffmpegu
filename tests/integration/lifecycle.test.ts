@@ -12,9 +12,11 @@ import { afterAll, afterEach } from "vitest"
 import {
   Command,
   FFmpeg,
+  FFprobe,
   Input,
   Options,
   Output,
+  probeWith,
   run
 } from "../../src/index.ts"
 import { PlatformLive } from "../helpers/platform.ts"
@@ -87,6 +89,91 @@ const stubborn = () => {
   )
   return wrapper(`'${process.execPath}' '${script}'`)
 }
+
+/** Installs its signal handler before reporting readiness or flooding stdout. */
+const stubbornProbe = (flood = false) => {
+  const script = `${dir}/probe-${fixtures++}.mjs`
+  const ready = `${script}.ready`
+  writeFileSync(
+    script,
+    [
+      `import { writeFileSync, writeSync } from "node:fs"`,
+      `process.on("SIGTERM", () => {})`,
+      `writeFileSync(${JSON.stringify(ready)}, "ready")`,
+      `setTimeout(() => process.exit(3), 20_000)`,
+      flood
+        ? `writeSync(1, "x".repeat(100000))`
+        : `setInterval(() => {}, 1_000)`
+    ].join("\n")
+  )
+  return { binary: wrapper(`'${process.execPath}' '${script}'`), ready }
+}
+
+it.live(
+  "interrupting a probe waits for a child ignoring SIGTERM to be killed",
+  () =>
+    Effect.gen(function* () {
+      const { binary, ready } = stubbornProbe()
+      const fiber = yield* Effect.forkChild(
+        probeWith("unused", Options.create("-show_streams")).pipe(
+          Effect.provide(
+            FFprobe.layer({ binary, forceKillAfter: "100 millis" })
+          ),
+          Effect.provide(PlatformLive)
+        )
+      )
+      while (!existsSync(ready)) yield* Effect.sleep("10 millis")
+      const started = Date.now()
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true)
+      expect(Date.now() - started).toBeLessThan(3_000)
+      expect(pids().filter(alive)).toEqual([])
+    }).pipe(Effect.timeout("5 seconds"))
+)
+
+it.live("a caller deadline cleans up a probe ignoring SIGTERM", () =>
+  Effect.gen(function* () {
+    const { binary, ready } = stubbornProbe()
+    const error = yield* probeWith(
+      "unused",
+      Options.create("-show_streams")
+    ).pipe(
+      Effect.provide(FFprobe.layer({ binary, forceKillAfter: "100 millis" })),
+      Effect.provide(PlatformLive),
+      Effect.timeout("1 second"),
+      Effect.flip
+    )
+    expect(existsSync(ready)).toBe(true)
+    expect(error).toMatchObject({ _tag: "TimeoutError" })
+    expect(pids().filter(alive)).toEqual([])
+  })
+)
+
+it.live("oversized probe output kills a child ignoring SIGTERM", () =>
+  Effect.gen(function* () {
+    const { binary } = stubbornProbe(true)
+    const error = yield* probeWith(
+      "unused",
+      Options.create("-show_format")
+    ).pipe(
+      Effect.provide(
+        FFprobe.layer({
+          binary,
+          forceKillAfter: "100 millis",
+          maxOutputBytes: 128
+        })
+      ),
+      Effect.provide(PlatformLive),
+      Effect.flip
+    )
+    expect(error).toMatchObject({
+      _tag: "ProbeOutputError",
+      maxOutputBytes: 128
+    })
+    expect(pids().filter(alive)).toEqual([])
+  }).pipe(Effect.timeout("5 seconds"))
+)
 
 const live = <A, E>(
   binary: string,

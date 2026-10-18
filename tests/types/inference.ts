@@ -18,8 +18,10 @@ import {
   options,
   Output,
   probe,
+  probeWith,
   type ProbeError,
   type ProbeResult,
+  type ProjectedProbeResult,
   run,
   type RunResult
 } from "../../src/index.ts"
@@ -168,6 +170,26 @@ assertType<
 >(true)
 
 const probed = probe("in.mp4")
+const probeCallbacks = Effect.forEach(["in.mp4"], probe)
+const probeArray = ["in.mp4"].map(probe)
+const serviceCallbacks = FFprobe.use((service) =>
+  Effect.forEach(["in.mp4"], service.probe)
+)
+assertType<
+  Equals<
+    typeof probeCallbacks,
+    Effect.Effect<ProbeResult[], ProbeError, FFprobe>
+  >
+>(true)
+assertType<
+  Equals<typeof probeArray, Effect.Effect<ProbeResult, ProbeError, FFprobe>[]>
+>(true)
+assertType<
+  Equals<
+    typeof serviceCallbacks,
+    Effect.Effect<ProbeResult[], ProbeError, FFprobe>
+  >
+>(true)
 assertType<
   Equals<typeof probed, Effect.Effect<ProbeResult, ProbeError, FFprobe>>
 >(true)
@@ -179,6 +201,41 @@ Effect.map(probed, (result) => {
   const formatName: string | undefined = result.format?.format_name
   return [index, width, unknownField, formatName]
 })
+
+// Default probes retain required indexes; projected probes expose optional indexes.
+Effect.map(probed, (result) => {
+  for (const stream of result.streams) {
+    const index: number = stream.index
+    void index
+  }
+})
+const projected = probeWith(
+  "in.mp4",
+  options.custom({ show_entries: "stream=width" })
+)
+assertType<
+  Equals<
+    typeof projected,
+    Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+  >
+>(true)
+Effect.map(projected, (result) => {
+  for (const stream of result.streams) {
+    const index: number | undefined = stream.index
+    // @ts-expect-error projections can omit index
+    const requiredIndex: number = stream.index
+    void [index, requiredIndex]
+  }
+})
+const projectedViaService = FFprobe.use((service) =>
+  service.probeWith("in.mp4", options.custom("-show_chapters"))
+)
+assertType<
+  Equals<
+    typeof projectedViaService,
+    Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+  >
+>(true)
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)

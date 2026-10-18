@@ -37,9 +37,16 @@ export {
   FFprobe,
   type FFprobeOptions,
   type FFprobeService,
-  probe
+  probe,
+  probeWith
 } from "./probe/ffprobe.ts"
-export { ProbeFormat, ProbeResult, ProbeStream } from "./probe/schema.ts"
+export {
+  ProbeFormat,
+  ProbeResult,
+  ProbeStream,
+  ProjectedProbeResult,
+  ProjectedProbeStream
+} from "./probe/schema.ts"
 export {
   CommandError,
   ExitError,

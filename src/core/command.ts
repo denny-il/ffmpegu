@@ -6,6 +6,7 @@ import { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguInput } from "./input.ts"
 import { type FFmpeguOutput, STREAM_DESTINATION } from "./output.ts"
 import { CommandReferences, ForeignReference } from "./references.ts"
+import { isDescriptorPath, isReservedInputPath } from "./validation.ts"
 
 /** File descriptor reserved for `-progress`; set up only when progress is requested. */
 export const PROGRESS_FD = 3
@@ -228,15 +229,6 @@ const fail = (
   cause?: unknown
 ) => Result.fail(new CommandError({ reason, message, cause }))
 
-/**
- * Matches argv tokens that would address the child's own file descriptors
- * (optionally behind nested protocols such as `async:pipe:3`). Those
- * descriptors are allocated by the runner, so user-provided paths and option
- * values must not name them.
- */
-const RESERVED_DESCRIPTOR =
-  /^(?:[a-z][a-z0-9+.-]*:)*(?:pipe|fd):|^\/dev\/(?:fd\/\d|std(?:in|out|err)$)|^\/proc\/(?:self|thread-self|\d+)\/fd\//i
-
 const reservedPath = (what: string, value: string) =>
   new CommandError({
     reason: "ReservedPath",
@@ -275,7 +267,7 @@ function pushOptions(
 ): CommandError | undefined {
   const rendered = options.getArgs(refs)
   for (const token of rendered) {
-    if (RESERVED_DESCRIPTOR.test(token)) return reservedPath(what, token)
+    if (isDescriptorPath(token)) return reservedPath(what, token)
     const hint = token.startsWith("-")
       ? ENGINE_OPTIONS.get(optionName(token))
       : undefined
@@ -292,14 +284,14 @@ function pushOptions(
 
 function validateInputPath(path: string, what: string) {
   // "-" is stdin, which the runner does not provide.
-  if (path === "-" || RESERVED_DESCRIPTOR.test(path)) {
+  if (isReservedInputPath(path)) {
     return reservedPath(what, path)
   }
   return undefined
 }
 
 function validateOutputPath(path: string, what: string) {
-  if (path === "-" || RESERVED_DESCRIPTOR.test(path)) {
+  if (isReservedInputPath(path)) {
     return reservedPath(what, path)
   }
   // Output names are positional, so ffmpeg would parse them as options.

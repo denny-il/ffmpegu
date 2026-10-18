@@ -2,6 +2,8 @@
 
 Options are composed using `ffmpegu.options.custom(...)` and helpers in `ffmpegu.options.*`.
 
+The same bundles can be passed to `probeWith(input, options)`. Use FFprobe option names such as `show_entries`, `select_streams`, `protocol_whitelist`, and `v`; explicit options replace the default metadata selection. See [FFprobe](ffprobe.md) for output ownership and projection types. FFmpeg-specific helpers are not necessarily accepted by FFprobe.
+
 ## API
 
 - `ffmpegu.options.custom(...args)` → builds an options bundle.
