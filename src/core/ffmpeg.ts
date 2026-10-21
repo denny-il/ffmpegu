@@ -527,7 +527,9 @@ const execute = (
  * whole: nothing is copied, and the sink writes a batch at once rather than
  * paying per-chunk Effect work. Backpressure is bounded in batches
  * accordingly: the source runs at most three of its batches ahead of the
- * descriptor (one being written, one queued, one waiting for room).
+ * descriptor (one being written, one queued, one waiting for room). A batch
+ * is written after it is emitted, so until the run settles the source must
+ * not mutate or reuse it; producers with reusable buffers copy before emitting.
  *
  * Closing stops the producer and ends the queue; the consumer then flushes
  * what was queued and ends the descriptor, which completes once the end is
