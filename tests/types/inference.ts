@@ -3,9 +3,6 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-<<<<<<< HEAD
-import { Context, Duration, Effect, Layer, type Result, Schema, Sink, Stream, type Types } from "effect"
-=======
 import {
   Context,
   Duration,
@@ -14,9 +11,9 @@ import {
   type Result,
   Schema,
   Sink,
-  Stream
+  Stream,
+  type Types
 } from "effect"
->>>>>>> e44dd78 (fix: record the exit code of processes terminated during cleanup)
 import {
   Command,
   type CommandError,
