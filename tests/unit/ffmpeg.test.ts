@@ -148,6 +148,31 @@ describe("FFmpeg", () => {
     })
   )
 
+  it.effect("writes the batches of a stream input whole, without copying", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const [a, b, c] = [bytes(1), bytes(2, 3), bytes(4)]
+      const command = Command.make({
+        inputs: [Input.fromStream(Stream.fromArrays([a, b], [c]))],
+        outputs: [Output.toFile("out.mp4")]
+      })
+      const fiber = yield* Effect.forkChild(ffmpeg.run(command))
+      const process = yield* next
+      yield* process
+        .inputEnded(4)
+        .pipe(Effect.repeat({ until: (ended) => ended }))
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+
+      const batches = yield* process.batches(4)
+      assert.deepStrictEqual(batches, [[a, b], [c]])
+      // The very chunks the source emitted.
+      assert.strictEqual(batches[0]![0], a)
+      assert.strictEqual(batches[0]![1], b)
+      assert.strictEqual(batches[1]![0], c)
+    })
+  )
+
   it.effect(
     "stops endless inputs when ffmpeg exits and awaits their finalizers",
     () =>
