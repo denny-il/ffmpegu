@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect"
 import {
   ExitError,
   CommandError,
@@ -207,23 +207,127 @@ describe("FFprobe", () => {
           )
         })
         const options = Options.create({ show_entries: "stream=width" })
-        const probes = [
-          probeWith("/test/input.mp4", options, Widths),
-          FFprobe.use((service) =>
-            service.probeWithSchema("/test/input.mp4", options, Widths)
+        const fiber = yield* Effect.forkChild(
+          probeWith("/test/input.mp4", options, Widths).pipe(
+            Effect.provide(layer)
           )
-        ]
-        for (const probed of probes) {
-          const fiber = yield* Effect.forkChild(
-            probed.pipe(Effect.provide(layer))
-          )
-          const process = yield* next
-          yield* process.emit(1, stdout)
-          yield* process.exit(0)
-          assert.deepStrictEqual(yield* Fiber.join(fiber), {
-            streams: [{ width: 640 }]
-          })
+        )
+        const process = yield* next
+        yield* process.emit(1, stdout)
+        yield* process.exit(0)
+        assert.deepStrictEqual(yield* Fiber.join(fiber), {
+          streams: [{ width: 640 }]
+        })
+      })
+  )
+
+  it.effect("ends the probe spans with decode failures", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const spans: Array<Tracer.NativeSpan> = []
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
         }
+      })
+      const failedSpans = () =>
+        spans
+          .filter(
+            (span) =>
+              span.status._tag === "Ended" && Exit.isFailure(span.status.exit)
+          )
+          .map((span) => span.name)
+      const probes: Array<Effect.Effect<unknown, unknown, FFprobe>> = [
+        probe("/test/input.mp4"),
+        probeWith(
+          "/test/input.mp4",
+          Options.create("-show_streams"),
+          Schema.Struct({ streams: Schema.Array(Schema.Number) })
+        )
+      ]
+      const expected = [["ffmpegu/FFprobe.probe"], ["ffmpegu/probeWith"]]
+      for (const [i, probed] of probes.entries()) {
+        spans.length = 0
+        const fiber = yield* Effect.forkChild(
+          probed.pipe(Effect.provide(layer), Effect.withTracer(tracer))
+        )
+        const process = yield* next
+        yield* process.emit(1, JSON.stringify({ streams: [{ index: "bad" }] }))
+        yield* process.exit(0)
+        yield* Fiber.await(fiber)
+        assert.deepStrictEqual(failedSpans(), expected[i])
+      }
+    })
+  )
+
+  it.effect("returns the parsed JSON document undecoded from probeJson", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const document = { streams: [{ index: "0" }], chapters: [] }
+      const fiber = yield* Effect.forkChild(
+        FFprobe.use((service) =>
+          service.probeJson(
+            "/test/input.mp4",
+            Options.create({ show_entries: "stream=index" })
+          )
+        ).pipe(Effect.provide(layer))
+      )
+      const process = yield* next
+      yield* process.emit(1, JSON.stringify(document))
+      yield* process.exit(0)
+      assert.deepStrictEqual(yield* Fiber.join(fiber), document)
+    })
+  )
+
+  it.effect("rejects invalid JSON from probeJson as ProbeDecodeError", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const fiber = yield* Effect.forkChild(
+        FFprobe.use((service) =>
+          service.probeJson("/test/input.mp4", Options.create("-show_streams"))
+        ).pipe(Effect.provide(layer))
+      )
+      const process = yield* next
+      yield* process.emit(1, "{")
+      yield* process.exit(0)
+      assert.instanceOf(yield* Effect.flip(Fiber.join(fiber)), ProbeDecodeError)
+    })
+  )
+
+  it.effect(
+    "decodes a custom service's raw output with the caller schema",
+    () =>
+      Effect.gen(function* () {
+        // A mock returns raw JSON; the library decodes it, so a mismatch is a
+        // typed ProbeDecodeError rather than a mistyped success or a defect.
+        const fixture = { streams: [{ width: 640 }] }
+        const mock = Layer.succeed(FFprobe, {
+          probe: () => Effect.die("unused"),
+          probeWith: () => Effect.die("unused"),
+          probeJson: () => Effect.succeed(fixture)
+        })
+        const options = Options.create({ show_entries: "stream=width" })
+        const Widths = Schema.Struct({
+          streams: Schema.Array(Schema.Struct({ width: Schema.Number }))
+        })
+        assert.deepStrictEqual(
+          yield* probeWith("/test/input.mp4", options, Widths).pipe(
+            Effect.provide(mock)
+          ),
+          fixture
+        )
+        const mismatch = yield* probeWith(
+          "/test/input.mp4",
+          options,
+          Schema.Number
+        ).pipe(
+          Effect.as("decoded"),
+          Effect.catchTag("ProbeDecodeError", () => Effect.succeed("caught")),
+          Effect.provide(mock)
+        )
+        assert.strictEqual(mismatch, "caught")
       })
   )
 

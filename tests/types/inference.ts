@@ -3,7 +3,7 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Duration, Effect, type Result, Schema, Sink, Stream } from "effect"
+import { Context, Duration, Effect, Layer, type Result, Schema, Sink, Stream } from "effect"
 import {
   Command,
   type CommandError,
@@ -12,6 +12,7 @@ import {
   type FFmpegError,
   type FFmpeguAnyInput,
   type FFmpeguCommand,
+  type FFmpeguOptions,
   FFprobe,
   type FFprobeService,
   filters,
@@ -440,14 +441,12 @@ assertType<
     Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
   >
 >(true)
-const storedDimsViaService = FFprobe.use((service) =>
-  service.probeWithSchema("in.mp4", options.custom("-show_streams"), StoredDims)
+// The service returns raw JSON; only the library decodes with the schema.
+const rawViaService = FFprobe.use((service) =>
+  service.probeJson("in.mp4", options.custom("-show_streams"))
 )
 assertType<
-  Equals<
-    typeof storedDimsViaService,
-    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
-  >
+  Equals<typeof rawViaService, Effect.Effect<unknown, ProbeError, FFprobe>>
 >(true)
 // Generic helpers and schema unions keep the schema's types.
 const probeWithHelper = <S extends Schema.Top>(schema: S) =>
@@ -470,18 +469,30 @@ assertType<
 >(true)
 // @ts-expect-error the third argument must be a Schema
 probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
-// An implementation must decode with the caller's schema. A fixed output
-// would make `probeWith(..., Schema.Number)` succeed with an object.
-const decodingProbeService: FFprobeService = {
-  probe: () => Effect.succeed({ streams: [] }),
-  probeWith: () => Effect.succeed({ streams: [] }),
-  probeWithSchema: (_input, _options, schema) =>
-    Schema.decodeUnknownEffect(schema)({ streams: [] }).pipe(Effect.orDie)
+// The documented mock: fixed raw JSON is enough, since `probeWith` decodes it.
+const fixture = { streams: [] }
+const mockProbeService: FFprobeService = {
+  probe: () => Effect.succeed(fixture),
+  probeWith: () => Effect.succeed(fixture),
+  probeJson: () => Effect.succeed(fixture)
 }
-export const fixedProbeService: FFprobeService = {
-  ...decodingProbeService,
-  // @ts-expect-error the result must have the schema's type
-  probeWithSchema: () => Effect.succeed({ streams: [] })
+export const FFprobeMock = Layer.succeed(FFprobe, mockProbeService)
+// @ts-expect-error custom implementations must provide probeJson
+export const withoutProbeJson: FFprobeService = {
+  probe: mockProbeService.probe,
+  probeWith: mockProbeService.probeWith
+}
+// A generic helper that claims to return the schema's type without decoding
+// no longer fits the service: it never receives a schema.
+const ignoresSchema = <S extends Schema.Top>(
+  _input: string,
+  _options: FFmpeguOptions,
+  _schema: S
+): Effect.Effect<S["Type"]> => Effect.succeed({ streams: [] })
+export const schemaIgnoringService: FFprobeService = {
+  ...mockProbeService,
+  // @ts-expect-error probeJson takes no schema
+  probeJson: ignoresSchema
 }
 
 // References of inputs with any error/requirement types are usable everywhere.

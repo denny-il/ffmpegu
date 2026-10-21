@@ -229,6 +229,15 @@ it.live("decodes real projected metadata with a caller schema", () =>
     expect(dims.streams).toEqual([{ width: 640, height: 360 }])
     expect(dims.format.duration).toBeGreaterThan(0)
 
+    // The raw document keeps FFprobe's string duration.
+    const raw = yield* FFprobe.use((service) =>
+      service.probeJson(
+        "./assets/video.mp4",
+        Options.create({ show_entries: "format=duration", v: "error" })
+      )
+    )
+    expect(raw).toEqual({ format: { duration: expect.any(String) } })
+
     const missing = yield* Effect.flip(
       probeWith(
         "./assets/video.mp4",

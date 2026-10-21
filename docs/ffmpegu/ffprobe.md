@@ -64,16 +64,19 @@ const dims = probeWith(
 
 The schema decodes FFprobe's whole JSON document in place of `ProjectedProbeResult`, so none of the projected defaults apply. FFprobe omits sections it did not print, including `streams`, so make a key optional if the selection can leave it out. Unlisted keys are dropped under Effect's default parse options. Transformations such as `Schema.NumberFromString` run as usual, and services the schema needs for decoding are added to the Effect's requirements. A failing decode is reported as `ProbeDecodeError`.
 
-The service exposes this as a separate method, `FFprobeService.probeWithSchema(input, options, schema)`; `FFprobeService.probeWith` keeps its two-argument signature. Custom implementations and mocks of `FFprobeService` must add `probeWithSchema`, and its result must come from decoding with `schema`. Its single generic signature rejects an implementation that returns a fixed value, so a mock can decode its fixture instead:
+`probeWith` decodes with your schema itself. The service only supplies FFprobe's parsed JSON document through `FFprobeService.probeJson(input, options)`, which returns it as `unknown`; `FFprobeService.probeWith` keeps its two-argument signature. Custom implementations and mocks of `FFprobeService` therefore return raw JSON from `probeJson`, and the library decodes it, so a fixture that does not match the schema fails with `ProbeDecodeError`:
 
 ```ts
+import { Effect, Layer } from "effect"
+import { FFprobe, type FFprobeService } from "ffmpegu"
+
 const fixture = { streams: [] }
 const mock: FFprobeService = {
   probe: () => Effect.succeed(fixture),
   probeWith: () => Effect.succeed(fixture),
-  probeWithSchema: (_input, _options, schema) =>
-    Schema.decodeUnknownEffect(schema)(fixture).pipe(Effect.orDie)
+  probeJson: () => Effect.succeed(fixture)
 }
+const FFprobeMock = Layer.succeed(FFprobe, mock)
 ```
 
 The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`. Attempts to set them, their file-loaded or stream-specifier spellings, or `--` fail with `CommandError` before spawning. The input is one argument following `-i`, so spaces, leading dashes, and shell metacharacters retain their literal meaning. Stdin/descriptor paths (`-`, `pipe:`, `fd:`, `/dev/stdin`, etc.) and NUL bytes are rejected in input and options. FFmpeg stream references are invalid in probe options. The builder passes other flags to FFprobe; invalid flags can fail with `ExitError`, and invalid output fails decoding. No shell is used.
@@ -87,6 +90,10 @@ Spawning, output collection, and cleanup are scoped. Spawn and nonzero exit erro
 Timeouts, queue admission, and concurrency belong to caller Effect composition. For example, `Effect.forEach(inputs, input => probeWith(input, selection), { concurrency: 2 })` limits that batch to two probes. Place a timeout around each probe for a per-operation deadline, or around a larger operation to include queue waiting. Interruption from a timeout, cancelled fiber, or enclosing scope closes the process scope and waits for cleanup. The spawner sends SIGTERM, escalating to SIGKILL after `forceKillAfter` if needed; cleanup can extend past the operation's timeout by that grace period. No additional runtime, queue, or kill-signal configuration is introduced.
 
 A probe can be executed repeatedly. There is no consumed-command state and no `.json` or `.result` wrapper.
+
+## Compatibility after 0.3.0
+
+`FFprobeService` gains a required `probeJson(input, options)` method returning FFprobe's parsed JSON document as `unknown`. This is a breaking addition for custom implementations and mocks of `FFprobeService`, which must add it; `probe`, `probeWith`, and their free functions keep their signatures.
 
 ## Compatibility in 0.3.0
 
