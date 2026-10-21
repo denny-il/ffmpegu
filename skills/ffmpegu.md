@@ -69,6 +69,8 @@ Time values for `startTime`/`duration`/`to` and for the `fps`/`atrim`/`afade` ti
 
 All filter helpers accept an optional second argument `{ inputs?: label[], outputs?: label[] }` for filtergraph labeling.
 
+Filter option values are escaped for FFmpeg automatically, including leading and trailing whitespace; pass raw strings. Booleans render as `1`/`0`, so `false` turns an option off rather than omitting it.
+
 ## Example
 
 ```ts

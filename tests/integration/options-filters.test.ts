@@ -315,6 +315,58 @@ it.live("uses an fps time object as the starting timestamp", () =>
   )
 )
 
+it.live("renders boolean filter options that FFmpeg can parse", () =>
+  live(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const dir = yield* fs.makeTempDirectoryScoped()
+      // repeatlast defaults to on, so only an explicit false shows the overlay ending.
+      for (const [repeatlast, expected] of [
+        [true, [255, 255, 255]],
+        [false, [255, 0, 0]]
+      ] as const) {
+        const main = Input.fromFile(
+          "color=black:size=2x2:rate=1:duration=3",
+          options.format("lavfi")
+        )
+        const top = Input.fromFile(
+          "color=white:size=2x2:rate=1:duration=1",
+          options.format("lavfi")
+        )
+        const target = `${dir}/${repeatlast}.gray`
+        yield* run(
+          Command.make({
+            inputs: [main, top],
+            outputs: [
+              Output.toFile(
+                target,
+                Options.create({
+                  filter_complex: filters.overlay(
+                    { repeatlast },
+                    {
+                      inputs: [
+                        filters.label(main.video),
+                        filters.label(top.video)
+                      ]
+                    }
+                  ),
+                  f: "rawvideo",
+                  pix_fmt: "gray",
+                  threads: 1
+                })
+              )
+            ]
+          })
+        )
+        const bytes = yield* fs.readFile(target)
+        expect(
+          Array.from({ length: 3 }, (_, frame) => bytes[frame * 4])
+        ).toEqual(expected)
+      }
+    })
+  )
+)
+
 const hasDrawtext = /\bdrawtext\b/.test(
   execFileSync("ffmpeg", ["-hide_banner", "-filters"], { encoding: "utf8" })
 )
@@ -326,48 +378,63 @@ it.live.skipIf(!hasDrawtext)(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const dir = yield* fs.makeTempDirectoryScoped()
-        const text = String.raw`a,b;[c]\\'d:ok`
-        const textfile = `${dir}/text.txt`
-        yield* fs.writeFileString(textfile, text)
-        // The text file bypasses filter-value escaping and supplies a pixel oracle.
-        for (const [name, value] of [
-          ["inline", { text }],
-          ["file", { textfile }]
-        ] as const) {
-          yield* run(
-            Command.make({
-              inputs: [
-                Input.fromFile(
-                  "color=black:size=320x64:duration=0.1",
-                  options.format("lavfi")
-                )
-              ],
-              outputs: [
-                Output.toFile(
-                  `${dir}/${name}.rgb`,
-                  Options.create({
-                    vf: filters.drawtext({
-                      ...value,
-                      x: 10,
-                      y: 10,
-                      fontsize: 20,
-                      fontcolor: "white"
-                    }),
-                    "frames:v": 1,
-                    f: "rawvideo",
-                    pix_fmt: "rgb24",
-                    threads: 1
-                  })
-                )
-              ]
-            })
-          )
+        const style = {
+          x: 10,
+          y: 10,
+          fontsize: 20,
+          fontcolor: "white",
+          // The box spans the text advance, so trailing whitespace shows up in pixels.
+          box: true,
+          boxcolor: "red"
         }
-        const inline = yield* fs.readFile(`${dir}/inline.rgb`)
-        const file = yield* fs.readFile(`${dir}/file.rgb`)
-        expect(file.some((byte) => byte !== 0)).toBe(true)
-        expect(inline.length).toBe(file.length)
-        expect(inline.findIndex((byte, index) => byte !== file[index])).toBe(-1)
+        // Boundary whitespace is trimmed by option parsing mid-filter and by
+        // graph parsing at the end of a filter, so cover both positions.
+        for (const { name, text, last } of [
+          { name: "special", text: String.raw`a,b;[c]\\'d:ok`, last: false },
+          { name: "mid", text: " \t padded \t ", last: false },
+          { name: "end", text: " \t padded \t ", last: true }
+        ]) {
+          const textfile = `${dir}/${name}.txt`
+          yield* fs.writeFileString(textfile, text)
+          const render = (
+            kind: string,
+            value: { text: string } | { textfile: string }
+          ) =>
+            run(
+              Command.make({
+                inputs: [
+                  Input.fromFile(
+                    "color=black:size=480x64:duration=0.1",
+                    options.format("lavfi")
+                  )
+                ],
+                outputs: [
+                  Output.toFile(
+                    `${dir}/${name}-${kind}.rgb`,
+                    Options.create({
+                      vf: filters.drawtext(
+                        last ? { ...style, ...value } : { ...value, ...style }
+                      ),
+                      "frames:v": 1,
+                      f: "rawvideo",
+                      pix_fmt: "rgb24",
+                      threads: 1
+                    })
+                  )
+                ]
+              })
+            )
+          // The text file bypasses filter-value escaping and supplies a pixel oracle.
+          yield* render("inline", { text })
+          yield* render("file", { textfile })
+          const inline = yield* fs.readFile(`${dir}/${name}-inline.rgb`)
+          const file = yield* fs.readFile(`${dir}/${name}-file.rgb`)
+          expect(file.some((byte) => byte !== 0)).toBe(true)
+          expect(inline.length).toBe(file.length)
+          expect(
+            inline.findIndex((byte, offset) => byte !== file[offset])
+          ).toBe(-1)
+        }
       })
     )
 )

@@ -22,7 +22,7 @@ describe("Filters Core", { concurrent: false }, () => {
     ])
   })
 
-  it("should include boolean options only when true", () => {
+  it("should render boolean options as 1 or 0", () => {
     const filter = FFmpeguSimpleFilter.create("scale", {
       w: 640,
       h: 360,
@@ -30,7 +30,7 @@ describe("Filters Core", { concurrent: false }, () => {
       eval: false
     })
 
-    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360:interl"])
+    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360:interl=1:eval=0"])
   })
 
   it("should support argument values in options", () => {

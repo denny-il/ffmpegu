@@ -11,6 +11,11 @@ Filters are used to build `-vf`, `-af`, and `-filter_complex` graphs.
 - `ffmpegu.filters.builder()`
 - Common helpers: `ffmpegu.filters.scale`, `ffmpegu.filters.fps`, `ffmpegu.filters.select`, `ffmpegu.filters.setpts`, `ffmpegu.filters.volume`, etc.
 
+## Option values
+
+- Booleans render as `key=1` or `key=0`, so `false` explicitly turns off options that default to on.
+- Strings and numbers are escaped for both FFmpeg parsing layers (the filtergraph, then the option value). Special characters and leading or trailing whitespace reach the filter unchanged, so `drawtext({ text: " hello " })` keeps its spaces.
+
 ## Time options
 
 The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `start_time`, `end_time`, `duration`), and `afade` (`start_time`, `duration`) accept time objects, Effect `Duration` values, and `Temporal.Duration` values in addition to plain filter values. They render as seconds (`start_time=1.25`), with microsecond precision for durations. Invalid durations fail compilation as for [time options](options.md#time-values).
