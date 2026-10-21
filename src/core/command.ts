@@ -1,3 +1,5 @@
+import { dual } from "effect/Function"
+import * as Pipeable from "effect/Pipeable"
 import * as Result from "effect/Result"
 import type * as Sink from "effect/Sink"
 import type * as Stream from "effect/Stream"
@@ -57,13 +59,18 @@ export interface FFmpeguCommandOptions<E, R> {
  *
  * `E` and `R` are the unions of the error and requirement types of all stream
  * inputs and sink outputs.
+ *
+ * Pipeable: `withGlobal`, `withInput` and `withOutput` are also available as
+ * data-first or data-last statics, e.g.
+ * `command.pipe(Command.withOutput(output))`.
  */
-export class FFmpeguCommand<E = never, R = never> {
+export class FFmpeguCommand<E = never, R = never> extends Pipeable.Class {
   readonly global: FFmpeguOptions | undefined
   readonly inputs: ReadonlyArray<FFmpeguInput<E, R>>
   readonly outputs: ReadonlyArray<FFmpeguOutput<E, R>>
 
   constructor(options: FFmpeguCommandOptions<E, R> = {}) {
+    super()
     this.global = options.global
     this.inputs = [...(options.inputs ?? [])]
     this.outputs = [...(options.outputs ?? [])]
@@ -96,6 +103,49 @@ export class FFmpeguCommand<E = never, R = never> {
   ): Result.Result<ReadonlyArray<string>, CommandError> {
     return Result.map(command.compile(), (compiled) => compiled.args)
   }
+
+  /** Data-first or data-last {@link FFmpeguCommand.prototype.withGlobal}. */
+  static withGlobal: {
+    (
+      options: FFmpeguOptions
+    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E, R>
+    <E, R>(
+      self: FFmpeguCommand<E, R>,
+      options: FFmpeguOptions
+    ): FFmpeguCommand<E, R>
+  } = dual(2, <E, R>(self: FFmpeguCommand<E, R>, options: FFmpeguOptions) =>
+    self.withGlobal(options)
+  )
+
+  /** Data-first or data-last {@link FFmpeguCommand.prototype.withInput}. */
+  static withInput: {
+    <E2, R2>(
+      input: FFmpeguInput<E2, R2>
+    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E | E2, R | R2>
+    <E, R, E2, R2>(
+      self: FFmpeguCommand<E, R>,
+      input: FFmpeguInput<E2, R2>
+    ): FFmpeguCommand<E | E2, R | R2>
+  } = dual(
+    2,
+    <E, R, E2, R2>(self: FFmpeguCommand<E, R>, input: FFmpeguInput<E2, R2>) =>
+      self.withInput(input)
+  )
+
+  /** Data-first or data-last {@link FFmpeguCommand.prototype.withOutput}. */
+  static withOutput: {
+    <E2, R2>(
+      output: FFmpeguOutput<E2, R2>
+    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E | E2, R | R2>
+    <E, R, E2, R2>(
+      self: FFmpeguCommand<E, R>,
+      output: FFmpeguOutput<E2, R2>
+    ): FFmpeguCommand<E | E2, R | R2>
+  } = dual(
+    2,
+    <E, R, E2, R2>(self: FFmpeguCommand<E, R>, output: FFmpeguOutput<E2, R2>) =>
+      self.withOutput(output)
+  )
 
   withGlobal(options: FFmpeguOptions): FFmpeguCommand<E, R> {
     return new FFmpeguCommand<E, R>({

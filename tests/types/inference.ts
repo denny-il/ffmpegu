@@ -107,6 +107,46 @@ assertType<
   >
 >(true)
 
+// Data-last combinators in a pipe accumulate unions exactly like the methods.
+const piped = Command.make({}).pipe(
+  Command.withInput(Input.fromStream(source)),
+  Command.withInput(Input.fromFile("in.mp4")),
+  Command.withOutput(Output.toSink(sink)),
+  Command.withGlobal(options.overwrite())
+)
+assertType<Equals<typeof piped, typeof chained>>(true)
+
+// Data-first forms widen the same way.
+const dataFirst = Command.withOutput(
+  Command.withInput(Command.make({}), Input.fromStream(source)),
+  Output.toSink(sink)
+)
+assertType<
+  Equals<
+    typeof dataFirst,
+    FFmpeguCommand<SourceError | SinkError, Storage | Uploader>
+  >
+>(true)
+
+// A data-last combinator stays generic over the command it is applied to.
+const overwrite = Command.withGlobal(options.overwrite())
+const addSink = Command.withOutput(Output.toSink(sink))
+assertType<
+  Equals<
+    ReturnType<typeof addSink<OtherSourceError, Metrics>>,
+    FFmpeguCommand<OtherSourceError | SinkError, Metrics | Uploader>
+  >
+>(true)
+const pipedWithStreamInput = Command.make({
+  inputs: [Input.fromStream(otherSource)]
+}).pipe(addSink, overwrite)
+assertType<
+  Equals<
+    typeof pipedWithStreamInput,
+    FFmpeguCommand<OtherSourceError | SinkError, Uploader>
+  >
+>(true)
+
 // File-only commands have no caller errors or requirements.
 const files = Command.make({
   inputs: [Input.fromFile("in.mp4")],
@@ -279,3 +319,5 @@ run(files, { onProgress: () => undefined })
 Effect.runPromise(files)
 // @ts-expect-error time values take Duration values, not other Duration.Input forms
 options.duration([1, 0])
+// @ts-expect-error inputs are not outputs
+Command.withOutput(Input.fromFile("in.mp4"))
