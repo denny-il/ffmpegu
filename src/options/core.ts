@@ -6,8 +6,12 @@ import type {
 } from "../types/index.ts"
 
 export class FFmpeguOptions extends FFmpeguArgument {
-  constructor(readonly args: FFmpeguUserArg[]) {
+  readonly args: ReadonlyArray<FFmpeguUserArg>
+
+  constructor(args: ReadonlyArray<FFmpeguUserArg>) {
     super()
+    // Copy so later changes to the caller's array cannot alter this value.
+    this.args = [...args]
   }
 
   static create(...args: FFmpeguUserArg[]) {

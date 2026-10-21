@@ -9,8 +9,8 @@ export class FFmpeguSimpleFilter extends FFmpeguFilter {
   constructor(
     name: string,
     options: FilterOptions = {},
-    inputs: FFmpeguFilterLabelRef[] = [],
-    outputs: FFmpeguFilterLabelRef[] = []
+    inputs: ReadonlyArray<FFmpeguFilterLabelRef> = [],
+    outputs: ReadonlyArray<FFmpeguFilterLabelRef> = []
   ) {
     super(name, options, inputs, outputs)
   }
@@ -21,8 +21,8 @@ export class FFmpeguSimpleFilter extends FFmpeguFilter {
   static create(
     name: string,
     options: FilterOptions = {},
-    inputs: FFmpeguFilterLabelRef[] = [],
-    outputs: FFmpeguFilterLabelRef[] = []
+    inputs: ReadonlyArray<FFmpeguFilterLabelRef> = [],
+    outputs: ReadonlyArray<FFmpeguFilterLabelRef> = []
   ): FFmpeguSimpleFilter {
     return new FFmpeguSimpleFilter(name, options, inputs, outputs)
   }

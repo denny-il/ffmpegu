@@ -17,6 +17,13 @@ describe("Options Core", { concurrent: false }, () => {
     expect(options.getArgs(refs)).toEqual(["-y", "-i", "input.mp4"])
   })
 
+  it("should not change when the args array passed in changes", () => {
+    const args = ["-y"]
+    const options = new FFmpeguOptions(args)
+    args.push("-n")
+    expect(options.getArgs(refs)).toEqual(["-y"])
+  })
+
   it("should resolve array args with and without values", () => {
     const options = new FFmpeguOptions([
       ["-y"],
