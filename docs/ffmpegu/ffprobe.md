@@ -40,6 +40,30 @@ Explicit options **replace** `-show_format -show_streams`. Select the desired se
 
 `probe(input)` still returns `ProbeResult`, whose streams require an integer `index`. `probeWith` returns `ProjectedProbeResult` with `ProjectedProbeStream`: `index` is optional because `show_entries` can omit it. Other known fields keep their validation and optionality, except projected `width`, `height`, `start_pts`, and `duration_ts` also accept `"N/A"`: with `show_optional_fields: "always"`, FFprobe prints it for unavailable timestamps and for subtitle streams without dimensions. Absent streams still decode to `[]`; `format` stays optional. Other sections and unknown fields are preserved as `unknown`. Both projected schemas are exported for use outside the service. Options that change the types of known fields (for example human-readable units) can cause `ProbeDecodeError`.
 
+## Decoding with your own schema
+
+Pass a schema as the third argument to decode the selected metadata into your own type instead of `ProjectedProbeResult`:
+
+```ts
+import { Schema } from "effect"
+import { options, probeWith } from "ffmpegu"
+
+const Dims = Schema.Struct({
+  streams: Schema.Array(
+    Schema.Struct({ width: Schema.Number, height: Schema.Number })
+  )
+})
+
+// Effect<{ readonly streams: ReadonlyArray<{ readonly width: number; readonly height: number }> }, ProbeError, FFprobe>
+const dims = probeWith(
+  "input.mp4",
+  options.custom({ show_entries: "stream=width,height", select_streams: "v:0" }),
+  Dims
+)
+```
+
+The schema decodes FFprobe's whole JSON document in place of `ProjectedProbeResult`, so none of the projected defaults apply. FFprobe omits sections it did not print, including `streams`, so make a key optional if the selection can leave it out. Unlisted keys are dropped under Effect's default parse options. Transformations such as `Schema.NumberFromString` run as usual, and services the schema needs for decoding are added to the Effect's requirements. A failing decode is reported as `ProbeDecodeError`. `FFprobeService.probeWith` accepts the same optional schema argument. A custom implementation or mock of the service must accept it too and decode with it, because the overloads infer the result type from that schema.
+
 The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`. Attempts to set them, their file-loaded or stream-specifier spellings, or `--` fail with `CommandError` before spawning. The input is one argument following `-i`, so spaces, leading dashes, and shell metacharacters retain their literal meaning. Stdin/descriptor paths (`-`, `pipe:`, `fd:`, `/dev/stdin`, etc.) and NUL bytes are rejected in input and options. FFmpeg stream references are invalid in probe options. The builder passes other flags to FFprobe; invalid flags can fail with `ExitError`, and invalid output fails decoding. No shell is used.
 
 ## Process policy and cleanup

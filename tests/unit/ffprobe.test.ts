@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import {
   ExitError,
   CommandError,
@@ -189,6 +189,61 @@ describe("FFprobe", () => {
         )
         assert.instanceOf(yield* Effect.flip(exit), ProbeDecodeError)
       }
+    })
+  )
+
+  it.effect(
+    "decodes raw output with a caller schema instead of the projected schema",
+    () =>
+      Effect.gen(function* () {
+        const { layer, next } = yield* setup()
+        // The projected schema rejects a string index; the caller's does not.
+        const stdout = JSON.stringify({
+          streams: [{ index: "0", width: "640" }]
+        })
+        const Widths = Schema.Struct({
+          streams: Schema.Array(
+            Schema.Struct({ width: Schema.NumberFromString })
+          )
+        })
+        const options = Options.create({ show_entries: "stream=width" })
+        const probes = [
+          probeWith("/test/input.mp4", options, Widths),
+          FFprobe.use((service) =>
+            service.probeWith("/test/input.mp4", options, Widths)
+          )
+        ]
+        for (const probed of probes) {
+          const fiber = yield* Effect.forkChild(
+            probed.pipe(Effect.provide(layer))
+          )
+          const process = yield* next
+          yield* process.emit(1, stdout)
+          yield* process.exit(0)
+          assert.deepStrictEqual(yield* Fiber.join(fiber), {
+            streams: [{ width: 640 }]
+          })
+        }
+      })
+  )
+
+  it.effect("reports caller schema mismatches as ProbeDecodeError", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const Dims = Schema.Struct({
+        streams: Schema.Array(Schema.Struct({ height: Schema.Number }))
+      })
+      const fiber = yield* Effect.forkChild(
+        probeWith(
+          "/test/input.mp4",
+          Options.create({ show_entries: "stream=width" }),
+          Dims
+        ).pipe(Effect.provide(layer))
+      )
+      const process = yield* next
+      yield* process.emit(1, JSON.stringify({ streams: [{ width: 640 }] }))
+      yield* process.exit(0)
+      assert.instanceOf(yield* Effect.flip(Fiber.join(fiber)), ProbeDecodeError)
     })
   )
 

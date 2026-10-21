@@ -3,7 +3,7 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Duration, Effect, type Result, Sink, Stream } from "effect"
+import { Context, Duration, Effect, type Result, Schema, Sink, Stream } from "effect"
 import {
   Command,
   type CommandError,
@@ -396,6 +396,60 @@ assertType<
     Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
   >
 >(true)
+
+// A caller schema replaces the projected result and adds its decoding services.
+const Dims = Schema.Struct({
+  streams: Schema.Array(
+    Schema.Struct({ width: Schema.Number, height: Schema.Number })
+  )
+})
+const dims = probeWith(
+  "in.mp4",
+  options.custom({ show_entries: "stream=width,height" }),
+  Dims
+)
+assertType<
+  Equals<
+    typeof dims,
+    Effect.Effect<
+      {
+        readonly streams: ReadonlyArray<{
+          readonly width: number
+          readonly height: number
+        }>
+      },
+      ProbeError,
+      FFprobe
+    >
+  >
+>(true)
+declare const StoredDims: Schema.Codec<
+  { readonly width: number },
+  unknown,
+  Storage
+>
+const storedDims = probeWith(
+  "in.mp4",
+  options.custom("-show_streams"),
+  StoredDims
+)
+assertType<
+  Equals<
+    typeof storedDims,
+    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
+  >
+>(true)
+const storedDimsViaService = FFprobe.use((service) =>
+  service.probeWith("in.mp4", options.custom("-show_streams"), StoredDims)
+)
+assertType<
+  Equals<
+    typeof storedDimsViaService,
+    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
+  >
+>(true)
+// @ts-expect-error the third argument must be a Schema
+probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)

@@ -64,7 +64,7 @@ const metadata = probeWith("input.mp4", Options.create({
 }))
 ```
 
-Explicit probe options replace the default format/stream selection. Output stays JSON; projected stream fields, including `index`, may be absent. See [FFprobe](docs/ffmpegu/ffprobe.md) for decoding, limits, and cancellation.
+Explicit probe options replace the default format/stream selection. Output stays JSON; projected stream fields, including `index`, may be absent. Pass a schema as the third argument, as in `probeWith(input, options, Dims)`, to decode the selection into your own type. See [FFprobe](docs/ffmpegu/ffprobe.md) for decoding, limits, and cancellation.
 
 ## Behavior
 

@@ -46,11 +46,21 @@ export interface FFprobeOptions {
 export interface FFprobeService {
   /** Probe a file path or URL for its format and streams. */
   readonly probe: (input: string) => Effect.Effect<ProbeResult, ProbeError>
-  /** Explicit options replace the default format/stream selection. */
-  readonly probeWith: (
-    input: string,
-    options: FFmpeguOptions
-  ) => Effect.Effect<ProjectedProbeResult, ProbeError>
+  /**
+   * Explicit options replace the default format/stream selection. A schema
+   * replaces `ProjectedProbeResult` for decoding the JSON document.
+   */
+  readonly probeWith: {
+    (
+      input: string,
+      options: FFmpeguOptions
+    ): Effect.Effect<ProjectedProbeResult, ProbeError>
+    <S extends Schema.Top>(
+      input: string,
+      options: FFmpeguOptions,
+      schema: S
+    ): Effect.Effect<S["Type"], ProbeError, S["DecodingServices"]>
+  }
 }
 
 export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
@@ -75,12 +85,30 @@ export const probe = (
 ): Effect.Effect<ProbeResult, ProbeError, FFprobe> =>
   FFprobe.use((ffprobe) => ffprobe.probe(input))
 
-/** Probe selected metadata using the existing options builder. */
-export const probeWith = (
+/**
+ * Probe selected metadata using the existing options builder, optionally
+ * decoding the output with a caller-supplied schema.
+ */
+export function probeWith(
   input: string,
   options: FFmpeguOptions
-): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe> =>
-  FFprobe.use((ffprobe) => ffprobe.probeWith(input, options))
+): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+export function probeWith<S extends Schema.Top>(
+  input: string,
+  options: FFmpeguOptions,
+  schema: S
+): Effect.Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
+export function probeWith(
+  input: string,
+  options: FFmpeguOptions,
+  schema?: Schema.Top
+): Effect.Effect<unknown, ProbeError, unknown> {
+  return FFprobe.use((ffprobe) =>
+    schema === undefined
+      ? ffprobe.probeWith(input, options)
+      : ffprobe.probeWith(input, options, schema)
+  )
+}
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
@@ -108,9 +136,9 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     DEFAULT_STDERR_TAIL_BYTES
   )
 
-  const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A>(
+  const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A, R>(
     input: string,
-    decodeOutput: (json: string) => Effect.Effect<A, Schema.SchemaError>,
+    decodeOutput: (json: string) => Effect.Effect<A, Schema.SchemaError, R>,
     options?: FFmpeguOptions
   ) {
     const compiled = probeArgs(input, options)
@@ -178,8 +206,31 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     )
   })
 
+  function probeWith(
+    input: string,
+    options: FFmpeguOptions
+  ): Effect.Effect<ProjectedProbeResult, ProbeError>
+  function probeWith<S extends Schema.Top>(
+    input: string,
+    options: FFmpeguOptions,
+    schema: S
+  ): Effect.Effect<S["Type"], ProbeError, S["DecodingServices"]>
+  function probeWith(
+    input: string,
+    options: FFmpeguOptions,
+    schema?: Schema.Top
+  ): Effect.Effect<unknown, ProbeError, unknown> {
+    return schema === undefined
+      ? execute(input, decodeProjected, options)
+      : execute(
+          input,
+          Schema.decodeUnknownEffect(Schema.fromJsonString(schema)),
+          options
+        )
+  }
+
   return FFprobe.of({
     probe: (input) => execute(input, decode),
-    probeWith: (input, options) => execute(input, decodeProjected, options)
+    probeWith
   })
 })
