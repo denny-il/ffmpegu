@@ -22,6 +22,7 @@ import {
   type ProbeError,
   type ProbeResult,
   type ProjectedProbeResult,
+  type Progress,
   run,
   type RunResult
 } from "../../src/index.ts"
@@ -255,6 +256,11 @@ filters.atrim({
   duration: Temporal.Duration.from({ seconds: 1 })
 })
 filters.fps({ start_time: Duration.micros(1n) })
+
+// Progress fields are camelCase; the marker and output time are typed.
+assertType<Equals<Progress["progress"], "continue" | "end">>(true)
+assertType<Equals<Progress["outTime"], Duration.Duration | undefined>>(true)
+assertType<Equals<Progress["totalSize"], number | undefined>>(true)
 
 // Contract violations.
 declare const strings: Stream.Stream<string>

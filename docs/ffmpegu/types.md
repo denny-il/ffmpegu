@@ -2,7 +2,7 @@
 
 `Command<E, R>` tracks errors and services required by its input streams and output sinks. `run` adds the FFmpeg service and execution errors, plus any errors/services required by `onProgress`. File-only commands have no stream requirements.
 
-`Progress` contains parsed progress fields and the original `raw` values. `RunResult` contains the executed `args` and bounded `stderr` diagnostics. `ProbeResult` exposes validated streams and optional format metadata, preserving unknown fields. Explicit probe options return `ProjectedProbeResult`, whose stream `index` may also be absent; the default `ProbeResult` still requires it.
+`Progress` contains camelCase progress fields, including `outTime` as an Effect `Duration` and `progress` as `"continue" | "end"`, plus the original `raw` values; see [progress](runners.md#progress). `RunResult` contains the executed `args` and bounded `stderr` diagnostics. `ProbeResult` exposes validated streams and optional format metadata, preserving unknown fields. Explicit probe options return `ProjectedProbeResult`, whose stream `index` may also be absent; the default `ProbeResult` still requires it.
 
 Time values are seconds as numbers, raw FFmpeg strings, time objects, Effect `Duration.Duration`, or `Temporal.Duration`; see [time values](options.md#time-values), including the decimal-seconds rendering beyond 9999 hours. The `Temporal.Duration` member uses the global type only when your TypeScript `lib` includes `esnext.temporal` (or `esnext`); otherwise it drops out, and the declarations still compile.
 

@@ -1,3 +1,4 @@
+import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { ByteTail, ProgressParser } from "../../src/core/diagnostics.ts"
 
@@ -21,8 +22,7 @@ describe("ProgressParser", () => {
         progress: "continue",
         frame: 12,
         fps: 29.97,
-        out_time: "00:00:00.400000",
-        out_time_us: 400000,
+        outTime: Duration.micros(400_000n),
         speed: 1.5,
         raw: {
           frame: "12",
@@ -53,6 +53,59 @@ describe("ProgressParser", () => {
     expect(blocks.map((block) => block.progress)).toEqual(["continue", "end"])
     expect(blocks[0]!.speed).toBeUndefined()
     expect(blocks[0]!.raw).toEqual({ speed: "fast", progress: "continue" })
+  })
+
+  it("should decode ffmpeg's snake_case keys into camelCase fields", () => {
+    const parser = new ProgressParser()
+
+    const [block] = parser.push(
+      bytes(
+        "frame=48\nbitrate=128.0kbits/s\ntotal_size=32768\nout_time_us=2000250\nout_time_ms=2000250\nout_time=00:00:02.000250\ndup_frames=2\ndrop_frames=1\nprogress=continue\n"
+      )
+    )
+
+    expect(block).toEqual({
+      progress: "continue",
+      frame: 48,
+      bitrate: "128.0kbits/s",
+      totalSize: 32768,
+      outTime: Duration.micros(2_000_250n),
+      dupFrames: 2,
+      dropFrames: 1,
+      raw: {
+        frame: "48",
+        bitrate: "128.0kbits/s",
+        total_size: "32768",
+        out_time_us: "2000250",
+        out_time_ms: "2000250",
+        out_time: "00:00:02.000250",
+        dup_frames: "2",
+        drop_frames: "1",
+        progress: "continue"
+      }
+    })
+  })
+
+  it("should keep negative output times and drop unavailable ones", () => {
+    const parser = new ProgressParser()
+
+    const [early, unknown] = parser.push(
+      bytes(
+        "out_time_us=-23220\nprogress=continue\nout_time_us=N/A\nprogress=continue\n"
+      )
+    )
+
+    expect(Duration.toNanosUnsafe(early!.outTime!)).toBe(-23_220_000n)
+    expect(unknown!.outTime).toBeUndefined()
+  })
+
+  it("should treat an unrecognized marker as continue and keep it in raw", () => {
+    const parser = new ProgressParser()
+
+    const [block] = parser.push(bytes("frame=3\nprogress=paused\n"))
+
+    expect(block!.progress).toBe("continue")
+    expect(block!.raw.progress).toBe("paused")
   })
 
   it("should not fabricate a block from an unterminated block", () => {
