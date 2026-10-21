@@ -207,6 +207,21 @@ describe("ByteTail", () => {
     expect(tail.text()).toBe("éx")
   })
 
+  it("should keep the bytes already written when the buffer grows", () => {
+    const tail = new ByteTail(8)
+    tail.push(Uint8Array.of(1, 2))
+    tail.push(Uint8Array.of(3, 4))
+    expect(tail.bytes()).toEqual(Uint8Array.of(1, 2, 3, 4))
+
+    tail.push(Uint8Array.of(5, 6, 7))
+    expect(tail.bytes()).toEqual(Uint8Array.of(1, 2, 3, 4, 5, 6, 7))
+
+    // Wrap-around starts only once the buffer reached `limit`, so no growth
+    // follows it.
+    tail.push(Uint8Array.of(8, 9, 10))
+    expect(tail.bytes()).toEqual(Uint8Array.of(3, 4, 5, 6, 7, 8, 9, 10))
+  })
+
   it("should match the end of everything written across growth and wrap-around", () => {
     // Deterministic pseudo-random sizes and contents, including UTF-8
     // continuation bytes, against a reference built by concatenation.
