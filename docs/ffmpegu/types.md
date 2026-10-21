@@ -14,7 +14,7 @@ Library failures are tagged errors suitable for `Effect.catchTag`:
 
 - `CommandError`: invalid references, descriptor conflicts, invalid command structure, invalid time values, or reserved probe arguments. Included in both `FFmpegError` and `ProbeError`. Its `reason` says which check failed; see below.
 - `SpawnError`: binary startup failed.
-- `ExitError`: nonzero or abnormal termination, with bounded stderr and the original cause when available.
+- `ExitError`: nonzero or abnormal termination, with the configured `binary`, bounded stderr and the original cause when available. `binary` tells FFmpeg and FFprobe failures apart when both run in one workflow.
 - `PipeError`: I/O on a library-owned descriptor failed.
 - `OutputError`: an output sink completed before EOF (reason `SinkEndedEarly`, with the output's `fd`).
 - `ProbeOutputError`: probe output exceeded the configured byte limit.

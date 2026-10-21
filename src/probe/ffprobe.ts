@@ -205,6 +205,7 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
 
     if (exit.exitCode !== 0) {
       const exitError = new ExitError({
+        binary,
         exitCode: exit.exitCode,
         stderr: stderr.text(),
         cause: exit.cause

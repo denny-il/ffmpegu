@@ -500,6 +500,7 @@ describe("FFprobe", () => {
       )
       const error = yield* Effect.flip(exit)
       assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "ffprobe")
       assert.strictEqual(error.exitCode, 1)
       assert.strictEqual(
         error.stderr,
@@ -507,6 +508,26 @@ describe("FFprobe", () => {
       )
     })
   )
+
+  it.effect("reports the configured binary in ExitError", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup({ binary: "/opt/ffprobe" })
+      const fiber = yield* Effect.forkChild(
+        probe("x").pipe(Effect.provide(layer))
+      )
+      const process = yield* next
+      yield* process.exit(1)
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "/opt/ffprobe")
+    })
+  )
+
+  it("keeps ExitError constructible without a binary", () => {
+    const error = new ExitError({ exitCode: 1, stderr: "" })
+    assert.strictEqual(error.binary, undefined)
+    assert.strictEqual(error.message, "Process exited with exit code 1")
+  })
 
   it.effect("fails and kills ffprobe when stdout exceeds the limit", () =>
     Effect.gen(function* () {

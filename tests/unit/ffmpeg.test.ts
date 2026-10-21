@@ -238,8 +238,13 @@ describe("FFmpeg", () => {
 
       const error = yield* Fiber.join(fiber).pipe(Effect.flip)
       assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "ffmpeg")
       assert.strictEqual(error.exitCode, 1)
       assert.strictEqual(error.stderr, "Invalid data found")
+      assert.strictEqual(
+        error.message,
+        "ffmpeg exited with exit code 1: Invalid data found"
+      )
     })
   )
 
