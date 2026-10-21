@@ -6,6 +6,9 @@ import * as Schema from "effect/Schema"
 const Rest = [Schema.Record(Schema.String, Schema.Unknown)] as const
 const string = Schema.optionalKey(Schema.String)
 const number = Schema.optionalKey(Schema.Number)
+const numberOrNA = Schema.optionalKey(
+  Schema.Union([Schema.Number, Schema.Literal("N/A")])
+)
 
 export const ProbeTags = Schema.Record(Schema.String, Schema.String)
 export const ProbeDisposition = Schema.Record(Schema.String, Schema.Number)
@@ -67,13 +70,13 @@ export const ProjectedProbeStream = Schema.StructWithRest(
   Schema.Struct({
     ...StreamFields,
     index: Schema.optionalKey(Schema.Int),
-    // show_optional_fields=always exposes unavailable timestamps explicitly.
-    start_pts: Schema.optionalKey(
-      Schema.Union([Schema.Number, Schema.Literal("N/A")])
-    ),
-    duration_ts: Schema.optionalKey(
-      Schema.Union([Schema.Number, Schema.Literal("N/A")])
-    )
+    // show_optional_fields=always prints these as "N/A" when unavailable:
+    // timestamps without a value and subtitle streams without dimensions.
+    // FFprobe 8 emits every other numeric field as a number or omits it.
+    width: numberOrNA,
+    height: numberOrNA,
+    start_pts: numberOrNA,
+    duration_ts: numberOrNA
   }),
   Rest
 )

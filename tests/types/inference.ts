@@ -381,7 +381,10 @@ Effect.map(projected, (result) => {
     const index: number | undefined = stream.index
     // @ts-expect-error projections can omit index
     const requiredIndex: number = stream.index
-    void [index, requiredIndex]
+    const width: number | "N/A" | undefined = stream.width
+    // @ts-expect-error projected dimensions can be "N/A"
+    const numericWidth: number | undefined = stream.width
+    void [index, requiredIndex, width, numericWidth]
   }
 })
 const projectedViaService = FFprobe.use((service) =>
