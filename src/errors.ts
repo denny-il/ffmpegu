@@ -137,7 +137,9 @@ export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
  * `binary` is the configured executable, as in {@link SpawnError}, so a
  * workflow running both ffprobe and ffmpeg can tell which one failed. The
  * runners always set it; it is optional only so that errors constructed
- * elsewhere (e.g. in mocks) without it stay valid.
+ * elsewhere (e.g. in mocks) without it stay valid. The message names only
+ * the executable's file name: tracing exports error messages, and a
+ * configured path can reveal more than the executable.
  * `exitCode` is `null` when the process did not report an exit code, which
  * happens when it was terminated by a signal; `cause` then carries the
  * platform error describing the termination.
@@ -154,7 +156,10 @@ export class ExitError extends Schema.TaggedError<ExitError>()("ExitError", {
       this.exitCode === null
         ? "without an exit code"
         : `with exit code ${this.exitCode}`
-    const name = this.binary ?? "Process"
+    const name =
+      this.binary === undefined
+        ? "Process"
+        : this.binary.slice(this.binary.lastIndexOf("/") + 1)
     return this.stderr.length > 0
       ? `${name} exited ${status}: ${this.stderr}`
       : `${name} exited ${status}`

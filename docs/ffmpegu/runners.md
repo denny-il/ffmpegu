@@ -4,7 +4,7 @@
 
 Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe does not act on SIGTERM, so sink and stream outputs keep being drained (and the remaining bytes discarded) during termination, and a cancelled or failed run does not wait out the grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe does not act on SIGTERM, so sink and stream outputs keep being drained (and the remaining bytes discarded) during termination, and a cancelled or failed run does not wait out the grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv. Tracing does export the messages of failed spans: an `ExitError` message names only the executable's file name, never its configured path, followed by the retained stderr tail when there is one, so `stderrTailBytes: 0` keeps stderr out of traces. The `binary` field keeps the configured path for callers. Treat explicitly inspected diagnostics as potentially sensitive.
 
 ## Streaming output
 

@@ -506,20 +506,28 @@ describe("FFprobe", () => {
         error.stderr,
         "/test/input.mp4: No such file or directory"
       )
+      assert.strictEqual(
+        error.message,
+        "ffprobe exited with exit code 1: /test/input.mp4: No such file or directory"
+      )
     })
   )
 
   it.effect("reports the configured binary in ExitError", () =>
     Effect.gen(function* () {
-      const { layer, next } = yield* setup({ binary: "/opt/ffprobe" })
+      const { layer, next } = yield* setup({
+        binary: "/home/user/secret-token/bin/ffprobe-7"
+      })
       const fiber = yield* Effect.forkChild(
         probe("x").pipe(Effect.provide(layer))
       )
       const process = yield* next
-      yield* process.exit(1)
+      yield* process.exitWithSignal()
       const error = yield* Fiber.join(fiber).pipe(Effect.flip)
       assert.instanceOf(error, ExitError)
-      assert.strictEqual(error.binary, "/opt/ffprobe")
+      assert.strictEqual(error.binary, "/home/user/secret-token/bin/ffprobe-7")
+      // Only the file name reaches the message, which tracing exports.
+      assert.strictEqual(error.message, "ffprobe-7 exited without an exit code")
     })
   )
 
