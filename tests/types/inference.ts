@@ -189,6 +189,17 @@ const maybeStreamed = Command.make({
 assertType<Equals<typeof maybeStreamed, FFmpeguCommand<never, never, 0 | 1>>>(
   true
 )
+// Counting stays within the instantiation depth limit for long output tuples.
+type Repeat<
+  T,
+  N extends number,
+  Acc extends ReadonlyArray<T> = []
+> = Acc["length"] extends N ? Acc : Repeat<T, N, readonly [...Acc, T]>
+declare const manyFiles: Repeat<Output<never, never, 0>, 100>
+const manyOutputs = Command.make({
+  outputs: [...manyFiles, Output.toStream(), ...manyFiles]
+})
+assertType<Equals<typeof manyOutputs, FFmpeguCommand<never, never, 1>>>(true)
 // Explicit type arguments written before the count existed still apply.
 const explicitOutput = files.withOutput<SinkError, Uploader>(
   Output.toSink(sink)

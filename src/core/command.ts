@@ -73,22 +73,26 @@ type AddStreamOutputs<S, O> = 0 extends 1 & (S | O)
     : never
 
 /**
- * Counts tuples element by element. Arrays of unknown length count as `0`
- * only when none of their elements can be a stream output.
+ * Counts tuples element by element into the accumulator `S`. Arrays of unknown
+ * length add nothing only when none of their elements can be a stream output.
+ * Tail-recursive so that long output tuples stay within the instantiation
+ * depth limit.
  */
-type CountStreamOutputs<O extends ReadonlyArray<AnyOutput>> =
-  O extends readonly [
-    infer Head,
-    ...infer Tail extends ReadonlyArray<AnyOutput>
-  ]
-    ? AddStreamOutputs<CountStreamOutputs<Tail>, OutputStreams<Head>>
-    : O extends readonly []
-      ? 0
-      : 0 extends 1 & OutputStreams<O[number]>
-        ? any
-        : [OutputStreams<O[number]>] extends [0]
-          ? 0
-          : any
+type CountStreamOutputs<
+  O extends ReadonlyArray<AnyOutput>,
+  S extends StreamOutputCount = 0
+> = O extends readonly [
+  infer Head,
+  ...infer Tail extends ReadonlyArray<AnyOutput>
+]
+  ? CountStreamOutputs<Tail, AddStreamOutputs<S, OutputStreams<Head>>>
+  : O extends readonly []
+    ? S
+    : 0 extends 1 & OutputStreams<O[number]>
+      ? any
+      : [OutputStreams<O[number]>] extends [0]
+        ? S
+        : any
 
 export interface FFmpeguCommandOptions<E, R> {
   readonly global?: FFmpeguOptions | undefined
