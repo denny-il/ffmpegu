@@ -71,8 +71,9 @@ export interface FFmpegOptions {
 }
 
 export interface FFmpegService {
+  /** Run a command without `Output.toStream` outputs. */
   readonly run: <E, R, PE = never, PR = never>(
-    command: FFmpeguCommand<E, R>,
+    command: FFmpeguCommand<E, R, 0>,
     options?: RunOptions<PE, PR>
   ) => Effect.Effect<RunResult, FFmpegError | E | PE, R | PR>
   /**
@@ -83,7 +84,7 @@ export interface FFmpegService {
    * ffmpeg and releases the inputs.
    */
   readonly stream: <E, R, PE = never, PR = never>(
-    command: FFmpeguCommand<E, R>,
+    command: FFmpeguCommand<E, R, 1>,
     options?: RunOptions<PE, PR>
   ) => Stream.Stream<Uint8Array, FFmpegError | E | PE, R | PR>
 }
@@ -106,14 +107,14 @@ export class FFmpeg extends Context.Service<FFmpeg, FFmpegService>()(
 
 /** Run a command with the `FFmpeg` service from the context. */
 export const run = <E, R, PE = never, PR = never>(
-  command: FFmpeguCommand<E, R>,
+  command: FFmpeguCommand<E, R, 0>,
   options?: RunOptions<PE, PR>
 ): Effect.Effect<RunResult, FFmpegError | E | PE, FFmpeg | R | PR> =>
   FFmpeg.use((ffmpeg) => ffmpeg.run(command, options))
 
 /** Stream a command's output with the `FFmpeg` service from the context. */
 export const stream = <E, R, PE = never, PR = never>(
-  command: FFmpeguCommand<E, R>,
+  command: FFmpeguCommand<E, R, 1>,
   options?: RunOptions<PE, PR>
 ): Stream.Stream<Uint8Array, FFmpegError | E | PE, FFmpeg | R | PR> =>
   Stream.unwrap(
@@ -147,6 +148,8 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
     options?: RunOptions<unknown, unknown>
   ) {
     const compiled = yield* Effect.fromResult(command.compile())
+    // The signature rejects stream outputs only when the command's count is
+    // known; commands typed with an unknown count reach this check.
     if (compiled.streamOutputFds.length > 0) {
       return yield* new CommandError({
         reason: "StreamOutput",
@@ -171,6 +174,8 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
       Effect.gen(function* () {
         const compiled = yield* Effect.fromResult(command.compile())
         const fds = compiled.streamOutputFds
+        // Fallback for commands whose stream-output count is unknown to the
+        // type system; see `run`.
         if (fds.length !== 1) {
           return yield* new CommandError({
             reason: "StreamOutput",
