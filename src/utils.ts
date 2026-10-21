@@ -1,3 +1,6 @@
+import * as Duration from "effect/Duration"
+import { FFmpeguArgument } from "./core/argument.ts"
+
 export type FFmpeguTimeObject = {
   hours?: number
   minutes?: number
@@ -5,15 +8,46 @@ export type FFmpeguTimeObject = {
   milliseconds?: number
 }
 
+/**
+ * `Temporal.Duration` when the TypeScript lib declares `Temporal`, otherwise
+ * `never`, so the declarations also compile without `esnext.temporal`.
+ */
+export type FFmpeguTemporalDuration = typeof globalThis extends {
+  Temporal: { Duration: new (...args: any[]) => infer T }
+}
+  ? T
+  : never
+
+/** Converted when the command is compiled, so invalid values fail there. */
+export type FFmpeguDurationValue = Duration.Duration | FFmpeguTemporalDuration
+
 const MS_IN_SECOND = 1_000
 const MS_IN_MINUTE = 60 * MS_IN_SECOND
 const MS_IN_HOUR = 60 * MS_IN_MINUTE
+// Bigint keeps durations beyond 2^53 microseconds exact.
+const US_IN_MS = 1_000n
+const US_IN_SECOND = 1_000_000n
+const US_IN_MINUTE = 60n * US_IN_SECOND
+const US_IN_HOUR = 60n * US_IN_MINUTE
 
 export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
   typeof value === "object" && value !== null && !("getArgs" in value)
 
+/**
+ * Must be checked before `isTimeObject`, which both kinds also satisfy:
+ * `Temporal.Duration` even has the time object's fields.
+ */
+export const isDurationValue = (
+  value: unknown
+): value is FFmpeguDurationValue =>
+  typeof value === "object" &&
+  value !== null &&
+  (Duration.isDuration(value) || value instanceof Temporal.Duration)
+
 type ResolvedTimeOptions<T, K extends keyof T> = {
-  [P in keyof T]: P extends K ? Exclude<T[P], FFmpeguTimeObject> : T[P]
+  [P in keyof T]: P extends K
+    ? Exclude<T[P], FFmpeguTimeObject | FFmpeguDurationValue> | FFmpeguArgument
+    : T[P]
 }
 
 const timeObjectToMilliseconds = (t: FFmpeguTimeObject): number =>
@@ -37,6 +71,65 @@ export const formatTime = (t: FFmpeguTimeObject): string => {
   return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`
 }
 
+/** ffmpeg's time base is microseconds; finer precision is truncated. */
+const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
+  if (Duration.isDuration(value)) {
+    if (!Duration.isFinite(value)) {
+      throw new RangeError("A time value must be a finite Duration.")
+    }
+    return Duration.toNanosUnsafe(value) / 1_000n
+  }
+  // Calendar units have no fixed length without a reference date.
+  if (value.years !== 0 || value.months !== 0 || value.weeks !== 0) {
+    throw new RangeError(
+      `A Temporal.Duration time value cannot contain years, months, or weeks: ${value}`
+    )
+  }
+  return BigInt(Math.trunc(value.total({ unit: "microseconds" })))
+}
+
+const pad = (n: bigint, length: number) => String(n).padStart(length, "0")
+
+/** `[-]HH:MM:SS.mmm`, or `.uuuuuu` with sub-millisecond precision. */
+const formatTimestamp = (microseconds: bigint): string => {
+  const sign = microseconds < 0n ? "-" : ""
+  const absolute = microseconds < 0n ? -microseconds : microseconds
+  const h = absolute / US_IN_HOUR
+  const m = (absolute % US_IN_HOUR) / US_IN_MINUTE
+  const s = (absolute % US_IN_MINUTE) / US_IN_SECOND
+  const fraction = absolute % US_IN_SECOND
+  const digits =
+    fraction % US_IN_MS === 0n ? pad(fraction / US_IN_MS, 3) : pad(fraction, 6)
+  return `${sign}${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${digits}`
+}
+
+/** Decimal seconds without trailing zeros, like `String(seconds)`. */
+const formatSeconds = (microseconds: bigint): string => {
+  const sign = microseconds < 0n ? "-" : ""
+  const absolute = microseconds < 0n ? -microseconds : microseconds
+  const fraction = pad(absolute % US_IN_SECOND, 6).replace(/0+$/, "")
+  return `${sign}${absolute / US_IN_SECOND}${fraction && `.${fraction}`}`
+}
+
+class FFmpeguTimeArgument extends FFmpeguArgument {
+  constructor(
+    readonly value: FFmpeguDurationValue,
+    readonly format: (microseconds: bigint) => string
+  ) {
+    super()
+  }
+
+  getArgs(): string[] {
+    return [this.format(toMicroseconds(this.value))]
+  }
+}
+
+export const timestampArgument = (value: FFmpeguDurationValue) =>
+  new FFmpeguTimeArgument(value, formatTimestamp)
+
+const secondsArgument = (value: FFmpeguDurationValue) =>
+  new FFmpeguTimeArgument(value, formatSeconds)
+
 export const resolveFilterTimeOptions = <
   T extends Record<string, unknown>,
   K extends keyof T
@@ -49,7 +142,9 @@ export const resolveFilterTimeOptions = <
   for (const key of keys) {
     const value = resolved[key]
 
-    if (isTimeObject(value)) {
+    if (isDurationValue(value)) {
+      resolved[key] = secondsArgument(value) as ResolvedTimeOptions<T, K>[K]
+    } else if (isTimeObject(value)) {
       // Filter options such as fps.start_time require seconds, not HH:MM:SS.
       resolved[key] = String(
         timeObjectToMilliseconds(value) / MS_IN_SECOND

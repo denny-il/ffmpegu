@@ -3,7 +3,7 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Effect, type Result, Sink, Stream } from "effect"
+import { Context, Duration, Effect, type Result, Sink, Stream } from "effect"
 import {
   Command,
   type CommandError,
@@ -25,6 +25,7 @@ import {
   run,
   type RunResult
 } from "../../src/index.ts"
+import type { FFmpeguTemporalDuration } from "../../src/utils.ts"
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -244,6 +245,17 @@ options.map(typedInput.video)
 options.map(anyInput.audio.track(1))
 filters.label(typedInput.video.track(0))
 
+// Time values accept Duration values and Temporal.Duration directly.
+// Temporal.Duration also fits the time object shape, so check the alias.
+assertType<Equals<FFmpeguTemporalDuration, Temporal.Duration>>(true)
+options.startTime(Duration.seconds(1))
+options.to(Temporal.Duration.from({ milliseconds: 1500 }))
+filters.atrim({
+  start: Duration.millis(500),
+  duration: Temporal.Duration.from({ seconds: 1 })
+})
+filters.fps({ start_time: Duration.micros(1n) })
+
 // Contract violations.
 declare const strings: Stream.Stream<string>
 declare const readable: Readable
@@ -259,3 +271,5 @@ Output.toSink(Sink.take<Uint8Array>(1).pipe(Sink.as(undefined)))
 run(files, { onProgress: () => undefined })
 // @ts-expect-error commands are not Effects
 Effect.runPromise(files)
+// @ts-expect-error time values take Duration values, not other Duration.Input forms
+options.duration([1, 0])

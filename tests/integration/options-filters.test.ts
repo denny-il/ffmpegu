@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Scope } from "effect"
+import { Duration, Effect, FileSystem, Layer, Scope } from "effect"
 import { execFileSync } from "node:child_process"
 import {
   Command,
@@ -67,6 +67,84 @@ it.live("applies time-object seek and duration options to a real file", () =>
       )
     })
   )
+)
+
+it.live(
+  "applies Effect and Temporal durations with microsecond precision",
+  () =>
+    live(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const source = `${dir}/source.pcm`
+        const seeked = `${dir}/seeked.pcm`
+        const trimmed = `${dir}/trimmed.pcm`
+        // At 8 kHz one sample is 125 µs, so a sub-millisecond time value
+        // that lost its microseconds would change the sample count.
+        const pcm = Options.create({ f: "s16le", ar: 8000, ac: 1 })
+        const firstSample = (bytes: Uint8Array) =>
+          new DataView(bytes.buffer, bytes.byteOffset).getInt16(0, true) / 32768
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile("aevalsrc=t/4:s=8000:d=3", options.format("lavfi"))
+            ],
+            outputs: [Output.toFile(source, pcm)]
+          })
+        )
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile(
+                source,
+                Options.create(pcm, options.startTime(Duration.seconds(1)))
+              )
+            ],
+            outputs: [
+              Output.toFile(
+                seeked,
+                Options.create(
+                  pcm,
+                  options.duration(
+                    Temporal.Duration.from({
+                      milliseconds: 500,
+                      microseconds: 125
+                    })
+                  )
+                )
+              )
+            ]
+          })
+        )
+        yield* run(
+          Command.make({
+            inputs: [Input.fromFile(source, pcm)],
+            outputs: [
+              Output.toFile(
+                trimmed,
+                Options.create(
+                  pcm,
+                  options.audioFilter(
+                    filters.chain(
+                      filters.atrim({
+                        start: Temporal.Duration.from({ milliseconds: 500 }),
+                        duration: Duration.micros(250_125n)
+                      })
+                    )
+                  )
+                )
+              )
+            ]
+          })
+        )
+        const seekedBytes = yield* fs.readFile(seeked)
+        expect(seekedBytes.length).toBe(4001 * 2)
+        expect(firstSample(seekedBytes)).toBeCloseTo(0.25, 3)
+        const trimmedBytes = yield* fs.readFile(trimmed)
+        expect(trimmedBytes.length).toBe(2001 * 2)
+        expect(firstSample(trimmedBytes)).toBeCloseTo(0.125, 3)
+      })
+    )
 )
 
 it.live("writes metadata through option helpers that FFprobe can read", () =>

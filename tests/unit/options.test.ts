@@ -1,3 +1,4 @@
+import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import { ffmpegu } from "../../src/index.ts"
@@ -53,6 +54,75 @@ describe("Options", { concurrent: false }, () => {
     expect(
       ffmpegu.options.duration({ minutes: 61, seconds: 120 }).getArgs(refs)
     ).toEqual(["-t", "01:03:00.000"])
+  })
+
+  it("should format Effect durations as timestamps", () => {
+    expect(
+      ffmpegu.options.startTime(Duration.minutes(90)).getArgs(refs)
+    ).toEqual(["-ss", "01:30:00.000"])
+    expect(
+      ffmpegu.options.duration(Duration.millis(90_500)).getArgs(refs)
+    ).toEqual(["-t", "00:01:30.500"])
+    expect(ffmpegu.options.to(Duration.millis(-1_500)).getArgs(refs)).toEqual([
+      "-to",
+      "-00:00:01.500"
+    ])
+    expect(ffmpegu.options.duration(Duration.hours(100)).getArgs(refs)).toEqual(
+      ["-t", "100:00:00.000"]
+    )
+    // Microseconds are ffmpeg's time base; finer precision is truncated.
+    expect(
+      ffmpegu.options.startTime(Duration.micros(1_500_250n)).getArgs(refs)
+    ).toEqual(["-ss", "00:00:01.500250"])
+    expect(
+      ffmpegu.options.startTime(Duration.nanos(1_500_999n)).getArgs(refs)
+    ).toEqual(["-ss", "00:00:00.001500"])
+    // Beyond 2^53 microseconds, where number arithmetic would round.
+    expect(
+      ffmpegu.options
+        .startTime(Duration.micros(9_007_199_254_740_993n))
+        .getArgs(refs)
+    ).toEqual(["-ss", "2501999:47:34.740993"])
+  })
+
+  it("should keep the millisecond rendering of large time objects", () => {
+    expect(
+      ffmpegu.options
+        .duration({ milliseconds: 72_057_594_037_929 })
+        .getArgs(refs)
+    ).toEqual(["-t", "20015998:20:37.929"])
+  })
+
+  it("should format Temporal durations as timestamps", () => {
+    expect(
+      ffmpegu.options
+        .duration(
+          Temporal.Duration.from({ minutes: 1, seconds: 30, milliseconds: 500 })
+        )
+        .getArgs(refs)
+    ).toEqual(["-t", "00:01:30.500"])
+    // Days have no time object counterpart and are 24 hours without a date.
+    expect(
+      ffmpegu.options
+        .startTime(Temporal.Duration.from({ days: 1, hours: 2 }))
+        .getArgs(refs)
+    ).toEqual(["-ss", "26:00:00.000"])
+    expect(
+      ffmpegu.options
+        .to(
+          Temporal.Duration.from({
+            seconds: -2,
+            microseconds: -5,
+            nanoseconds: -999
+          })
+        )
+        .getArgs(refs)
+    ).toEqual(["-to", "-00:00:02.000005"])
+    expect(
+      ffmpegu.options
+        .startTime(Temporal.Duration.from("PT1H0.000001S"))
+        .getArgs(refs)
+    ).toEqual(["-ss", "01:00:00.000001"])
   })
 
   it("should format codec options", () => {

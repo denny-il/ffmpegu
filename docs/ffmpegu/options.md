@@ -22,6 +22,28 @@ Common helpers:
 - Containers: `format`, `movFlags`
 - Streaming: `hls`, `dash`
 
+## Time values
+
+`startTime`, `duration`, and `to` accept:
+
+- a number of seconds, or a string passed to FFmpeg unchanged (`"00:01:30.5"`, `"90.5"`);
+- a time object `{ hours?, minutes?, seconds?, milliseconds? }`, truncated to whole milliseconds;
+- an Effect `Duration.Duration`, such as `Duration.seconds(90.5)`;
+- a `Temporal.Duration`, such as `Temporal.Duration.from({ minutes: 1, seconds: 30 })`.
+
+Time objects and durations render as `[-]HH:MM:SS.mmm`. Durations keep microseconds, FFmpeg's time base, and render as `HH:MM:SS.uuuuuu` when they have sub-millisecond precision; finer precision is truncated. Pass `Duration` values, not `Duration.Input`: a bare number always means seconds here, while Effect reads a number input as milliseconds.
+
+Durations are converted when the command is compiled. Infinite durations and `Temporal.Duration` values with years, months, or weeks (which need a reference date) make `Command.compile()`, `run`, and `probeWith` fail with a `CommandError` whose reason is `InvalidArgument`. Builders do not throw. A `Temporal.Duration` with days counts each day as 24 hours.
+
+```ts
+import { Duration } from "effect"
+
+const clip = ffmpegu.options.concat(
+  ffmpegu.options.startTime(Duration.minutes(1)),
+  ffmpegu.options.duration(Temporal.Duration.from({ seconds: 30 }))
+)
+```
+
 ## Examples
 
 ```ts

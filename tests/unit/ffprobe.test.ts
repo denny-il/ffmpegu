@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, Fiber, Layer } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer } from "effect"
 import {
   ExitError,
   CommandError,
   FFprobe,
   Options,
+  options,
   Input,
   type FFprobeOptions,
   ProbeDecodeError,
@@ -268,6 +269,24 @@ describe("FFprobe", () => {
         assert.instanceOf(optionError, CommandError)
       }
     })
+  )
+
+  it.effect(
+    "reports invalid time values in probe options before spawning",
+    () =>
+      Effect.gen(function* () {
+        const spawner = yield* makeFakeSpawner({
+          spawnError: platformError("must not spawn")
+        })
+        const layer = FFprobe.layer().pipe(Layer.provide(spawner.layer))
+        const error = yield* probeWith(
+          "x",
+          options.duration(Duration.infinity)
+        ).pipe(Effect.provide(layer), Effect.flip)
+        assert.instanceOf(error, CommandError)
+        assert.strictEqual(error.reason, "InvalidArgument")
+        assert.instanceOf(error.cause, RangeError)
+      })
   )
 
   it.effect("rejects FFmpeg stream references in probe options", () =>

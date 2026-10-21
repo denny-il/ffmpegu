@@ -2,18 +2,33 @@ import type {
   FFmpeguPrimitiveUserArgValue,
   FFmpeguUserArgValue
 } from "../types/index.ts"
-import { type FFmpeguTimeObject, formatTime } from "../utils.ts"
+import {
+  type FFmpeguDurationValue,
+  type FFmpeguTimeObject,
+  formatTime,
+  isDurationValue,
+  timestampArgument
+} from "../utils.ts"
 import { FFmpeguOptions } from "./core.ts"
 
 export type FFmpeguBitrateUnit = "k" | "K" | "m" | "M" | "g" | "G" | "t" | "T"
 export type FFmpeguBitrateValue = string | number
 export type FFmpeguRateValue = string | number
 export type FFmpeguSizeValue = string
-export type { FFmpeguTimeObject }
-export type FFmpeguTimeValue = string | number | FFmpeguTimeObject
+export type { FFmpeguDurationValue, FFmpeguTimeObject }
+/** Numbers are seconds. */
+export type FFmpeguTimeValue =
+  | string
+  | number
+  | FFmpeguDurationValue
+  | FFmpeguTimeObject
 
-const resolveTime = (value: FFmpeguTimeValue): string | number =>
-  typeof value === "object" ? formatTime(value) : value
+const resolveTime = (value: FFmpeguTimeValue): FFmpeguUserArgValue =>
+  isDurationValue(value)
+    ? timestampArgument(value)
+    : typeof value === "object"
+      ? formatTime(value)
+      : value
 
 export type FFmpeguFormat =
   | "mp4"

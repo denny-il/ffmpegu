@@ -1,4 +1,4 @@
-import { Effect, Result, Sink, Stream } from "effect"
+import { Duration, Effect, Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguCommand } from "../../src/core/command.ts"
@@ -415,6 +415,57 @@ describe("Command", () => {
 
     expect(error.reason).toBe("InvalidArgument")
     expect(error.cause).toBe(boom)
+  })
+
+  it("should fail compilation, not construction, for invalid time values", () => {
+    const input = FFmpeguInput.fromFile("/test/in.wav")
+    const cases = [
+      FFmpeguCommand.make({
+        global: options.startTime(Duration.infinity),
+        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.duration(Temporal.Duration.from({ weeks: 1 }))
+          )
+        ]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.audioFilter(
+              filters.chain(
+                filters.atrim({ end: Temporal.Duration.from({ months: 1 }) })
+              )
+            )
+          )
+        ]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.audioFilter(
+              filters.chain(
+                filters.afade({ duration: Duration.negativeInfinity })
+              )
+            )
+          )
+        ]
+      })
+    ]
+
+    for (const command of cases) {
+      const error = compileError(command)
+      expect(error.reason).toBe("InvalidArgument")
+      expect(error.cause).toBeInstanceOf(RangeError)
+    }
   })
 
   it("should expose compiled args through toArgs", () => {
