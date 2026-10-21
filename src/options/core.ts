@@ -10,8 +10,9 @@ export class FFmpeguOptions extends FFmpeguArgument {
 
   constructor(args: ReadonlyArray<FFmpeguUserArg>) {
     super()
-    // Copy so later changes to the caller's array cannot alter this value.
-    this.args = [...args]
+    // Copy the array and its tuple and record entries so later changes to the
+    // caller's values cannot alter this value or bundles derived from it.
+    this.args = args.map(copyArg)
   }
 
   static create(...args: FFmpeguUserArg[]) {
@@ -46,7 +47,7 @@ export class FFmpeguOptions extends FFmpeguArgument {
 
     const args: string[] = []
 
-    if (Array.isArray(arg)) {
+    if (isTupleArg(arg)) {
       const [name, value] = arg
       if (typeof value !== "undefined") {
         args.push(...this.resolveOptionValue(name, value, refs))
@@ -88,4 +89,16 @@ export class FFmpeguOptions extends FFmpeguArgument {
   private isFFmpeguArgumentable(value: unknown): value is FFmpeguArgument {
     return value instanceof FFmpeguArgument
   }
+}
+
+type FFmpeguTupleArg = Extract<FFmpeguUserArg, ReadonlyArray<unknown>>
+
+// `Array.isArray` does not narrow readonly tuples, so check them explicitly.
+function isTupleArg(arg: FFmpeguUserArg): arg is FFmpeguTupleArg {
+  return Array.isArray(arg)
+}
+
+function copyArg(arg: FFmpeguUserArg): FFmpeguUserArg {
+  if (typeof arg !== "object" || arg instanceof FFmpeguArgument) return arg
+  return isTupleArg(arg) ? [...arg] : { ...arg }
 }

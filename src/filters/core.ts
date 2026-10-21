@@ -21,17 +21,19 @@ const escapeLayer = (value: string, special: RegExp): string =>
  * Follows the FFmpeg filtergraph syntax: [inputs]filter_name=arguments[outputs]
  */
 export abstract class FFmpeguFilter extends FFmpeguArgument {
+  protected readonly options: Readonly<FilterOptions>
   protected readonly inputs: ReadonlyArray<FFmpeguFilterLabelRef>
   protected readonly outputs: ReadonlyArray<FFmpeguFilterLabelRef>
 
   constructor(
     protected readonly name: string,
-    protected readonly options: FilterOptions = {},
+    options: Readonly<FilterOptions> = {},
     inputs: ReadonlyArray<FFmpeguFilterLabelRef> = [],
     outputs: ReadonlyArray<FFmpeguFilterLabelRef> = []
   ) {
     super()
-    // Copy so later changes to the caller's arrays cannot alter this value.
+    // Copy so later changes to the caller's values cannot alter this value.
+    this.options = { ...options }
     this.inputs = [...inputs]
     this.outputs = [...outputs]
   }

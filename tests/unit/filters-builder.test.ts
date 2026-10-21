@@ -34,19 +34,26 @@ describe("Filters Builder", { concurrent: false }, () => {
     expect(withFlip.build().getArgs(refs)).toEqual(["scale=w=320:h=180;hflip"])
   })
 
-  it("should not change when the arrays passed to constructors change", () => {
-    const labels = [FFmpeguFilterLabelRef.create("in")]
-    const filters = [FFmpeguSimpleFilter.create("null", {}, labels)]
+  it("should not change when the values passed to constructors change", () => {
+    const options: Record<string, number> = { w: 320 }
+    const inputs = [FFmpeguFilterLabelRef.create("in")]
+    const outputs = [FFmpeguFilterLabelRef.create("out")]
+    const filters = [
+      FFmpeguSimpleFilter.create("scale", options, inputs, outputs)
+    ]
     const chains = [new FFmpeguFilterChain(filters)]
     const graph = new FFmpeguFilterGraph(chains)
     const builder = new FFmpeguFilterBuilder(chains)
 
-    labels.push(FFmpeguFilterLabelRef.create("extra"))
+    options.w = 640
+    options.h = 360
+    inputs.push(FFmpeguFilterLabelRef.create("extra_in"))
+    outputs.push(FFmpeguFilterLabelRef.create("extra_out"))
     filters.push(FFmpeguSimpleFilter.create("hflip"))
     chains.push(FFmpeguFilterChain.create(FFmpeguSimpleFilter.create("vflip")))
 
-    expect(graph.getArgs(refs)).toEqual(["[in]null"])
-    expect(builder.build().getArgs(refs)).toEqual(["[in]null"])
+    expect(graph.getArgs(refs)).toEqual(["[in]scale=w=320[out]"])
+    expect(builder.build().getArgs(refs)).toEqual(["[in]scale=w=320[out]"])
   })
 
   it("should create custom filters via builder", () => {

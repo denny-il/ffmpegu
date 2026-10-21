@@ -24,6 +24,34 @@ describe("Options Core", { concurrent: false }, () => {
     expect(options.getArgs(refs)).toEqual(["-y"])
   })
 
+  it("should not change when tuple or record args passed in change", () => {
+    const tuple: [string, number] = ["-crf", 23]
+    const record: Record<string, string> = { "-preset": "fast" }
+    const created = FFmpeguOptions.create(tuple, record)
+    const concat = FFmpeguOptions.concat(created, "-an")
+    const merged = FFmpeguOptions.merge(created, FFmpeguOptions.create("-y"))
+
+    tuple[1] = 51
+    record["-preset"] = "slow"
+    record["-tune"] = "film"
+
+    expect(created.getArgs(refs)).toEqual(["-crf", "23", "-preset", "fast"])
+    expect(concat.getArgs(refs)).toEqual([
+      "-crf",
+      "23",
+      "-preset",
+      "fast",
+      "-an"
+    ])
+    expect(merged.getArgs(refs)).toEqual([
+      "-crf",
+      "23",
+      "-preset",
+      "fast",
+      "-y"
+    ])
+  })
+
   it("should resolve array args with and without values", () => {
     const options = new FFmpeguOptions([
       ["-y"],

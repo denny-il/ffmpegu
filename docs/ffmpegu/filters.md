@@ -48,7 +48,7 @@ const output = ffmpegu.output.toFile(
 
 ## Builder
 
-`ffmpegu.filters.builder()` returns an immutable builder. Each `chain(...filters)` call returns a new builder with the chain appended and leaves the original unchanged, so a base builder can be reused safely. Filters, chains, graphs, builders and option bundles copy the arrays they receive, so changing those arrays afterwards does not change them.
+`ffmpegu.filters.builder()` returns an immutable builder. Each `chain(...filters)` call returns a new builder with the chain appended and leaves the original unchanged, so a base builder can be reused safely. Filters, chains, graphs, builders and option bundles copy the arrays, option records and option tuples they receive, so changing those values afterwards does not change them.
 
 ```ts
 const base = ffmpegu.filters

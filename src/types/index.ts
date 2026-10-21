@@ -18,8 +18,8 @@ export type FFmpeguUserArgValue =
 
 export type FFmpeguUserArg =
   | FFmpeguPrimitiveUserArgValue
-  | [string, FFmpeguUserArgValue?]
-  | Record<string, FFmpeguUserArgValue>
+  | readonly [string, FFmpeguUserArgValue?]
+  | Readonly<Record<string, FFmpeguUserArgValue>>
 
 /**
  * One `-progress` block reported by ffmpeg.
