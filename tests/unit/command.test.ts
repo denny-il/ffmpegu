@@ -1,3 +1,4 @@
+import vm from "node:vm"
 import { Duration, Effect, Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguArgument } from "../../src/core/argument.ts"
@@ -458,6 +459,12 @@ describe("Command", () => {
             )
           )
         ]
+      }),
+      FFmpeguCommand.make({
+        global: options.startTime(
+          vm.runInNewContext("Temporal.Duration.from({ years: 1 })")
+        ),
+        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
       })
     ]
 

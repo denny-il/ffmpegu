@@ -29,9 +29,30 @@ const US_IN_MS = 1_000n
 const US_IN_SECOND = 1_000_000n
 const US_IN_MINUTE = 60n * US_IN_SECOND
 const US_IN_HOUR = 60n * US_IN_MINUTE
+const NS_IN_SECOND = 1_000_000_000n
+const NS_IN_MINUTE = 60n * NS_IN_SECOND
+const NS_IN_HOUR = 60n * NS_IN_MINUTE
+const NS_IN_DAY = 24n * NS_IN_HOUR
 
 export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
   typeof value === "object" && value !== null && !("getArgs" in value)
+
+// Native getters throw for anything without Temporal.Duration's internal
+// slots, so they recognise Durations from other realms (where `instanceof`
+// fails) and reject lookalike objects and proxies.
+const temporalDurationSign = Object.getOwnPropertyDescriptor(
+  Temporal.Duration.prototype,
+  "sign"
+)!.get!
+
+const isTemporalDuration = (value: object): value is Temporal.Duration => {
+  try {
+    temporalDurationSign.call(value)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * Must be checked before `isTimeObject`, which both kinds also satisfy:
@@ -42,7 +63,7 @@ export const isDurationValue = (
 ): value is FFmpeguDurationValue =>
   typeof value === "object" &&
   value !== null &&
-  (Duration.isDuration(value) || value instanceof Temporal.Duration)
+  (Duration.isDuration(value) || isTemporalDuration(value))
 
 type ResolvedTimeOptions<T, K extends keyof T> = {
   [P in keyof T]: P extends K
@@ -79,13 +100,29 @@ const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
     }
     return Duration.toNanosUnsafe(value) / 1_000n
   }
+  // `from` copies the internal slots into this realm's Duration, so the
+  // fields below come from native getters even for foreign Durations.
+  const d = Temporal.Duration.from(value)
   // Calendar units have no fixed length without a reference date.
-  if (value.years !== 0 || value.months !== 0 || value.weeks !== 0) {
+  if (d.years !== 0 || d.months !== 0 || d.weeks !== 0) {
     throw new RangeError(
-      `A Temporal.Duration time value cannot contain years, months, or weeks: ${value}`
+      `A Temporal.Duration time value cannot contain years, months, or weeks: ${d}`
     )
   }
-  return BigInt(Math.trunc(value.total({ unit: "microseconds" })))
+  // `total()` returns a number, which rounds beyond 2^53 units. The fields
+  // are integers sharing one sign, so their bigint sum is exact. Days are 24
+  // hours without a reference date.
+  const nanoseconds =
+    BigInt(d.days) * NS_IN_DAY +
+    BigInt(d.hours) * NS_IN_HOUR +
+    BigInt(d.minutes) * NS_IN_MINUTE +
+    BigInt(d.seconds) * NS_IN_SECOND +
+    BigInt(d.milliseconds) * 1_000_000n +
+    BigInt(d.microseconds) * 1_000n +
+    BigInt(d.nanoseconds)
+  // Bigint division truncates toward zero, matching Effect durations and
+  // keeping negative values symmetric with positive ones.
+  return nanoseconds / 1_000n
 }
 
 const pad = (n: bigint, length: number) => String(n).padStart(length, "0")

@@ -1,3 +1,4 @@
+import vm from "node:vm"
 import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguReferences } from "../../src/core/references.ts"
@@ -141,6 +142,19 @@ describe("Filters Common", { concurrent: false }, () => {
         duration: Duration.micros(500n)
       }).getArgs(refs)
     ).toEqual(["atrim=start=9007199254.740993:end=-1.5:duration=0.0005"])
+    expect(
+      atrim({
+        start: Temporal.Duration.from({
+          seconds: 9_007_199_254,
+          microseconds: 740_993
+        }),
+        end: Temporal.Duration.from({
+          seconds: -20_000_000,
+          nanoseconds: -999
+        }),
+        duration: vm.runInNewContext("Temporal.Duration.from({ days: 1 })")
+      }).getArgs(refs)
+    ).toEqual(["atrim=start=9007199254.740993:end=-20000000:duration=86400"])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([

@@ -1,3 +1,4 @@
+import vm from "node:vm"
 import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguReferences } from "../../src/core/references.ts"
@@ -123,6 +124,47 @@ describe("Options", { concurrent: false }, () => {
         .startTime(Temporal.Duration.from("PT1H0.000001S"))
         .getArgs(refs)
     ).toEqual(["-ss", "01:00:00.000001"])
+    // Beyond 2^53 microseconds, where a number total would round.
+    expect(
+      ffmpegu.options
+        .startTime(
+          Temporal.Duration.from({
+            seconds: 9_007_199_254,
+            microseconds: 740_993
+          })
+        )
+        .getArgs(refs)
+    ).toEqual(["-ss", "2501999:47:34.740993"])
+    // Nanoseconds are truncated toward zero, like Effect durations.
+    expect(
+      ffmpegu.options
+        .startTime(
+          Temporal.Duration.from({ seconds: 20_000_000, nanoseconds: 999 })
+        )
+        .getArgs(refs)
+    ).toEqual(["-ss", "5555:33:20.000"])
+    expect(
+      ffmpegu.options
+        .to(
+          Temporal.Duration.from({
+            seconds: -9_007_199_254,
+            microseconds: -740_993,
+            nanoseconds: -999
+          })
+        )
+        .getArgs(refs)
+    ).toEqual(["-to", "-2501999:47:34.740993"])
+  })
+
+  it("should format Temporal durations from another realm", () => {
+    const foreign = vm.runInNewContext(
+      "Temporal.Duration.from({ days: 1, microseconds: 1 })"
+    )
+    expect(foreign).not.toBeInstanceOf(Temporal.Duration)
+    expect(ffmpegu.options.startTime(foreign).getArgs(refs)).toEqual([
+      "-ss",
+      "24:00:00.000001"
+    ])
   })
 
   it("should format codec options", () => {
