@@ -73,3 +73,5 @@ For Bun, substitute `BunServices` and `BunRuntime` from `@effect/platform-bun`. 
 The old runner classes and FIFO implementation are removed. The `ffmpegu` namespace remains convenient for pure builders, options, and filters; named exports are preferred for execution.
 
 Bundled FFmpeg, FFprobe, and FFplay reference documents describe the binaries themselves, independently of this library's API.
+
+ffmpegu is independent of the FFmpeg project. See [third-party notices and branding](../NOTICE.md) for trademark attribution and the separate licensing of upstream tools and reference documentation.

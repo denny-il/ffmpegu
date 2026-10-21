@@ -1,3 +1,9 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-dark-square.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/brand/logo-light-square.svg">
+  <img alt="ffmpegu" src="assets/brand/logo-light-square.png" width="320" height="320">
+</picture>
+
 # ffmpegu
 
 Effect-native FFmpeg and FFprobe services for Node.js and Bun. Build commands with typed options, stream references, and filter graphs; execute them with scoped resources, typed failures, and cancellation through Effect interruption.
@@ -72,6 +78,14 @@ Explicit probe options replace the default format/stream selection. Output stays
 ## Documentation
 
 Start with [the guide](docs/README.md), then see [commands](docs/ffmpegu/command.md), [inputs and outputs](docs/ffmpegu/inputs-outputs.md), [execution services](docs/ffmpegu/runners.md), [FFprobe](docs/ffmpegu/ffprobe.md), [options](docs/ffmpegu/options.md), and [filters](docs/ffmpegu/filters.md).
+
+## License and attribution
+
+ffmpegu is [MIT licensed](LICENSE) and is an independent project, not affiliated with or endorsed by FFmpeg. FFmpeg is a trademark of Fabrice Bellard. The FFmpeg name and official branding remain with their respective rights holders.
+
+FFmpeg and FFprobe are installed separately and retain their own licenses. See [third-party notices and branding](NOTICE.md) for attribution, upstream documentation, and license scope.
+
+Approved SVG and PNG logos, palette values, and export instructions are in [assets/brand](assets/brand/README.md).
 
 ## Development
 

@@ -1,6 +1,9 @@
 dev/
 tests/__output/
 
+# Local logo explorations; approved artwork lives in assets/brand/.
+assets/logo-concepts/
+
 # REF: https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore
 
 # MacOS
