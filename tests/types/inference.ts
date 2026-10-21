@@ -3,7 +3,17 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Duration, Effect, Layer, type Result, Schema, Sink, Stream, type Types } from "effect"
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  type Result,
+  Schema,
+  Sink,
+  Stream,
+  type Types
+} from "effect"
 import {
   Command,
   type CommandError,

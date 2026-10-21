@@ -545,7 +545,7 @@ describe("Command", () => {
 
     for (const command of cases) {
       const error = compileError(command)
-      expect(error.reason).toBe("InvalidArgument")
+      expect(error.reason._tag).toBe("InvalidArgument")
       expect(error.cause).toBeInstanceOf(RangeError)
     }
   })
@@ -590,7 +590,7 @@ describe("Command", () => {
         })
       ]) {
         const error = compileError(command)
-        expect(error.reason).toBe("InvalidArgument")
+        expect(error.reason._tag).toBe("InvalidArgument")
         expect(error.cause).toBeInstanceOf(RangeError)
       }
     }

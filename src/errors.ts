@@ -115,9 +115,9 @@ export class CommandError extends Schema.TaggedError<CommandError>()(
     cause: Schema.optional(Schema.Unknown)
   }
 ) {
-  override get message() {
-    return this.reason.message
-  }
+  // An own property rather than a getter so `toJSON` and `stack` include it.
+  // Field initializers run after `super`, once `reason` is assigned.
+  override readonly message: string = this.reason.message
 }
 
 /**
@@ -185,9 +185,8 @@ export class OutputError extends Schema.TaggedError<OutputError>()(
   "OutputError",
   { reason: SinkEndedEarly }
 ) {
-  override get message() {
-    return this.reason.message
-  }
+  // See `CommandError.message`.
+  override readonly message: string = this.reason.message
 }
 
 /**

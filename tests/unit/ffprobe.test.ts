@@ -452,7 +452,7 @@ describe("FFprobe", () => {
           options.duration(Duration.infinity)
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
-        assert.strictEqual(error.reason, "InvalidArgument")
+        assert.strictEqual(error.reason._tag, "InvalidArgument")
         assert.instanceOf(error.cause, RangeError)
       })
   )
