@@ -46,21 +46,25 @@ export interface FFprobeOptions {
 export interface FFprobeService {
   /** Probe a file path or URL for its format and streams. */
   readonly probe: (input: string) => Effect.Effect<ProbeResult, ProbeError>
+  /** Explicit options replace the default format/stream selection. */
+  readonly probeWith: (
+    input: string,
+    options: FFmpeguOptions
+  ) => Effect.Effect<ProjectedProbeResult, ProbeError>
   /**
-   * Explicit options replace the default format/stream selection. A schema
-   * replaces `ProjectedProbeResult` for decoding the JSON document.
+   * Like `probeWith`, decoding the JSON document with `schema` instead of
+   * `ProjectedProbeResult`.
+   *
+   * A separate method with a single generic signature, so an implementation
+   * that ignores the schema does not type-check. Overloads on `probeWith` or
+   * an `S["Type"]` result would both accept one: TypeScript erases generics
+   * when checking against overloads, and `S["Type"]` accepts any value.
    */
-  readonly probeWith: {
-    (
-      input: string,
-      options: FFmpeguOptions
-    ): Effect.Effect<ProjectedProbeResult, ProbeError>
-    <S extends Schema.Top>(
-      input: string,
-      options: FFmpeguOptions,
-      schema: S
-    ): Effect.Effect<S["Type"], ProbeError, S["DecodingServices"]>
-  }
+  readonly probeWithSchema: <A, R>(
+    input: string,
+    options: FFmpeguOptions,
+    schema: Schema.Decoder<A, R>
+  ) => Effect.Effect<A, ProbeError, R>
 }
 
 export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
@@ -106,7 +110,7 @@ export function probeWith(
   return FFprobe.use((ffprobe) =>
     schema === undefined
       ? ffprobe.probeWith(input, options)
-      : ffprobe.probeWith(input, options, schema)
+      : ffprobe.probeWithSchema(input, options, schema)
   )
 }
 
@@ -206,31 +210,14 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     )
   })
 
-  function probeWith(
-    input: string,
-    options: FFmpeguOptions
-  ): Effect.Effect<ProjectedProbeResult, ProbeError>
-  function probeWith<S extends Schema.Top>(
-    input: string,
-    options: FFmpeguOptions,
-    schema: S
-  ): Effect.Effect<S["Type"], ProbeError, S["DecodingServices"]>
-  function probeWith(
-    input: string,
-    options: FFmpeguOptions,
-    schema?: Schema.Top
-  ): Effect.Effect<unknown, ProbeError, unknown> {
-    return schema === undefined
-      ? execute(input, decodeProjected, options)
-      : execute(
-          input,
-          Schema.decodeUnknownEffect(Schema.fromJsonString(schema)),
-          options
-        )
-  }
-
   return FFprobe.of({
     probe: (input) => execute(input, decode),
-    probeWith
+    probeWith: (input, options) => execute(input, decodeProjected, options),
+    probeWithSchema: (input, options, schema) =>
+      execute(
+        input,
+        Schema.decodeUnknownEffect(Schema.fromJsonString(schema)),
+        options
+      )
   })
 })

@@ -62,7 +62,19 @@ const dims = probeWith(
 )
 ```
 
-The schema decodes FFprobe's whole JSON document in place of `ProjectedProbeResult`, so none of the projected defaults apply. FFprobe omits sections it did not print, including `streams`, so make a key optional if the selection can leave it out. Unlisted keys are dropped under Effect's default parse options. Transformations such as `Schema.NumberFromString` run as usual, and services the schema needs for decoding are added to the Effect's requirements. A failing decode is reported as `ProbeDecodeError`. `FFprobeService.probeWith` accepts the same optional schema argument. A custom implementation or mock of the service must accept it too and decode with it, because the overloads infer the result type from that schema.
+The schema decodes FFprobe's whole JSON document in place of `ProjectedProbeResult`, so none of the projected defaults apply. FFprobe omits sections it did not print, including `streams`, so make a key optional if the selection can leave it out. Unlisted keys are dropped under Effect's default parse options. Transformations such as `Schema.NumberFromString` run as usual, and services the schema needs for decoding are added to the Effect's requirements. A failing decode is reported as `ProbeDecodeError`.
+
+The service exposes this as a separate method, `FFprobeService.probeWithSchema(input, options, schema)`; `FFprobeService.probeWith` keeps its two-argument signature. Custom implementations and mocks of `FFprobeService` must add `probeWithSchema`, and its result must come from decoding with `schema`. Its single generic signature rejects an implementation that returns a fixed value, so a mock can decode its fixture instead:
+
+```ts
+const fixture = { streams: [] }
+const mock: FFprobeService = {
+  probe: () => Effect.succeed(fixture),
+  probeWith: () => Effect.succeed(fixture),
+  probeWithSchema: (_input, _options, schema) =>
+    Schema.decodeUnknownEffect(schema)(fixture).pipe(Effect.orDie)
+}
+```
 
 The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`. Attempts to set them, their file-loaded or stream-specifier spellings, or `--` fail with `CommandError` before spawning. The input is one argument following `-i`, so spaces, leading dashes, and shell metacharacters retain their literal meaning. Stdin/descriptor paths (`-`, `pipe:`, `fd:`, `/dev/stdin`, etc.) and NUL bytes are rejected in input and options. FFmpeg stream references are invalid in probe options. The builder passes other flags to FFprobe; invalid flags can fail with `ExitError`, and invalid output fails decoding. No shell is used.
 

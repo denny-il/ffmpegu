@@ -210,7 +210,7 @@ describe("FFprobe", () => {
         const probes = [
           probeWith("/test/input.mp4", options, Widths),
           FFprobe.use((service) =>
-            service.probeWith("/test/input.mp4", options, Widths)
+            service.probeWithSchema("/test/input.mp4", options, Widths)
           )
         ]
         for (const probed of probes) {

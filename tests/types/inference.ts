@@ -13,6 +13,7 @@ import {
   type FFmpeguAnyInput,
   type FFmpeguCommand,
   FFprobe,
+  type FFprobeService,
   filters,
   Input,
   options,
@@ -440,7 +441,7 @@ assertType<
   >
 >(true)
 const storedDimsViaService = FFprobe.use((service) =>
-  service.probeWith("in.mp4", options.custom("-show_streams"), StoredDims)
+  service.probeWithSchema("in.mp4", options.custom("-show_streams"), StoredDims)
 )
 assertType<
   Equals<
@@ -448,8 +449,40 @@ assertType<
     Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
   >
 >(true)
+// Generic helpers and schema unions keep the schema's types.
+const probeWithHelper = <S extends Schema.Top>(schema: S) =>
+  probeWith("in.mp4", options.custom("-show_streams"), schema)
+const helperDims = probeWithHelper(StoredDims)
+assertType<
+  Equals<
+    typeof helperDims,
+    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
+  >
+>(true)
+declare const eitherSchema: typeof Schema.String | typeof Schema.Number
+const either = probeWith(
+  "in.mp4",
+  options.custom("-show_streams"),
+  eitherSchema
+)
+assertType<
+  Equals<typeof either, Effect.Effect<string | number, ProbeError, FFprobe>>
+>(true)
 // @ts-expect-error the third argument must be a Schema
 probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
+// An implementation must decode with the caller's schema. A fixed output
+// would make `probeWith(..., Schema.Number)` succeed with an object.
+const decodingProbeService: FFprobeService = {
+  probe: () => Effect.succeed({ streams: [] }),
+  probeWith: () => Effect.succeed({ streams: [] }),
+  probeWithSchema: (_input, _options, schema) =>
+    Schema.decodeUnknownEffect(schema)({ streams: [] }).pipe(Effect.orDie)
+}
+export const fixedProbeService: FFprobeService = {
+  ...decodingProbeService,
+  // @ts-expect-error the result must have the schema's type
+  probeWithSchema: () => Effect.succeed({ streams: [] })
+}
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)
