@@ -99,6 +99,43 @@ describe("ProgressParser", () => {
     expect(unknown!.outTime).toBeUndefined()
   })
 
+  it("should keep output times exact beyond the safe integer range", () => {
+    const parser = new ProgressParser()
+    const values = [
+      "9007199254740993",
+      "-9007199254740993",
+      "9223372036854775807",
+      "-9223372036854775808"
+    ]
+
+    const blocks = parser.push(
+      bytes(
+        values
+          .map((value) => `out_time_us=${value}\nprogress=continue\n`)
+          .join("")
+      )
+    )
+
+    expect(
+      blocks.map((block) => Duration.toNanosUnsafe(block.outTime!))
+    ).toEqual(values.map((value) => BigInt(value) * 1000n))
+  })
+
+  it("should drop output times that are not plain integers", () => {
+    const parser = new ProgressParser()
+
+    const blocks = parser.push(
+      bytes(
+        ["12a", "1e3", "", "1.5", "0x10", "-"]
+          .map((value) => `out_time_us=${value}\nprogress=continue\n`)
+          .join("")
+      )
+    )
+
+    expect(blocks).toHaveLength(6)
+    for (const block of blocks) expect(block.outTime).toBeUndefined()
+  })
+
   it("should treat an unrecognized marker as continue and keep it in raw", () => {
     const parser = new ProgressParser()
 

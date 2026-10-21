@@ -178,11 +178,17 @@ function number(value: string | undefined): number | undefined {
   return Number.isFinite(numeric) ? numeric : undefined
 }
 
+const INTEGER = /^[+-]?\d+$/
+
+/**
+ * Parsed straight from the text with `BigInt`: ffmpeg reports an int64 that
+ * can exceed `Number.MAX_SAFE_INTEGER`, and a `Number` round-trip would round
+ * it. The regex also rejects inputs `BigInt` would accept (`""`, `0x10`).
+ */
 function microseconds(
   value: string | undefined
 ): Duration.Duration | undefined {
-  const micros = number(value)
-  return micros === undefined
-    ? undefined
-    : Duration.micros(BigInt(Math.trunc(micros)))
+  return value !== undefined && INTEGER.test(value)
+    ? Duration.micros(BigInt(value))
+    : undefined
 }
