@@ -91,15 +91,17 @@ export const probe = (
  * decoding the output with a caller-supplied schema. A schema decodes the
  * service's `probeJson` output here, not in the service.
  */
-export function probeWith(
-  input: string,
-  options: FFmpeguOptions
-): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
 export function probeWith<S extends Schema.Top>(
   input: string,
   options: FFmpeguOptions,
   schema: S
 ): Effect.Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
+// Kept last: `Parameters`/`ReturnType` resolve to the final overload, so
+// wrappers derived from them keep the two-argument API.
+export function probeWith(
+  input: string,
+  options: FFmpeguOptions
+): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
 export function probeWith(
   input: string,
   options: FFmpeguOptions,

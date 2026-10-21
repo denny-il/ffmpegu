@@ -3,7 +3,16 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Duration, Effect, Layer, type Result, Schema, Sink, Stream } from "effect"
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  type Result,
+  Schema,
+  Sink,
+  Stream
+} from "effect"
 import {
   Command,
   type CommandError,
@@ -469,6 +478,18 @@ assertType<
 >(true)
 // @ts-expect-error the third argument must be a Schema
 probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
+// `Parameters`/`ReturnType` read the last overload, so wrappers derived from
+// them keep the two-argument API.
+const forwardProbeWith = (
+  ...args: Parameters<typeof probeWith>
+): ReturnType<typeof probeWith> => probeWith(...args)
+const forwarded = forwardProbeWith("in.mp4", options.custom("-show_streams"))
+assertType<
+  Equals<
+    typeof forwarded,
+    Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+  >
+>(true)
 // The documented mock: fixed raw JSON is enough, since `probeWith` decodes it.
 const fixture = { streams: [] }
 const mockProbeService: FFprobeService = {
