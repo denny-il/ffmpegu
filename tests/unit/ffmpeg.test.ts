@@ -584,10 +584,42 @@ describe("FFmpeg", () => {
 
         const error = yield* Fiber.join(fiber).pipe(Effect.flip)
         assert.instanceOf(error, OutputError)
-        assert.strictEqual(error.reason, "SinkEndedEarly")
-        assert.strictEqual(error.fd, 4)
+        assert.strictEqual(error.reason._tag, "SinkEndedEarly")
+        assert.strictEqual(error.reason.fd, 4)
         assert.strictEqual((yield* process.kills).length, 1)
       }
+    })
+  )
+
+  it.effect("exposes reasons to Effect.catchReason", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const reserved = yield* ffmpeg
+        .run(Command.make({ inputs: [Input.fromFile("pipe:4")] }))
+        .pipe(
+          Effect.catchReason("CommandError", "ReservedPath", (reason) =>
+            Effect.succeed(reason.path)
+          )
+        )
+      assert.strictEqual(reserved, "pipe:4")
+
+      const fiber = yield* Effect.forkChild(
+        ffmpeg
+          .run(
+            Command.make({
+              inputs: [Input.fromFile("in.mp4")],
+              outputs: [Output.toSink(Sink.fromEffect(Effect.void))]
+            })
+          )
+          .pipe(
+            Effect.catchReason("OutputError", "SinkEndedEarly", (reason) =>
+              Effect.succeed(reason.fd)
+            )
+          )
+      )
+      const process = yield* next
+      yield* process.emit(4, bytes(1))
+      assert.strictEqual(yield* Fiber.join(fiber), 4)
     })
   )
 
@@ -1574,7 +1606,11 @@ describe("FFmpeg.stream", () => {
           Effect.flip
         )
         assert.instanceOf(error, CommandError)
-        assert.strictEqual(error.reason, "StreamOutput")
+        assert.strictEqual(error.reason._tag, "StreamOutput")
+        assert.strictEqual(
+          error.reason._tag === "StreamOutput" && error.reason.count,
+          outputs.length === 1 ? 0 : 2
+        )
       }
     })
   )
@@ -1591,7 +1627,7 @@ describe("FFmpeg.stream", () => {
       })
       const error = yield* ffmpeg.run(command).pipe(Effect.flip)
       assert.instanceOf(error, CommandError)
-      assert.strictEqual(error.reason, "StreamOutput")
+      assert.strictEqual(error.reason._tag, "StreamOutput")
     })
   )
 

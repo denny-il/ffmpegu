@@ -12,12 +12,37 @@ Time values are seconds as numbers, raw FFmpeg strings, time objects, Effect `Du
 
 Library failures are tagged errors suitable for `Effect.catchTag`:
 
-- `CommandError`: invalid references, descriptor conflicts, invalid command structure, invalid time values, or reserved probe arguments. Included in both `FFmpegError` and `ProbeError`.
+- `CommandError`: invalid references, descriptor conflicts, invalid command structure, invalid time values, or reserved probe arguments. Included in both `FFmpegError` and `ProbeError`. Its `reason` says which check failed; see below.
 - `SpawnError`: binary startup failed.
 - `ExitError`: nonzero or abnormal termination, with bounded stderr and the original cause when available.
 - `PipeError`: I/O on a library-owned descriptor failed.
-- `OutputError`: an output sink completed before EOF.
+- `OutputError`: an output sink completed before EOF (reason `SinkEndedEarly`, with the output's `fd`).
 - `ProbeOutputError`: probe output exceeded the configured byte limit.
 - `ProbeDecodeError`: output is not valid probe data.
+
+`CommandError` and `OutputError` carry a tagged `reason`, so a single case can be handled with `Effect.catchReason` while other reasons stay in the error channel:
+
+```ts
+run(command).pipe(
+  Effect.catchReason("CommandError", "ReservedPath", (reason) =>
+    Effect.logWarning(`Use a stream input instead of ${reason.path}`)
+  )
+)
+```
+
+| Reason             | Fields                | Cause                                                                            |
+| ------------------ | --------------------- | -------------------------------------------------------------------------------- |
+| `DuplicateInput`   | `index`, `firstIndex` | The same input object is used twice.                                             |
+| `DuplicateOutput`  | `index`, `firstIndex` | The same output object is used twice.                                            |
+| `ForeignReference` |                       | A stream reference names an input outside the command; probes have no inputs.   |
+| `ReservedPath`     | `path`, `location`    | A path or option value addresses a descriptor owned by ffmpegu.                  |
+| `ReservedOption`   | `option`, `location`  | An option managed by ffmpegu (`-i`, `-progress`, `-stdin`, probe output) is set. |
+| `InvalidArgument`  |                       | Any other invalid value, including a builder that failed to render.              |
+| `StreamOutput`     | `count`               | `run` got an `Output.toStream` output, or `stream` did not get exactly one.      |
+| `SinkEndedEarly`   | `fd`                  | `OutputError` only: an output sink completed before EOF.                         |
+
+Every reason has a `message`, which is also the error's message. `location` is a `CommandLocation`: `{ _tag: "Global" }`, `{ _tag: "Input", index }`, `{ _tag: "Output", index }` (the path or options of that input or output), or `{ _tag: "Probe" }`. The failure that made a builder throw while rendering is the `cause` of the `CommandError`.
+
+Migrating from 0.3: `reason` used to be a string. Replace `error.reason === "ReservedPath"` with `error.reason._tag === "ReservedPath"` (or `Effect.catchReason`), and `outputError.fd` with `outputError.reason.fd`. `CommandError` no longer takes a `message` field; construct it with a reason instance such as `new CommandError({ reason: new InvalidArgument({ message }) })`.
 
 Caller-defined input, output, and callback errors keep their original identity and type. Interruption stays interruption. Defects remain defects; they are not converted into ordinary domain failures. Output files may be partial after either failure or interruption, so automatic retry is deliberately absent.

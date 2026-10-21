@@ -48,7 +48,7 @@ Use `NodeStream.fromReadable` and `NodeSink.fromWritable` from `@effect/platform
 
 ## Completion and format requirements
 
-A successful output sink must consume through EOF and finish its own writes. Early success is an `OutputError` with reason `SinkEndedEarly`; the engine does not silently discard the remaining media. If a sink produces an irrelevant result, explicitly map it to `void` with `Sink.map(sink, () => undefined)`.
+A successful output sink must consume through EOF and finish its own writes. Early success is an `OutputError` whose `reason` is `SinkEndedEarly` (handle it with `Effect.catchReason("OutputError", "SinkEndedEarly", ...)`); the engine does not silently discard the remaining media. If a sink produces an irrelevant result, explicitly map it to `void` with `Sink.map(sink, () => undefined)`.
 
 Pipes are not seekable. Specify raw input formats and output muxers explicitly. For MP4 output through a sink, use a streaming-compatible layout such as `movflags: "frag_keyframe+empty_moov"`; ordinary seekable MP4 files should use `Output.toFile`.
 

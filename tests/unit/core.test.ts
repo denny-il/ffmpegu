@@ -191,7 +191,7 @@ describe("FFmpegu", { concurrent: false }, () => {
         outputs: [output]
       }).compile()
 
-      expect(Result.isFailure(result) && result.failure.reason).toBe(
+      expect(Result.isFailure(result) && result.failure.reason._tag).toBe(
         "DuplicateInput"
       )
     })
@@ -202,7 +202,7 @@ describe("FFmpegu", { concurrent: false }, () => {
         outputs: [output, output]
       }).compile()
 
-      expect(Result.isFailure(result) && result.failure.reason).toBe(
+      expect(Result.isFailure(result) && result.failure.reason._tag).toBe(
         "DuplicateOutput"
       )
     })

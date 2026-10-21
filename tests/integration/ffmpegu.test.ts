@@ -246,7 +246,7 @@ it.live("rejects a sink that stops consuming output", () =>
       )
       expect(error).toMatchObject({
         _tag: "OutputError",
-        reason: "SinkEndedEarly"
+        reason: { _tag: "SinkEndedEarly" }
       })
     })
   )

@@ -3,16 +3,7 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import {
-  Context,
-  Duration,
-  Effect,
-  Layer,
-  type Result,
-  Schema,
-  Sink,
-  Stream
-} from "effect"
+import { Context, Duration, Effect, Layer, type Result, Schema, Sink, Stream, type Types } from "effect"
 import {
   Command,
   type CommandError,
@@ -22,6 +13,7 @@ import {
   type FFmpeguAnyInput,
   type FFmpeguCommand,
   type FFmpeguOptions,
+  type OutputError,
   FFprobe,
   type FFprobeService,
   filters,
@@ -34,6 +26,7 @@ import {
   type ProbeResult,
   type ProjectedProbeResult,
   type Progress,
+  type ReservedPath,
   run,
   type RunResult,
   stream
@@ -515,6 +508,42 @@ export const schemaIgnoringService: FFprobeService = {
   // @ts-expect-error probeJson takes no schema
   probeJson: ignoresSchema
 }
+// Error reasons are tagged, so Effect.catchReason narrows them.
+assertType<
+  Equals<
+    Types.ReasonTags<CommandError>,
+    | "DuplicateInput"
+    | "DuplicateOutput"
+    | "ForeignReference"
+    | "ReservedPath"
+    | "ReservedOption"
+    | "InvalidArgument"
+    | "StreamOutput"
+  >
+>(true)
+assertType<Equals<Types.ReasonTags<OutputError>, "SinkEndedEarly">>(true)
+declare const failing: Effect.Effect<RunResult, FFmpegError>
+const reservedPath = failing.pipe(
+  Effect.catchReason("CommandError", "ReservedPath", (reason) => {
+    assertType<Equals<typeof reason, ReservedPath>>(true)
+    return Effect.succeed(reason.path)
+  })
+)
+assertType<
+  Equals<typeof reservedPath, Effect.Effect<RunResult | string, FFmpegError>>
+>(true)
+const sinkFd = failing.pipe(
+  Effect.catchReason("OutputError", "SinkEndedEarly", (reason) =>
+    Effect.succeed(reason.fd)
+  )
+)
+assertType<
+  Equals<typeof sinkFd, Effect.Effect<RunResult | number, FFmpegError>>
+>(true)
+failing.pipe(
+  // @ts-expect-error reason tags are checked against the error
+  Effect.catchReason("CommandError", "SinkEndedEarly", () => Effect.void)
+)
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)

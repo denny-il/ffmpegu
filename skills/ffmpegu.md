@@ -20,7 +20,7 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 - Application owns runtime execution. Use Effect fibers, interruption, and timeout for cancellation.
 - Never introduce old Promise runners, AbortSignal options, FIFO transport, Node streams directly in commands, or `.json`/`.result` probe wrappers.
 
-Each execution owns a scope and supervised process/stream resources. Successful output sinks consume EOF and finish writes. Nonzero exit is a typed failure. Caller errors retain identity; interruption and defects retain their semantics. Commands can run again only when their streams acquire fresh resources. Outputs are neither atomic nor idempotent; never add automatic retries.
+Each execution owns a scope and supervised process/stream resources. Successful output sinks consume EOF and finish writes. Nonzero exit is a typed failure. `CommandError`/`OutputError` reasons are tagged classes: match `error.reason._tag` or use `Effect.catchReason("CommandError", "ReservedPath", (reason) => ...)`, never compare `reason` to a string. Caller errors retain identity; interruption and defects retain their semantics. Commands can run again only when their streams acquire fresh resources. Outputs are neither atomic nor idempotent; never add automatic retries.
 
 File paths are passed to FFmpeg to retain seeking. Use Effect FileSystem for application-owned filesystem operations and adapters. Streaming output needs a pipe-compatible format; MP4 usually needs fragmented output flags. Raw descriptor paths conflict with engine ownership: use stream/sink constructors.
 
