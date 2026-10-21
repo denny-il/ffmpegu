@@ -18,6 +18,8 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 - `probeWith(path, options, schema?)` replaces the default selection with FFprobe options. It yields `ProjectedProbeResult`, or `schema`'s type when one is given; decode failures are `ProbeDecodeError`.
 - Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration.
 - Application owns runtime execution. Use Effect fibers, interruption, and timeout for cancellation.
+- Spans `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream` and `ffmpegu/FFprobe.probe` carry only the binary's file name, input/output counts, the progress flag and the exit code. Never add argv, paths, URLs or stderr to spans or logs.
+- Test code depending on the services with `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` or `Layer.mock(FFprobe, { probe: ... })`.
 - Never introduce old Promise runners, AbortSignal options, FIFO transport, Node streams directly in commands, or `.json`/`.result` probe wrappers.
 
 Each execution owns a scope and supervised process/stream resources. Successful output sinks consume EOF and finish writes. Nonzero exit is a typed failure. `CommandError`/`OutputError` reasons are tagged classes: match `error.reason._tag` or use `Effect.catchReason("CommandError", "ReservedPath", (reason) => ...)`, never compare `reason` to a string. Caller errors retain identity; interruption and defects retain their semantics. Commands can run again only when their streams acquire fresh resources. Outputs are neither atomic nor idempotent; never add automatic retries.

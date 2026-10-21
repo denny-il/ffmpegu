@@ -6,7 +6,10 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as ChildProcess from "effect/process/ChildProcess"
-import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import {
+  type ChildProcessHandle,
+  ChildProcessSpawner
+} from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
@@ -20,12 +23,14 @@ import {
 import { ByteTail } from "../core/diagnostics.ts"
 import type { FFmpeguOptions } from "../options/core.ts"
 import {
+  annotateExitCode,
   awaitExit,
   byteLimit,
   DEFAULT_FORCE_KILL_AFTER,
   DEFAULT_STDERR_TAIL_BYTES,
   drainToTail,
   durationOption,
+  executableName,
   mapEffectErrors,
   mapStreamErrors
 } from "../core/process.ts"
@@ -161,11 +166,23 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     decodeOutput: (output: unknown) => Effect.Effect<A, ProbeDecodeError, R>,
     options?: FFmpeguOptions
   ) {
+    // The input path or URL can carry credentials, so it is not recorded.
+    yield* Effect.annotateCurrentSpan(
+      "process.executable.name",
+      executableName(binary)
+    )
     const compiled = probeArgs(input, options)
     if (Result.isFailure(compiled)) return yield* Effect.fail(compiled.failure)
     const args = compiled.success
     const { exit, stderr, stdout } = yield* Effect.scoped(
       Effect.gen(function* () {
+        // For an output failure, which interrupts `awaitExit` before the
+        // process exits. Registered before spawning, so that it runs after the
+        // platform's release has terminated the process.
+        let spawned: ChildProcessHandle | undefined
+        yield* Effect.addFinalizer(() =>
+          spawned === undefined ? Effect.void : annotateExitCode(spawned)
+        )
         const handle = yield* spawner
           .spawn(
             ChildProcess.make(binary, args, {
@@ -176,6 +193,7 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
             })
           )
           .pipe(mapEffectErrors((cause) => new SpawnError({ binary, cause })))
+        spawned = handle
 
         // Holds at most maxOutputBytes: exceeding the limit fails first.
         const stdout = new ByteTail(maxOutputBytes)
@@ -184,7 +202,12 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
         // which terminates the process.
         const [exit] = yield* Effect.all(
           [
-            awaitExit(handle),
+            // Annotated as soon as known: draining may still fail after exit.
+            Effect.tap(awaitExit(handle), ({ exitCode }) =>
+              exitCode === null
+                ? Effect.void
+                : Effect.annotateCurrentSpan("process.exit.code", exitCode)
+            ),
             handle.stdout.pipe(
               mapStreamErrors(
                 (cause) => new PipeError({ fd: 1, direction: "output", cause })

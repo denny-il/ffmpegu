@@ -47,6 +47,31 @@ export const awaitExit = (
     })
   )
 
+/**
+ * Records the exit code on the current span if the handle already reports
+ * it. Called once cleanup has terminated the process. A code not reported yet
+ * (the process is still running, or the spawner reports it later) is not
+ * awaited, as that could delay teardown; it is not recorded, nor is a signal
+ * exit. Never fails: tracing must not change the outcome.
+ */
+export const annotateExitCode = (
+  handle: ChildProcessHandle
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    // Started immediately, so an exit code already known is read synchronously.
+    const reader = yield* Effect.forkDetach(handle.exitCode, {
+      startImmediately: true
+    })
+    const exit = reader.pollUnsafe()
+    if (exit === undefined) {
+      reader.interruptUnsafe()
+      return
+    }
+    if (Exit.isSuccess(exit)) {
+      yield* Effect.annotateCurrentSpan("process.exit.code", exit.value)
+    }
+  }).pipe(Effect.ignoreCause)
+
 /** Drains a library-owned output stream into a bounded tail. */
 export const drainToTail = (
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
@@ -96,6 +121,13 @@ export const isClosedByReader = (error: unknown): boolean => {
     EXPECTED_CLOSE_CODES.has(original.code)
   )
 }
+
+/**
+ * The file name of a binary, for span attributes: a configured path can
+ * reveal more than the executable.
+ */
+export const executableName = (binary: string): string =>
+  binary.slice(binary.lastIndexOf("/") + 1)
 
 /**
  * Validates a byte limit. Invalid limits (negative, fractional, NaN or

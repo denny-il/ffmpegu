@@ -80,6 +80,22 @@ Use `forkScoped` when the operation should belong to a surrounding scope. `Effec
 
 Cleanup waits for caller-owned stream, sink, and callback finalizers. Sinks and callbacks are stopped, inputs are closed and FFmpeg is terminated together, so a sink finalizer may wait for a resource the input stream releases. As with other scoped Effects, a finalizer that never completes can prevent cancellation from completing; `forceKillAfter` bounds process termination, not arbitrary application finalizers.
 
+## Tracing
+
+`run`, `stream`, and `probe` run in the spans `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream`, and `ffmpegu/FFprobe.probe`. Their attributes are limited to data that cannot carry credentials; argv, paths, URLs, and stderr are never recorded.
+
+| Attribute                 | Spans  | Value                                                                       |
+| ------------------------- | ------ | --------------------------------------------------------------------------- |
+| `process.executable.name` | all    | File name of the binary, without its directory                              |
+| `process.exit.code`       | all    | Exit code, once the process exited with one (see below)                     |
+| `ffmpegu.inputs`          | FFmpeg | Number of inputs                                                            |
+| `ffmpegu.outputs`         | FFmpeg | Number of outputs                                                           |
+| `ffmpegu.input_streams`   | FFmpeg | Inputs fed from an Effect `Stream`                                          |
+| `ffmpegu.output_streams`  | FFmpeg | Outputs written to a `Sink` or to the stream returned by `stream`           |
+| `ffmpegu.progress`        | FFmpeg | Whether a progress callback is set                                          |
+
+The exit code is also recorded when cleanup terminates the process, for example after an interruption, a failed source or sink, or a stream consumer that stops early. It is absent when the process was terminated by a signal (such as the `forceKillAfter` SIGKILL) or its exit code was not yet reported when cleanup finished: cleanup never waits for it.
+
 ## Configuration and testing
 
 Both services offer `layerConfig` for application-owned configuration:
@@ -98,3 +114,22 @@ const FFmpegLive = FFmpeg.layerConfig(
 A configuration provider can be replaced in tests. Byte limits must be non-negative safe integers; invalid programmatic settings are defects during Layer construction. No binary is started until an execution Effect runs.
 
 For deterministic tests, supply a fake `ChildProcessSpawner` to the live service Layer and use `@effect/vitest`'s `it.effect`. Real process tests use `it.live` so process shutdown and platform timers advance normally. Applications can also provide a fake `FFmpeg` or `FFprobe` service when testing higher-level workflows without testing process behavior.
+
+To test code that depends on `FFmpeg` or `FFprobe` without running processes, replace the service with `Layer.mock`. It takes a partial implementation; members left out die with an unimplemented defect when used:
+
+```ts
+import { Effect, Layer } from "effect"
+import { FFmpeg, FFprobe, run } from "ffmpegu"
+
+const FFmpegTest = Layer.mock(FFmpeg, {
+  run: () => Effect.succeed({ args: [], stderr: "" })
+})
+
+const FFprobeTest = Layer.mock(FFprobe, {
+  probe: () => Effect.succeed({ streams: [] })
+})
+
+const result = run(command).pipe(Effect.provide(FFmpegTest))
+```
+
+A mock does not need to be generic: callers of `run` and `stream` keep the command's error and requirement types.

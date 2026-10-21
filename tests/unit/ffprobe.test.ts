@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 import {
   ExitError,
   CommandError,
@@ -15,6 +16,7 @@ import {
   SpawnError
 } from "../../src/index.ts"
 import { makeFakeSpawner, platformError } from "./fake-spawner.ts"
+import { makeRecordingTracer } from "./tracer.ts"
 
 const setup = Effect.fnUntraced(function* (options?: FFprobeOptions) {
   const spawner = yield* makeFakeSpawner()
@@ -569,6 +571,159 @@ describe("FFprobe", () => {
         error,
         new SpawnError({ binary: "/missing/ffprobe", cause })
       )
+    })
+  )
+
+  it.effect("annotates the probe span without the input", () =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const recorder = makeRecordingTracer()
+      const fiber = yield* Effect.forkChild(
+        probe("https://user:secret@example.com/in.mp4").pipe(
+          Effect.provide(
+            FFprobe.layer({ binary: "/opt/bin/ffprobe" }).pipe(
+              Layer.provide(spawner.layer)
+            )
+          ),
+          Effect.withTracer(recorder.tracer)
+        )
+      )
+      const process = yield* spawner.next
+      yield* process.emit(1, '{"streams":[]}')
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+
+      assert.deepStrictEqual(recorder.attributes("ffmpegu/FFprobe.probe"), {
+        "process.executable.name": "ffprobe",
+        "process.exit.code": 0
+      })
+    })
+  )
+
+  it.effect("records the exit code when the output fails after exit", () =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const recorder = makeRecordingTracer()
+      const fiber = yield* Effect.forkChild(
+        probe("/test/input.mp4").pipe(
+          Effect.provide(
+            FFprobe.layer({ maxOutputBytes: 1 }).pipe(
+              Layer.provide(spawner.layer)
+            )
+          ),
+          Effect.withTracer(recorder.tracer)
+        )
+      )
+      const process = yield* spawner.next
+      yield* process.emit(1, '{"streams":[]}')
+      yield* process.exit(0)
+
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ProbeOutputError)
+      assert.strictEqual(
+        recorder.attributes("ffmpegu/FFprobe.probe")["process.exit.code"],
+        0
+      )
+    })
+  )
+
+  it.effect(
+    "records the exit code of a process terminated on an output failure",
+    () =>
+      Effect.gen(function* () {
+        // A process handling SIGTERM still exits with a code.
+        const spawner = yield* makeFakeSpawner({ killExitCode: 23 })
+        const recorder = makeRecordingTracer()
+        const fiber = yield* Effect.forkChild(
+          probe("/test/input.mp4").pipe(
+            Effect.provide(
+              FFprobe.layer({ maxOutputBytes: 1 }).pipe(
+                Layer.provide(spawner.layer)
+              )
+            ),
+            Effect.withTracer(recorder.tracer)
+          )
+        )
+        const process = yield* spawner.next
+        yield* process.emit(1, "xx")
+
+        const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+        assert.instanceOf(error, ProbeOutputError)
+        assert.isTrue(yield* process.released)
+        assert.strictEqual(
+          recorder.attributes("ffmpegu/FFprobe.probe")["process.exit.code"],
+          23
+        )
+      })
+  )
+
+  /**
+   * Probe through a fake spawner whose handles are altered by `alter`,
+   * recording spans. Returns the probe fiber, the spawned process and the
+   * probe span's attributes accessor.
+   */
+  const probeWithHandle = Effect.fnUntraced(function* (
+    alter: (
+      handle: ChildProcessSpawner.ChildProcessHandle
+    ) => Partial<ChildProcessSpawner.ChildProcessHandle>,
+    options?: FFprobeOptions
+  ) {
+    const spawner = yield* makeFakeSpawner()
+    const altered = Layer.effect(
+      ChildProcessSpawner.ChildProcessSpawner,
+      Effect.gen(function* () {
+        const fake = yield* ChildProcessSpawner.ChildProcessSpawner
+        return ChildProcessSpawner.make((command) =>
+          Effect.map(fake.spawn(command), (handle) =>
+            ChildProcessSpawner.makeHandle({ ...handle, ...alter(handle) })
+          )
+        )
+      })
+    ).pipe(Layer.provide(spawner.layer))
+    const recorder = makeRecordingTracer()
+    const fiber = yield* Effect.forkChild(
+      probe("/test/input.mp4").pipe(
+        Effect.provide(FFprobe.layer(options).pipe(Layer.provide(altered))),
+        Effect.withTracer(recorder.tracer)
+      )
+    )
+    const process = yield* spawner.next
+    return {
+      fiber,
+      process,
+      attributes: () => recorder.attributes("ffmpegu/FFprobe.probe")
+    }
+  })
+
+  it.effect("records an exit code the spawner reports asynchronously", () =>
+    Effect.gen(function* () {
+      const { fiber, process, attributes } = yield* probeWithHandle(
+        (handle) => ({
+          exitCode: Effect.flatMap(handle.exitCode, (code) =>
+            Effect.promise(() => Promise.resolve(code))
+          )
+        })
+      )
+      yield* process.emit(1, '{"streams":[]}')
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+
+      assert.strictEqual(attributes()["process.exit.code"], 0)
+    })
+  )
+
+  it.effect("does not wait for an exit code reported late", () =>
+    Effect.gen(function* () {
+      // The spawner reports the process stopped before its exit code is known.
+      const { fiber, process, attributes } = yield* probeWithHandle(
+        () => ({ exitCode: Effect.never, isRunning: Effect.succeed(false) }),
+        { maxOutputBytes: 1 }
+      )
+      yield* process.emit(1, "xx")
+
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ProbeOutputError)
+      assert.notProperty(attributes(), "process.exit.code")
     })
   )
 

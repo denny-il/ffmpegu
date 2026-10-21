@@ -38,12 +38,14 @@ import {
 } from "./command.ts"
 import { ByteTail, ProgressParser } from "./diagnostics.ts"
 import {
+  annotateExitCode,
   awaitExit,
   byteLimit,
   DEFAULT_FORCE_KILL_AFTER,
   DEFAULT_STDERR_TAIL_BYTES,
   drainToTail,
   durationOption,
+  executableName,
   failureReasons,
   firstFailure,
   isClosedByReader,
@@ -152,6 +154,9 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
     options?: RunOptions<unknown, unknown>
   ) {
     const compiled = yield* Effect.fromResult(command.compile())
+    yield* Effect.annotateCurrentSpan(
+      runAttributes(settings, command, compiled, options)
+    )
     // The signature rejects stream outputs only when the command's count is
     // known; commands typed with an unknown count reach this check.
     if (compiled.streamOutputFds.length > 0) {
@@ -215,7 +220,9 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
               options?.onProgress,
               { fd: fds[0]!, queue }
             ).pipe(
-              Effect.withSpan("ffmpegu/FFmpeg.stream"),
+              Effect.withSpan("ffmpegu/FFmpeg.stream", {
+                attributes: runAttributes(settings, command, compiled, options)
+              }),
               Effect.onExit(() => Queue.end(queue)),
               Effect.interruptible,
               Effect.forkScoped
@@ -256,6 +263,25 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
     run: run as FFmpegService["run"],
     stream: stream as FFmpegService["stream"]
   })
+})
+
+/**
+ * Span attributes of a run. Paths, URLs, argv and stderr can carry
+ * credentials, so only the binary's file name and counts are recorded.
+ */
+const runAttributes = (
+  settings: Settings,
+  command: FFmpeguCommand<unknown, unknown>,
+  compiled: CompiledCommand<unknown, unknown>,
+  options: RunOptions<unknown, unknown> | undefined
+) => ({
+  "process.executable.name": executableName(settings.binary),
+  "ffmpegu.inputs": command.inputs.length,
+  "ffmpegu.outputs": command.outputs.length,
+  "ffmpegu.input_streams": compiled.inputStreams.length,
+  "ffmpegu.output_streams":
+    compiled.outputStreams.length + compiled.streamOutputFds.length,
+  "ffmpegu.progress": options?.onProgress !== undefined
 })
 
 /** Destination of an `Output.toStream` output: the queue behind the stream. */
@@ -412,10 +438,12 @@ const execute = (
       // releases the handle. Failed and successful runs have already settled
       // and reported every task; a cancelled run (only interruptions) reports
       // the failures and cleanup defects of its tasks here, next to the
-      // original interruption.
+      // original interruption. An exit code not yet recorded (the run was
+      // stopped before the process exited) is recorded here once known.
       yield* Effect.addFinalizer((runExit) =>
         Effect.gen(function* () {
           yield* abandon
+          yield* annotateExitCode(handle)
           if (
             !(Exit.isFailure(runExit) && Cause.hasInterruptsOnly(runExit.cause))
           ) {
@@ -462,6 +490,9 @@ const execute = (
         return yield* failWith(failureReasons(raced), exits)
       }
       const exit = raced.value
+      if (exit.exitCode !== null) {
+        yield* Effect.annotateCurrentSpan("process.exit.code", exit.exitCode)
+      }
 
       // Once ffmpeg has exited nothing reads its inputs anymore, so pending
       // (possibly infinite) sources are stopped and their finalizers awaited.
