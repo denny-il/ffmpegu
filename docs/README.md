@@ -1,6 +1,6 @@
 # ffmpegu guide
 
-ffmpegu describes FFmpeg commands with pure builders and executes them through Effect v4 services. It supports Node.js and Bun on Linux and macOS.
+ffmpegu describes FFmpeg commands with pure builders and executes them through Effect v4 services. It supports Node.js 26.3+ and Bun 1.4.3+ on Linux and macOS.
 
 ## API guide
 
@@ -54,6 +54,10 @@ program.pipe(Effect.provide(MediaLive), NodeRuntime.runMain)
 ```
 
 For Bun, substitute `BunServices` and `BunRuntime` from `@effect/platform-bun`. FileSystem operations in your application additionally require the platform layer to remain available, for example with `Layer.provideMerge`.
+
+## Runtime requirements
+
+The minimum runtimes are Node.js 26.3.0 and Bun 1.4.3, which provide the global `Temporal`. Earlier releases supported Node.js 24 and Bun 1.4. Applications on older runtimes must upgrade them; the API is otherwise unchanged. The package `engines` field declares both minimums.
 
 ## Migrating from the Promise API
 

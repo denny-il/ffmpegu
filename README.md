@@ -15,7 +15,7 @@ pnpm add ffmpegu effect @effect/platform-node
 # For Bun applications, use @effect/platform-bun instead.
 ```
 
-Requires Effect 4.0.x, Node.js 24+ or Bun 1.4+, macOS or Linux, and FFmpeg/FFprobe on PATH. Custom binary paths can be supplied to the service Layers.
+Requires Effect 4.0.x, Node.js 26.3+ or Bun 1.4.3+, macOS or Linux, and FFmpeg/FFprobe on PATH. Custom binary paths can be supplied to the service Layers.
 
 Known limitation: slow streaming output consumers on macOS/Bun can fail with `ECONNRESET`; investigation and re-enabling the affected tests are tracked in [#3](https://github.com/denny-il/ffmpegu/issues/3).
 

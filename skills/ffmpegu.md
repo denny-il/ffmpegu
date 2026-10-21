@@ -2,7 +2,7 @@
 
 Use the Effect-native ffmpegu API to build and run FFmpeg/FFprobe operations on Node.js or Bun, on Linux or macOS.
 
-Install `ffmpegu`, `effect`, and the application platform package (`@effect/platform-node` or `@effect/platform-bun`). The supported Effect version is the tested 4.0 patch series. FFmpeg/FFprobe binaries must be installed separately.
+Install `ffmpegu`, `effect`, and the application platform package (`@effect/platform-node` or `@effect/platform-bun`). The supported Effect version is the tested 4.0 patch series; the minimum runtimes are Node.js 26.3 and Bun 1.4.3. FFmpeg/FFprobe binaries must be installed separately.
 
 ## Execution model
 
