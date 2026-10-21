@@ -109,8 +109,22 @@ export const formatTime = (t: FFmpeguTimeObject): string => {
   return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`
 }
 
+// FFmpeg parses a time's magnitude into an int64 before applying the sign,
+// so -2^63 µs is out of range as well.
+const MAX_MICROSECONDS = 9_223_372_036_854_775_807n
+
 /** ffmpeg's time base is microseconds; finer precision is truncated. */
 const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
+  const microseconds = durationToMicroseconds(value)
+  if (microseconds > MAX_MICROSECONDS || microseconds < -MAX_MICROSECONDS) {
+    throw new RangeError(
+      `A time value must be within ±${MAX_MICROSECONDS} microseconds.`
+    )
+  }
+  return microseconds
+}
+
+const durationToMicroseconds = (value: FFmpeguDurationValue): bigint => {
   // Same order as `isDurationValue`: anything else is an Effect Duration.
   if (!isTemporalDuration(value)) {
     if (!Duration.isFinite(value)) {

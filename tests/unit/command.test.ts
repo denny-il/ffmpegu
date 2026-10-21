@@ -5,6 +5,7 @@ import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguCommand } from "../../src/core/command.ts"
 import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguOutput } from "../../src/core/output.ts"
+import { FFmpeguReferences } from "../../src/core/references.ts"
 import type { CommandError } from "../../src/errors.ts"
 import { filters, options } from "../../src/index.ts"
 import { FFmpeguOptions } from "../../src/options/core.ts"
@@ -472,6 +473,52 @@ describe("Command", () => {
       const error = compileError(command)
       expect(error.reason).toBe("InvalidArgument")
       expect(error.cause).toBeInstanceOf(RangeError)
+    }
+  })
+
+  it("should fail compilation for time values outside FFmpeg's range", () => {
+    // FFmpeg parses the magnitude into an int64 before negating, so -2^63 µs
+    // is rejected along with 2^63 µs.
+    const max = 9_223_372_036_854_775_807n
+    const refs = new FFmpeguReferences()
+
+    for (const [value, seconds] of [
+      [Duration.micros(max), "9223372036854.775807"],
+      [Duration.micros(-max), "-9223372036854.775807"]
+    ] as const) {
+      expect(options.startTime(value).getArgs(refs)).toEqual(["-ss", seconds])
+      expect(filters.atrim({ start: value }).getArgs(refs)).toEqual([
+        `atrim=start=${seconds}`
+      ])
+    }
+
+    for (const value of [
+      Duration.micros(max + 1n),
+      Duration.micros(-max - 1n),
+      Temporal.Duration.from({ seconds: 9_223_372_036_855 }),
+      Temporal.Duration.from({ seconds: -9_223_372_036_855 })
+    ]) {
+      for (const command of [
+        FFmpeguCommand.make({
+          global: options.startTime(value),
+          outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+        }),
+        FFmpeguCommand.make({
+          inputs: [FFmpeguInput.fromFile("/test/in.wav")],
+          outputs: [
+            FFmpeguOutput.toFile(
+              "/test/out.wav",
+              options.audioFilter(
+                filters.chain(filters.atrim({ start: value }))
+              )
+            )
+          ]
+        })
+      ]) {
+        const error = compileError(command)
+        expect(error.reason).toBe("InvalidArgument")
+        expect(error.cause).toBeInstanceOf(RangeError)
+      }
     }
   })
 
