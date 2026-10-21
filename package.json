@@ -20,7 +20,9 @@
 	},
 	"files": [
 		"dist",
+		"assets/brand",
 		"README.md",
+		"NOTICE.md",
 		"docs/README.md",
 		"docs/ffmpegu/*.md",
 		"LICENSE"
@@ -40,6 +42,7 @@
 		}
 	},
 	"scripts": {
+		"brand:render": "node scripts/render-brand.mjs",
 		"build": "rm -rf dist && tsc -p tsconfig.build.json",
 		"dev": "tsc --watch",
 		"test": "vitest run",
@@ -68,6 +71,7 @@
 		"@effect/platform-bun": "4.0.5",
 		"@effect/platform-node": "4.0.5",
 		"@effect/vitest": "4.0.5",
+		"@resvg/resvg-js": "2.6.2",
 		"@types/node": "^26.6.5",
 		"@vitest/coverage-v8": "5.0.4",
 		"ai": "^7.0.140",
