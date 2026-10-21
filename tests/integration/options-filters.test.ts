@@ -147,6 +147,39 @@ it.live(
     )
 )
 
+it.live("seeks with time values beyond four hour digits", () =>
+  live(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const dir = yield* fs.makeTempDirectoryScoped()
+      // FFmpeg rejects five-digit HH:MM:SS hours as an invalid duration, so
+      // these must render as seconds; seeking past the source leaves no audio.
+      for (const [index, startTime] of [
+        Duration.micros(9_007_199_254_740_993n),
+        Temporal.Duration.from({ hours: 10_000, microseconds: 1 }),
+        { hours: 10_000 }
+      ].entries()) {
+        const target = `${dir}/empty-${index}.pcm`
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile(
+                "anullsrc=d=0.001",
+                Options.create(
+                  options.format("lavfi"),
+                  options.startTime(startTime)
+                )
+              )
+            ],
+            outputs: [Output.toFile(target, options.format("s16le"))]
+          })
+        )
+        expect((yield* fs.readFile(target)).length).toBe(0)
+      }
+    })
+  )
+)
+
 it.live("writes metadata through option helpers that FFprobe can read", () =>
   live(
     Effect.gen(function* () {

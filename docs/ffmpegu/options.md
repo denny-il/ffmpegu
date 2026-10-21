@@ -31,7 +31,7 @@ Common helpers:
 - an Effect `Duration.Duration`, such as `Duration.seconds(90.5)`;
 - a `Temporal.Duration`, such as `Temporal.Duration.from({ minutes: 1, seconds: 30 })`.
 
-Time objects and durations render as `[-]HH:MM:SS.mmm`. Durations keep microseconds, FFmpeg's time base, and render as `HH:MM:SS.uuuuuu` when they have sub-millisecond precision; finer precision is truncated. Pass `Duration` values, not `Duration.Input`: a bare number always means seconds here, while Effect reads a number input as milliseconds.
+Time objects and durations render as `[-]HH:MM:SS.mmm`. Durations keep microseconds, FFmpeg's time base, and render as `HH:MM:SS.uuuuuu` when they have sub-millisecond precision; finer precision is truncated. FFmpeg reads at most four hour digits, so values beyond 9999 hours render as decimal seconds with the same fraction instead (`36000000.000`, `9007199254.740993`). Pass `Duration` values, not `Duration.Input`: a bare number always means seconds here, while Effect reads a number input as milliseconds.
 
 Durations are converted when the command is compiled. Infinite durations and `Temporal.Duration` values with years, months, or weeks (which need a reference date) make `Command.compile()`, `run`, and `probeWith` fail with a `CommandError` whose reason is `InvalidArgument`. Builders do not throw. A `Temporal.Duration` with days counts each day as 24 hours.
 

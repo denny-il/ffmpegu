@@ -155,6 +155,30 @@ describe("Filters Common", { concurrent: false }, () => {
         duration: vm.runInNewContext("Temporal.Duration.from({ days: 1 })")
       }).getArgs(refs)
     ).toEqual(["atrim=start=9007199254.740993:end=-20000000:duration=86400"])
+    // A throwing Effect brand probe neither throws nor hides the value.
+    const timeObject = new Proxy(
+      { seconds: 1 },
+      {
+        has(target, key) {
+          if (key === "~effect/Duration") throw new Error("unsupported probe")
+          return Reflect.has(target, key)
+        }
+      }
+    )
+    const foreign = vm.runInNewContext(
+      "Temporal.Duration.from({ microseconds: 1 })"
+    )
+    Object.setPrototypeOf(
+      foreign,
+      new Proxy(Object.getPrototypeOf(foreign), {
+        has() {
+          throw new Error("unsupported probe")
+        }
+      })
+    )
+    expect(atrim({ start: timeObject, end: foreign }).getArgs(refs)).toEqual([
+      "atrim=start=1:end=0.000001"
+    ])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([

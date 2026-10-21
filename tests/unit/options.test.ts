@@ -83,15 +83,41 @@ describe("Options", { concurrent: false }, () => {
       ffmpegu.options
         .startTime(Duration.micros(9_007_199_254_740_993n))
         .getArgs(refs)
-    ).toEqual(["-ss", "2501999:47:34.740993"])
+    ).toEqual(["-ss", "9007199254.740993"])
   })
 
-  it("should keep the millisecond rendering of large time objects", () => {
+  it("should render seconds once hours exceed four digits", () => {
+    // FFmpeg rejects HH:MM:SS with more than four hour digits.
+    expect(
+      ffmpegu.options
+        .startTime(Duration.micros(36_000_000_000_000n - 1n))
+        .getArgs(refs)
+    ).toEqual(["-ss", "9999:59:59.999999"])
+    expect(
+      ffmpegu.options.startTime(Duration.hours(10_000)).getArgs(refs)
+    ).toEqual(["-ss", "36000000.000"])
+    expect(
+      ffmpegu.options
+        .to(Temporal.Duration.from({ hours: -10_000, microseconds: -1 }))
+        .getArgs(refs)
+    ).toEqual(["-to", "-36000000.000001"])
+    expect(
+      ffmpegu.options
+        .duration({ hours: 9_999, minutes: 59, seconds: 59, milliseconds: 999 })
+        .getArgs(refs)
+    ).toEqual(["-t", "9999:59:59.999"])
+    expect(ffmpegu.options.duration({ hours: 10_000 }).getArgs(refs)).toEqual([
+      "-t",
+      "36000000.000"
+    ])
+    expect(
+      ffmpegu.options.to({ hours: -10_000, milliseconds: -1 }).getArgs(refs)
+    ).toEqual(["-to", "-36000000.001"])
     expect(
       ffmpegu.options
         .duration({ milliseconds: 72_057_594_037_929 })
         .getArgs(refs)
-    ).toEqual(["-t", "20015998:20:37.929"])
+    ).toEqual(["-t", "72057594037.929"])
   })
 
   it("should format Temporal durations as timestamps", () => {
@@ -134,7 +160,7 @@ describe("Options", { concurrent: false }, () => {
           })
         )
         .getArgs(refs)
-    ).toEqual(["-ss", "2501999:47:34.740993"])
+    ).toEqual(["-ss", "9007199254.740993"])
     // Nanoseconds are truncated toward zero, like Effect durations.
     expect(
       ffmpegu.options
@@ -153,7 +179,7 @@ describe("Options", { concurrent: false }, () => {
           })
         )
         .getArgs(refs)
-    ).toEqual(["-to", "-2501999:47:34.740993"])
+    ).toEqual(["-to", "-9007199254.740993"])
   })
 
   it("should format Temporal durations from another realm", () => {
@@ -164,6 +190,34 @@ describe("Options", { concurrent: false }, () => {
     expect(ffmpegu.options.startTime(foreign).getArgs(refs)).toEqual([
       "-ss",
       "24:00:00.000001"
+    ])
+  })
+
+  it("should not let a throwing Effect brand probe break time values", () => {
+    const throwOnEffectProbe = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        has(target, key) {
+          if (key === "~effect/Duration") throw new Error("unsupported probe")
+          return Reflect.has(target, key)
+        }
+      })
+    expect(
+      ffmpegu.options
+        .startTime(throwOnEffectProbe({ seconds: 1 }))
+        .getArgs(refs)
+    ).toEqual(["-ss", "00:00:01.000"])
+    // Native getters still read a genuine Duration whose prototype chain
+    // throws for the probe.
+    const foreign = vm.runInNewContext(
+      "Temporal.Duration.from({ seconds: 1, microseconds: 1 })"
+    )
+    Object.setPrototypeOf(
+      foreign,
+      throwOnEffectProbe(Object.getPrototypeOf(foreign))
+    )
+    expect(ffmpegu.options.startTime(foreign).getArgs(refs)).toEqual([
+      "-ss",
+      "00:00:01.000001"
     ])
   })
 

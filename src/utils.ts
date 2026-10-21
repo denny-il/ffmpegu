@@ -33,6 +33,9 @@ const NS_IN_SECOND = 1_000_000_000n
 const NS_IN_MINUTE = 60n * NS_IN_SECOND
 const NS_IN_HOUR = 60n * NS_IN_MINUTE
 const NS_IN_DAY = 24n * NS_IN_HOUR
+// FFmpeg's av_parse_time reads at most four hour digits in HH:MM:SS, so
+// longer values render as decimal seconds, which it parses exactly.
+const MAX_TIMESTAMP_HOURS = 9_999
 
 export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
   typeof value === "object" && value !== null && !("getArgs" in value)
@@ -54,16 +57,27 @@ const isTemporalDuration = (value: object): value is Temporal.Duration => {
   }
 }
 
+// `isDuration` probes with `in`, which a proxy's `has` trap may make throw.
+// Such a value is not an Effect Duration, and builders must not throw.
+const isEffectDuration = (value: object): value is Duration.Duration => {
+  try {
+    return Duration.isDuration(value)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Must be checked before `isTimeObject`, which both kinds also satisfy:
- * `Temporal.Duration` even has the time object's fields.
+ * `Temporal.Duration` even has the time object's fields. The native check
+ * runs first because it never consults the prototype chain.
  */
 export const isDurationValue = (
   value: unknown
 ): value is FFmpeguDurationValue =>
   typeof value === "object" &&
   value !== null &&
-  (Duration.isDuration(value) || isTemporalDuration(value))
+  (isTemporalDuration(value) || isEffectDuration(value))
 
 type ResolvedTimeOptions<T, K extends keyof T> = {
   [P in keyof T]: P extends K
@@ -89,12 +103,16 @@ export const formatTime = (t: FFmpeguTimeObject): string => {
   const ms = absoluteMilliseconds % MS_IN_SECOND
   const pad2 = (n: number) => String(n).padStart(2, "0")
   const pad3 = (n: number) => String(n).padStart(3, "0")
+  if (h > MAX_TIMESTAMP_HOURS) {
+    return `${sign}${Math.floor(absoluteMilliseconds / MS_IN_SECOND)}.${pad3(ms)}`
+  }
   return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`
 }
 
 /** ffmpeg's time base is microseconds; finer precision is truncated. */
 const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
-  if (Duration.isDuration(value)) {
+  // Same order as `isDurationValue`: anything else is an Effect Duration.
+  if (!isTemporalDuration(value)) {
     if (!Duration.isFinite(value)) {
       throw new RangeError("A time value must be a finite Duration.")
     }
@@ -127,7 +145,10 @@ const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
 
 const pad = (n: bigint, length: number) => String(n).padStart(length, "0")
 
-/** `[-]HH:MM:SS.mmm`, or `.uuuuuu` with sub-millisecond precision. */
+/**
+ * `[-]HH:MM:SS.mmm`, or `.uuuuuu` with sub-millisecond precision. Beyond
+ * 9999 hours, `[-]S.mmm` or `[-]S.uuuuuu` with the same fraction.
+ */
 const formatTimestamp = (microseconds: bigint): string => {
   const sign = microseconds < 0n ? "-" : ""
   const absolute = microseconds < 0n ? -microseconds : microseconds
@@ -137,6 +158,9 @@ const formatTimestamp = (microseconds: bigint): string => {
   const fraction = absolute % US_IN_SECOND
   const digits =
     fraction % US_IN_MS === 0n ? pad(fraction / US_IN_MS, 3) : pad(fraction, 6)
+  if (h > BigInt(MAX_TIMESTAMP_HOURS)) {
+    return `${sign}${absolute / US_IN_SECOND}.${digits}`
+  }
   return `${sign}${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${digits}`
 }
 
