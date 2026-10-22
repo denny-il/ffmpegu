@@ -7,8 +7,12 @@ import type { FFmpeguFilter } from "./core.ts"
  * Filters in a chain are separated by commas in FFmpeg syntax
  */
 export class FFmpeguFilterChain extends FFmpeguArgument {
-  constructor(private readonly filters: FFmpeguFilter[]) {
+  private readonly filters: ReadonlyArray<FFmpeguFilter>
+
+  constructor(filters: ReadonlyArray<FFmpeguFilter>) {
     super()
+    // Copy so later changes to the caller's array cannot alter this value.
+    this.filters = [...filters]
   }
 
   static create(...filters: FFmpeguFilter[]): FFmpeguFilterChain {

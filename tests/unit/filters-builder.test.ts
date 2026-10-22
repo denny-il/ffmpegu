@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import { FFmpeguFilterBuilder } from "../../src/filters/builder.ts"
+import { FFmpeguFilterChain } from "../../src/filters/chain.ts"
+import { FFmpeguFilterGraph } from "../../src/filters/graph.ts"
 import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
 import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
 
@@ -16,6 +18,42 @@ describe("Filters Builder", { concurrent: false }, () => {
       .build()
 
     expect(graph.getArgs(refs)).toEqual(["scale=w=320:h=180;fps=fps=30"])
+  })
+
+  it("should not change a builder when chaining from it", () => {
+    const base = FFmpeguFilterBuilder.create().chain(
+      FFmpeguSimpleFilter.create("scale", { w: 320, h: 180 })
+    )
+    const withFps = base.chain(FFmpeguSimpleFilter.create("fps", { fps: 30 }))
+    const withFlip = base.chain(FFmpeguSimpleFilter.create("hflip"))
+
+    expect(base.build().getArgs(refs)).toEqual(["scale=w=320:h=180"])
+    expect(withFps.build().getArgs(refs)).toEqual([
+      "scale=w=320:h=180;fps=fps=30"
+    ])
+    expect(withFlip.build().getArgs(refs)).toEqual(["scale=w=320:h=180;hflip"])
+  })
+
+  it("should not change when the values passed to constructors change", () => {
+    const options: Record<string, number> = { w: 320 }
+    const inputs = [FFmpeguFilterLabelRef.create("in")]
+    const outputs = [FFmpeguFilterLabelRef.create("out")]
+    const filters = [
+      FFmpeguSimpleFilter.create("scale", options, inputs, outputs)
+    ]
+    const chains = [new FFmpeguFilterChain(filters)]
+    const graph = new FFmpeguFilterGraph(chains)
+    const builder = new FFmpeguFilterBuilder(chains)
+
+    options.w = 640
+    options.h = 360
+    inputs.push(FFmpeguFilterLabelRef.create("extra_in"))
+    outputs.push(FFmpeguFilterLabelRef.create("extra_out"))
+    filters.push(FFmpeguSimpleFilter.create("hflip"))
+    chains.push(FFmpeguFilterChain.create(FFmpeguSimpleFilter.create("vflip")))
+
+    expect(graph.getArgs(refs)).toEqual(["[in]scale=w=320[out]"])
+    expect(builder.build().getArgs(refs)).toEqual(["[in]scale=w=320[out]"])
   })
 
   it("should create custom filters via builder", () => {

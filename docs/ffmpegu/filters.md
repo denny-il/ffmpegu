@@ -46,6 +46,21 @@ const output = ffmpegu.output.toFile(
 )
 ```
 
+## Builder
+
+`ffmpegu.filters.builder()` returns an immutable builder. Each `chain(...filters)` call returns a new builder with the chain appended and leaves the original unchanged, so a base builder can be reused safely. Filters, chains, graphs, builders and option bundles copy the arrays, option records and option tuples they receive, so changing those values afterwards does not change them.
+
+```ts
+const base = ffmpegu.filters
+  .builder()
+  .chain(ffmpegu.filters.scale({ w: 640, h: 360 }))
+const withFps = base.chain(ffmpegu.filters.fps({ fps: 30 })).build()
+const flipped = base.chain(ffmpegu.filters.hflip()).build()
+// base.build() still renders only the scale chain.
+```
+
+> **Breaking change:** earlier versions mutated the builder in place and returned it. Code that calls `builder.chain(...)` without using the result now loses those chains. Use the returned builder instead, for example `builder = builder.chain(...)`, or chain the calls in one expression.
+
 ## Filter graphs with labels
 
 ```ts

@@ -8,8 +8,8 @@ import type { FFmpeguFilterLabelRef } from "../label.ts"
 import { FFmpeguSimpleFilter } from "../simple.ts"
 
 type FilterLabels = {
-  inputs?: FFmpeguFilterLabelRef[]
-  outputs?: FFmpeguFilterLabelRef[]
+  inputs?: ReadonlyArray<FFmpeguFilterLabelRef>
+  outputs?: ReadonlyArray<FFmpeguFilterLabelRef>
 }
 
 type FilterOptionValue = FilterArgument

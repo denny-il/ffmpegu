@@ -539,6 +539,15 @@ assertType<Equals<Progress["progress"], "continue" | "end">>(true)
 assertType<Equals<Progress["outTime"], Duration.Duration | undefined>>(true)
 assertType<Equals<Progress["totalSize"], number | undefined>>(true)
 
+// Filter labels accept readonly arrays.
+const readonlyLabels: ReadonlyArray<ReturnType<typeof filters.label>> = [
+  filters.label("in")
+]
+filters.scale({ w: 320 }, { inputs: readonlyLabels, outputs: readonlyLabels })
+filters.custom("null", {}, readonlyLabels, readonlyLabels)
+// @ts-expect-error option bundles are immutable
+options.custom("-y").args.push("-n")
+
 // Contract violations.
 declare const strings: Stream.Stream<string>
 declare const readable: Readable

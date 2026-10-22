@@ -7,18 +7,25 @@ import { FFmpeguSimpleFilter } from "./simple.ts"
  * Builder for creating filter chains and graphs
  */
 export class FFmpeguFilterBuilder {
-  private chains: FFmpeguFilterChain[] = []
+  private readonly chains: ReadonlyArray<FFmpeguFilterChain>
+
+  constructor(chains: ReadonlyArray<FFmpeguFilterChain> = []) {
+    // Copy so later changes to the caller's array cannot alter this value.
+    this.chains = [...chains]
+  }
 
   static create(): FFmpeguFilterBuilder {
     return new FFmpeguFilterBuilder()
   }
 
   /**
-   * Add a filter chain to the graph
+   * Return a new builder with a filter chain appended; this builder is unchanged
    */
   chain(...filters: FFmpeguFilter[]): FFmpeguFilterBuilder {
-    this.chains.push(FFmpeguFilterChain.create(...filters))
-    return this
+    return new FFmpeguFilterBuilder([
+      ...this.chains,
+      FFmpeguFilterChain.create(...filters)
+    ])
   }
 
   /**

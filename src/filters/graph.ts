@@ -7,8 +7,12 @@ import type { FFmpeguFilterChain } from "./chain.ts"
  * Chains are separated by semicolons in FFmpeg syntax
  */
 export class FFmpeguFilterGraph extends FFmpeguArgument {
-  constructor(private readonly chains: FFmpeguFilterChain[]) {
+  private readonly chains: ReadonlyArray<FFmpeguFilterChain>
+
+  constructor(chains: ReadonlyArray<FFmpeguFilterChain>) {
     super()
+    // Copy so later changes to the caller's array cannot alter this value.
+    this.chains = [...chains]
   }
 
   static create(...chains: FFmpeguFilterChain[]): FFmpeguFilterGraph {

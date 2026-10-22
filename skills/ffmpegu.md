@@ -57,7 +57,7 @@ File paths are passed to FFmpeg to retain seeking. Use Effect FileSystem for app
 - `label(value)` -- create `[label]` reference (accepts string or input stream ref)
 - `chain(...filters)` -- comma-separated filter chain (for `-vf`/`-af`)
 - `graph(...chains)` -- semicolon-separated filtergraph (for `-filter_complex`)
-- `builder()` -- programmatic filter builder
+- `builder()` -- immutable filter builder; `chain(...)` returns a new builder, so use its result
 
 ### Typed filter helpers
 
