@@ -1,4 +1,6 @@
+import * as ByteSize from "effect/ByteSize"
 import * as Cause from "effect/Cause"
+import * as Config from "effect/Config"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -6,6 +8,8 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import type { ChildProcessHandle } from "effect/process/ChildProcessSpawner"
+import * as Schema from "effect/Schema"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as Stream from "effect/Stream"
 import { PipeError } from "../errors.ts"
 import { ByteTail } from "./diagnostics.ts"
@@ -130,39 +134,155 @@ export const executableName = (binary: string): string =>
   binary.slice(binary.lastIndexOf("/") + 1)
 
 /**
- * Validates a byte limit. Invalid limits (negative, fractional, NaN or
- * infinite) are programmer errors and make layer construction die.
+ * An invalid service option. Programmatic options are programmer errors (see
+ * {@link orDieInvalid}); configured ones are recoverable (see
+ * {@link validatedConfig}).
  */
+export class InvalidOption {
+  readonly _tag = "InvalidOption"
+  constructor(
+    readonly option: string,
+    readonly value: unknown,
+    readonly expected: string
+  ) {}
+  get message(): string {
+    return `${this.option} must be ${this.expected}, got: ${String(this.value)}`
+  }
+}
+
+/** Validates a byte limit: a non-negative safe integer or a byte size. */
 export const byteLimit = (
   name: string,
-  value: number | undefined,
+  value: ByteSize.Input | undefined,
   fallback: number
-): Effect.Effect<number> => {
-  const limit = value ?? fallback
-  return Number.isSafeInteger(limit) && limit >= 0
-    ? Effect.succeed(limit)
-    : Effect.die(
-        new Cause.IllegalArgumentError(
-          `${name} must be a non-negative safe integer, got: ${limit}`
+): Effect.Effect<number, InvalidOption> => {
+  if (value === undefined) return Effect.succeed(fallback)
+  const limit = Option.flatMap(ByteSize.fromInput(value), ByteSize.toNumber)
+  return Option.isSome(limit)
+    ? Effect.succeed(limit.value)
+    : Effect.fail(
+        new InvalidOption(
+          name,
+          value,
+          "a non-negative safe integer or byte size"
         )
       )
 }
 
-/** Validates a duration option; invalid input makes layer construction die. */
+// Nanoseconds per unit of each field `Duration.fromInput` reads from a
+// `DurationObject`.
+const NANOS_PER_UNIT = {
+  weeks: 604_800e9,
+  days: 86_400e9,
+  hours: 3_600e9,
+  minutes: 60e9,
+  seconds: 1e9,
+  milliseconds: 1e6,
+  microseconds: 1e3,
+  nanoseconds: 1
+} as const
+
+// `Duration.fromInput` normalises with floating-point arithmetic. It reads NaN
+// as zero, sums the parts of a tuple or object (so parts of opposite sign, or
+// infinite ones, can cancel out) and rounds tiny values to zero. So no part
+// may be negative or NaN, checked before normalisation; the number `-0`
+// counts as zero. The parts of a tuple or object must also total at most a safe integer of
+// nanoseconds (about 104 days), so that whole-unit parts sum exactly and a
+// small part is not lost to a huge one. Single values are not summed, so
+// `"Infinity"` stays allowed.
+const isSafeInput = (input: Duration.Input): boolean => {
+  switch (typeof input) {
+    case "number":
+      return input >= 0
+    case "bigint":
+      return input >= 0n
+    case "string":
+      // Parsing the numeric part could underflow to `-0`, so a leading `-`
+      // is rejected, even in `"-0 seconds"`.
+      return !input.startsWith("-")
+  }
+  if (Duration.isDuration(input)) return !Duration.isNegative(input)
+  const parts: ReadonlyArray<readonly [unknown, number]> = Array.isArray(input)
+    ? [
+        [input[0], 1e9],
+        [input[1], 1]
+      ]
+    : Object.entries(NANOS_PER_UNIT).map(([field, nanos]) => [
+        (input as Record<string, unknown>)[field],
+        nanos
+      ])
+  let total = 0
+  for (const [value, nanos] of parts) {
+    if (value === undefined) continue
+    if (typeof value !== "number" || !(value >= 0)) return false
+    total += value * nanos
+  }
+  // Also rejects infinite parts.
+  return total <= Number.MAX_SAFE_INTEGER
+}
+
+/**
+ * Validates a non-negative duration option. Zero and `"Infinity"` are
+ * allowed; negative values and NaN, which `Duration` would silently read as
+ * zero, are not. The parts of a tuple or object must all be non-negative and
+ * total at most `Number.MAX_SAFE_INTEGER` nanoseconds, as `Duration` sums
+ * them in floating point.
+ */
 export const durationOption = (
   name: string,
   value: Duration.Input | undefined,
   fallback: Duration.Input
-): Effect.Effect<Duration.Duration> => {
-  const duration = Duration.fromInput(value ?? fallback)
+): Effect.Effect<Duration.Duration, InvalidOption> => {
+  const input = value ?? fallback
+  const duration = isSafeInput(input)
+    ? Duration.fromInput(input)
+    : Option.none()
   return Option.isSome(duration)
     ? Effect.succeed(duration.value)
-    : Effect.die(
-        new Cause.IllegalArgumentError(
-          `${name} must be a valid duration, got: ${String(value)}`
-        )
-      )
+    : Effect.fail(new InvalidOption(name, value, "a non-negative duration"))
 }
+
+/** Invalid programmatic options make layer construction die. */
+export const orDieInvalid = <A, R>(
+  self: Effect.Effect<A, InvalidOption, R>
+): Effect.Effect<A, never, R> =>
+  Effect.catch(self, (invalid) =>
+    Effect.die(new Cause.IllegalArgumentError(invalid.message))
+  )
+
+// `Config.unwrap` treats an `undefined` record field as a nested record and
+// throws, so such fields are dropped: they mean an omitted option.
+const omitUndefined = <Options>(
+  options: Config.Wrap<Options>
+): Config.Wrap<Options> =>
+  Config.isConfig(options)
+    ? options
+    : (Object.fromEntries(
+        Object.entries(options).filter(([, field]) => field !== undefined)
+      ) as unknown as Config.Wrap<Options>)
+
+/**
+ * Unwraps configured options and validates them into settings, so that
+ * invalid values fail as a `ConfigError` at the option's key.
+ */
+export const validatedConfig = <Options, Settings>(
+  options: Config.Wrap<Options>,
+  validate: (options: Options) => Effect.Effect<Settings, InvalidOption>
+): Config.Config<Settings> =>
+  Config.mapEffect(Config.unwrap(omitUndefined(options)), (unwrapped) =>
+    Effect.mapError(
+      validate(unwrapped),
+      (invalid) =>
+        new Config.ConfigError(
+          new Schema.SchemaError(
+            new SchemaIssue.Pointer(
+              [invalid.option],
+              new SchemaIssue.InvalidValue({ message: invalid.message })
+            )
+          )
+        )
+    )
+  )
 
 /**
  * Maps the typed errors of a stream at the cause level. Unlike

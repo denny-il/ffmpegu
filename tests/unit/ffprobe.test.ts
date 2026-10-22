@@ -1,5 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect"
+import {
+  Config,
+  ConfigProvider,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Schema,
+  Tracer
+} from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import {
   ExitError,
@@ -851,9 +861,140 @@ describe("FFprobe", () => {
     })
   )
 
-  it.effect("rejects invalid limits", () =>
+  it.effect("reads byte sizes from a Config layer", () =>
     Effect.gen(function* () {
-      const { layer } = yield* setup({ maxOutputBytes: Number.NaN })
+      const spawner = yield* makeFakeSpawner()
+      const layer = FFprobe.layerConfig({
+        maxOutputBytes: Config.ByteSize("FFPROBE_MAX_OUTPUT")
+      }).pipe(
+        Layer.provide(spawner.layer),
+        Layer.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({ FFPROBE_MAX_OUTPUT: "8 B" })
+          )
+        )
+      )
+      const fiber = yield* Effect.forkChild(
+        probe("/test/input.mp4").pipe(Effect.provide(layer))
+      )
+      const process = yield* spawner.next
+      yield* process.emit(1, '{"streams":', "[]}")
+
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ProbeOutputError)
+      assert.strictEqual(error.maxOutputBytes, 8)
+    })
+  )
+
+  it.effect("treats undefined fields of a Config record as omitted", () =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const fiber = yield* Effect.forkChild(
+        probe("/test/input.mp4").pipe(
+          Effect.provide(
+            FFprobe.layerConfig({ maxOutputBytes: undefined }).pipe(
+              Layer.provide(spawner.layer)
+            )
+          )
+        )
+      )
+      const process = yield* spawner.next
+      yield* process.emit(1, '{"streams":[]}')
+      yield* process.exit(0)
+      assert.deepStrictEqual((yield* Fiber.join(fiber)).streams, [])
+    })
+  )
+
+  it.effect("fails with ConfigError for invalid configured limits", () =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const error = yield* probe("x").pipe(
+        Effect.provide(
+          FFprobe.layerConfig({
+            maxOutputBytes: Config.Int("FFPROBE_MAX_OUTPUT")
+          }).pipe(
+            Layer.provide(spawner.layer),
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({ FFPROBE_MAX_OUTPUT: -1 })
+              )
+            )
+          )
+        ),
+        Effect.flip
+      )
+      assert.instanceOf(error, Config.ConfigError)
+      assert.include(error.message, "maxOutputBytes must be")
+    })
+  )
+
+  const weeksAndDays = Config.all({
+    weeks: Config.Number("WEEKS"),
+    days: Config.Number("DAYS")
+  })
+
+  it.effect.each<
+    [string, Config.Config<Duration.Input>, Record<string, string>]
+  >([
+    [
+      "infinite fields cancel out",
+      weeksAndDays,
+      { WEEKS: "Infinity", DAYS: "-Infinity" }
+    ],
+    ["total overflows", weeksAndDays, { WEEKS: "1e308", DAYS: "-1e308" }],
+    [
+      "negative finite fields round to zero",
+      Config.all({
+        weeks: Config.Number("WEEKS"),
+        seconds: Config.Number("SECONDS"),
+        milliseconds: Config.Number("MILLISECONDS")
+      }),
+      { WEEKS: "1e12", SECONDS: "-1", MILLISECONDS: "-604800000000000000000" }
+    ],
+    [
+      "negative value rounds to zero",
+      Config.Number("VALUE"),
+      {
+        VALUE: "-5e-324"
+      }
+    ]
+  ])("fails with ConfigError for a grace period whose %s", ([, config, env]) =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const error = yield* probe("x").pipe(
+        Effect.provide(
+          FFprobe.layerConfig({ forceKillAfter: config }).pipe(
+            Layer.provide(spawner.layer),
+            Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
+          )
+        ),
+        Effect.flip
+      )
+      assert.instanceOf(error, Config.ConfigError)
+      assert.include(error.message, "forceKillAfter must be")
+    })
+  )
+
+  it.effect.each<[FFprobeOptions]>([
+    [{ maxOutputBytes: Number.NaN }],
+    [{ forceKillAfter: -1 }],
+    [{ forceKillAfter: { seconds: Infinity, milliseconds: -Infinity } }],
+    [{ forceKillAfter: { weeks: 1e308, days: -1e308 } }],
+    [
+      {
+        forceKillAfter: {
+          weeks: 1e12,
+          seconds: -1,
+          milliseconds: -604800000000000000000
+        }
+      }
+    ],
+    [{ forceKillAfter: -Number.MIN_VALUE }],
+    [{ forceKillAfter: [1, -1000000000.25] }],
+    [{ forceKillAfter: "-0.0000000001 seconds" }]
+  ])("rejects invalid options %j", ([options]) =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup(options)
       const exit = yield* Effect.exit(probe("x").pipe(Effect.provide(layer)))
       assert.isTrue(
         Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Die"

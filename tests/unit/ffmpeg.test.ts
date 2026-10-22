@@ -1123,18 +1123,16 @@ describe("FFmpeg", () => {
     () =>
       Effect.gen(function* () {
         const spawner = yield* makeFakeSpawner()
-        const layer = FFmpeg.layerConfig(
-          Config.all({
-            binary: Config.String("FFMPEG_BINARY"),
-            stderrTailBytes: Config.Int("FFMPEG_STDERR_TAIL")
-          })
-        ).pipe(
+        const layer = FFmpeg.layerConfig({
+          binary: Config.String("FFMPEG_BINARY"),
+          stderrTailBytes: Config.ByteSize("FFMPEG_STDERR_TAIL")
+        }).pipe(
           Layer.provide(spawner.layer),
           Layer.provide(
             ConfigProvider.layer(
               ConfigProvider.fromUnknown({
                 FFMPEG_BINARY: "/opt/ffmpeg",
-                FFMPEG_STDERR_TAIL: 3
+                FFMPEG_STDERR_TAIL: "3 B"
               })
             )
           )
@@ -1150,16 +1148,217 @@ describe("FFmpeg", () => {
       })
   )
 
+  it.effect("treats undefined fields of a Config record as omitted", () =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const layer = FFmpeg.layerConfig({
+        binary: Config.String("FFMPEG_BINARY"),
+        stderrTailBytes: undefined
+      }).pipe(
+        Layer.provide(spawner.layer),
+        Layer.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({ FFMPEG_BINARY: "/opt/ffmpeg" })
+          )
+        )
+      )
+      const fiber = yield* Effect.forkChild(
+        run(toFile).pipe(Effect.provide(layer))
+      )
+      const process = yield* spawner.next
+      assert.strictEqual(process.command.command, "/opt/ffmpeg")
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+    })
+  )
+
   it.effect.each([
+    [
+      "a negative count",
+      { stderrTailBytes: Config.Int("VALUE") },
+      { VALUE: "-1" },
+      "stderrTailBytes"
+    ],
+    [
+      "an unsafe byte size",
+      { stderrTailBytes: Config.ByteSize("VALUE") },
+      { VALUE: "1 EiB" },
+      "stderrTailBytes"
+    ],
+    [
+      "a fractional count in a single Config",
+      Config.all({ stderrTailBytes: Config.Number("VALUE") }),
+      { VALUE: "1.5" },
+      "stderrTailBytes"
+    ],
+    [
+      "a negative grace period",
+      { forceKillAfter: Config.Duration("VALUE") },
+      { VALUE: "-1 seconds" },
+      "forceKillAfter"
+    ],
+    [
+      "a grace period whose infinite fields cancel out",
+      {
+        forceKillAfter: Config.all({
+          seconds: Config.Number("SECONDS"),
+          milliseconds: Config.Number("MILLISECONDS")
+        })
+      },
+      { SECONDS: "Infinity", MILLISECONDS: "-Infinity" },
+      "forceKillAfter"
+    ],
+    [
+      "a grace period whose total overflows",
+      {
+        forceKillAfter: Config.all({
+          weeks: Config.Number("WEEKS"),
+          days: Config.Number("DAYS")
+        })
+      },
+      { WEEKS: "1e308", DAYS: "-1e308" },
+      "forceKillAfter"
+    ],
+    [
+      "a negative grace period whose finite fields round to zero",
+      {
+        forceKillAfter: Config.all({
+          weeks: Config.Number("WEEKS"),
+          seconds: Config.Number("SECONDS"),
+          milliseconds: Config.Number("MILLISECONDS")
+        })
+      },
+      {
+        WEEKS: "1e12",
+        SECONDS: "-1",
+        MILLISECONDS: "-604800000000000000000"
+      },
+      "forceKillAfter"
+    ],
+    [
+      "a negative grace period that rounds to zero",
+      { forceKillAfter: Config.Number("VALUE") },
+      { VALUE: "-5e-324" },
+      "forceKillAfter"
+    ],
+    [
+      "a negative tuple grace period that rounds to zero",
+      {
+        forceKillAfter: Config.all([
+          Config.Number("SECONDS"),
+          Config.Number("NANOS")
+        ])
+      },
+      { SECONDS: "1", NANOS: "-1000000000.25" },
+      "forceKillAfter"
+    ],
+    [
+      "a negative grace period string that rounds to zero",
+      // `Config.Duration` would round it to zero before validation.
+      {
+        forceKillAfter: Config.String("VALUE") as Config.Config<Duration.Input>
+      },
+      { VALUE: "-0.0000000001 seconds" },
+      "forceKillAfter"
+    ]
+  ] as const)("fails with ConfigError for %s", ([, options, env, name]) =>
+    Effect.gen(function* () {
+      const spawner = yield* makeFakeSpawner()
+      const exit = yield* Effect.service(FFmpeg).pipe(
+        Effect.provide(
+          FFmpeg.layerConfig(options).pipe(
+            Layer.provide(spawner.layer),
+            Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
+          )
+        ),
+        Effect.exit
+      )
+      const reasons = describeCause(exit)
+      assert.strictEqual(reasons.length, 1)
+      const [tag, error] = reasons[0]!
+      assert.strictEqual(tag, "Fail")
+      assert.instanceOf(error, Config.ConfigError)
+      assert.include(error.message, `${name} must be`)
+    })
+  )
+
+  it.effect.each<[FFmpegOptions]>([
     [{ stderrTailBytes: Number.NaN }],
     [{ stderrTailBytes: Number.POSITIVE_INFINITY }],
     [{ stderrTailBytes: -1 }],
     [{ stderrTailBytes: 1.5 }],
-    [{ forceKillAfter: "soon" as never }]
+    [{ forceKillAfter: "soon" as never }],
+    [{ forceKillAfter: -1 }],
+    [{ forceKillAfter: "-Infinity" }],
+    // Duration.fromInput reads NaN as zero.
+    [{ forceKillAfter: Number.NaN }],
+    [{ forceKillAfter: [Number.NaN, 0] }],
+    [{ forceKillAfter: { seconds: 1, milliseconds: Number.NaN } }],
+    // Duration.fromInput sums object fields, which can cancel out to zero.
+    [{ forceKillAfter: { seconds: Infinity, milliseconds: -Infinity } }],
+    [{ forceKillAfter: { weeks: 1e308, days: -1e308 } }],
+    [{ forceKillAfter: { seconds: Infinity } }],
+    [{ forceKillAfter: [Infinity, 0] }],
+    // Floating-point sums and rounding would turn these into zero.
+    [
+      {
+        forceKillAfter: {
+          weeks: 1e12,
+          seconds: -1,
+          milliseconds: -604800000000000000000
+        }
+      }
+    ],
+    [
+      {
+        forceKillAfter: {
+          weeks: 1e12,
+          seconds: 1,
+          milliseconds: -604800000000000000000
+        }
+      }
+    ],
+    [{ forceKillAfter: -Number.MIN_VALUE }],
+    [{ forceKillAfter: [1, -1000000000.25] }],
+    [{ forceKillAfter: "-0.0000000001 seconds" }],
+    // Parsing would underflow to -0.
+    [{ forceKillAfter: `-0.${"0".repeat(323)}1 seconds` as Duration.Input }],
+    [{ forceKillAfter: "-0 seconds" }],
+    // Mixed signs are rejected even when the total is positive.
+    [{ forceKillAfter: { seconds: 1, milliseconds: -500 } }],
+    // Beyond a safe number of nanoseconds, the 1 second would be lost.
+    [{ forceKillAfter: { weeks: 1e12, seconds: 1 } }],
+    [
+      {
+        forceKillAfter: new (class {
+          get seconds() {
+            return Number.NaN
+          }
+        })()
+      }
+    ]
   ])("rejects invalid options %j", ([options]) =>
     Effect.gen(function* () {
       const exit = yield* setup(options).pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
+    })
+  )
+
+  it.effect.each([
+    [0, 0],
+    [-0, 0],
+    ["Infinity", Infinity]
+  ] as const)("accepts a forceKillAfter of %s", ([forceKillAfter, expected]) =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup({ forceKillAfter })
+      const fiber = yield* Effect.forkChild(ffmpeg.run(toFile))
+      const process = yield* next
+      assert.strictEqual(
+        millis(process.command.options.forceKillAfter),
+        expected
+      )
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
     })
   )
 })

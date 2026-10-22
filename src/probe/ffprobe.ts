@@ -1,3 +1,4 @@
+import type * as ByteSize from "effect/ByteSize"
 import * as Cause from "effect/Cause"
 import type * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -32,7 +33,9 @@ import {
   durationOption,
   executableName,
   mapEffectErrors,
-  mapStreamErrors
+  mapStreamErrors,
+  orDieInvalid,
+  validatedConfig
 } from "../core/process.ts"
 import { probeArgs } from "./command.ts"
 import { ProbeResult, ProjectedProbeResult } from "./schema.ts"
@@ -40,12 +43,21 @@ import { ProbeResult, ProjectedProbeResult } from "./schema.ts"
 export interface FFprobeOptions {
   /** Binary name or path. Defaults to `"ffprobe"`. */
   readonly binary?: string | undefined
-  /** Grace period after SIGTERM before SIGKILL. Defaults to 5 seconds. */
+  /**
+   * Grace period after SIGTERM before SIGKILL. Defaults to 5 seconds. Must
+   * not be negative or NaN; `0` (or `-0`) escalates at once, `"Infinity"`
+   * never does. Strings with a leading `-` are rejected. Every element of a tuple and field of a duration object must
+   * be non-negative (mixed signs are rejected), with a total of at most
+   * `Number.MAX_SAFE_INTEGER` nanoseconds (about 104 days).
+   */
   readonly forceKillAfter?: Duration.Input | undefined
-  /** Largest accepted JSON output. Defaults to 16 MiB. */
-  readonly maxOutputBytes?: number | undefined
-  /** Bytes of stderr kept for errors. Defaults to 64 KiB. */
-  readonly stderrTailBytes?: number | undefined
+  /**
+   * Largest accepted JSON output, as a byte count or a size such as
+   * `"16 MiB"`. Defaults to 16 MiB.
+   */
+  readonly maxOutputBytes?: ByteSize.Input | undefined
+  /** Bytes of stderr kept for errors, like `maxOutputBytes`. Defaults to 64 KiB. */
+  readonly stderrTailBytes?: ByteSize.Input | undefined
 }
 
 export interface FFprobeService {
@@ -72,17 +84,30 @@ export interface FFprobeService {
 export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
   "ffmpegu/FFprobe"
 ) {
-  /** Layer running `ffprobe` through the provided `ChildProcessSpawner`. */
+  /**
+   * Layer running `ffprobe` through the provided `ChildProcessSpawner`.
+   * Invalid options are defects.
+   */
   static layer = (
     options: FFprobeOptions = {}
   ): Layer.Layer<FFprobe, never, ChildProcessSpawner> =>
-    Layer.effect(FFprobe, make(options))
+    Layer.effect(
+      FFprobe,
+      Effect.flatMap(orDieInvalid(toSettings(options)), make)
+    )
 
-  /** Like {@link FFprobe.layer}, reading options from `Config`. */
+  /**
+   * Like {@link FFprobe.layer}, reading options from `Config`: either a
+   * `Config` of all options or a record of a `Config` per option. Invalid
+   * values fail with `ConfigError`.
+   */
   static layerConfig = (
-    options: Config.Config<FFprobeOptions>
+    options: Config.Wrap<FFprobeOptions>
   ): Layer.Layer<FFprobe, Config.ConfigError, ChildProcessSpawner> =>
-    Layer.effect(FFprobe, Effect.flatMap(options, make))
+    Layer.effect(
+      FFprobe,
+      Effect.flatMap(validatedConfig(options, toSettings), make)
+    )
 }
 
 /** Probe with the `FFprobe` service from the context. */
@@ -142,24 +167,41 @@ const parseJson = decodeOutput(Schema.fromJsonString(Schema.Unknown))
 const decode = decodeOutput(ProbeResult)
 const decodeProjected = decodeOutput(ProjectedProbeResult)
 
-const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
+interface Settings {
+  readonly binary: string
+  readonly forceKillAfter: Duration.Duration
+  readonly maxOutputBytes: number
+  readonly stderrTailBytes: number
+}
+
+const toSettings = Effect.fnUntraced(function* (options: FFprobeOptions) {
+  return {
+    binary: options.binary ?? "ffprobe",
+    forceKillAfter: yield* durationOption(
+      "forceKillAfter",
+      options.forceKillAfter,
+      DEFAULT_FORCE_KILL_AFTER
+    ),
+    maxOutputBytes: yield* byteLimit(
+      "maxOutputBytes",
+      options.maxOutputBytes,
+      DEFAULT_MAX_OUTPUT_BYTES
+    ),
+    stderrTailBytes: yield* byteLimit(
+      "stderrTailBytes",
+      options.stderrTailBytes,
+      DEFAULT_STDERR_TAIL_BYTES
+    )
+  } satisfies Settings
+})
+
+const make = Effect.fnUntraced(function* ({
+  binary,
+  forceKillAfter,
+  maxOutputBytes,
+  stderrTailBytes
+}: Settings) {
   const spawner = yield* ChildProcessSpawner
-  const binary = options.binary ?? "ffprobe"
-  const forceKillAfter = yield* durationOption(
-    "forceKillAfter",
-    options.forceKillAfter,
-    DEFAULT_FORCE_KILL_AFTER
-  )
-  const maxOutputBytes = yield* byteLimit(
-    "maxOutputBytes",
-    options.maxOutputBytes,
-    DEFAULT_MAX_OUTPUT_BYTES
-  )
-  const stderrTailBytes = yield* byteLimit(
-    "stderrTailBytes",
-    options.stderrTailBytes,
-    DEFAULT_STDERR_TAIL_BYTES
-  )
 
   const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A, R>(
     input: string,

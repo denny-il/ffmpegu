@@ -4,7 +4,7 @@
 
 Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe does not act on SIGTERM, so sink and stream outputs keep being drained (and the remaining bytes discarded) during termination, and a cancelled or failed run does not wait out the grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials. Failed-span messages for an `ExitError` name only the executable's file name, followed by the retained stderr tail when there is one; `stderrTailBytes: 0` keeps stderr out of them. A `SpawnError` message names the configured path in full. Platform error causes kept on `ExitError` and `SpawnError` can include the executable path and arguments, including input and output URLs; these reach `Cause.pretty` and exported exception stack traces. The `binary` field keeps the configured path for callers. Treat explicitly inspected diagnostics as potentially sensitive.
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. Zero sends SIGKILL right after SIGTERM and `"Infinity"` never escalates; negative and NaN durations are rejected, including tiny negatives that would round to zero (the number `-0` counts as zero, but any string with a leading `-` is rejected; `Config.Duration` parses durations itself, so a tiny negative read through it is already zero). `Duration` sums the parts of a `[seconds, nanos]` tuple or a duration object (such as `{ seconds, milliseconds }`) in floating point, so every part must be non-negative, even when the total would be positive (`{ seconds: 1, milliseconds: -500 }` is rejected), and the parts must total at most `Number.MAX_SAFE_INTEGER` nanoseconds (about 104 days), so that none is lost to rounding; use a string such as `"200 days"` for longer periods, or `"Infinity"`. FFmpeg blocked writing to a full output pipe does not act on SIGTERM, so sink and stream outputs keep being drained (and the remaining bytes discarded) during termination, and a cancelled or failed run does not wait out the grace period. `stderrTailBytes` bounds retained diagnostics (a byte count or a size such as `"64 KiB"`). Paths and arguments can contain credentials. Failed-span messages for an `ExitError` name only the executable's file name, followed by the retained stderr tail when there is one; `stderrTailBytes: 0` keeps stderr out of them. A `SpawnError` message names the configured path in full. Platform error causes kept on `ExitError` and `SpawnError` can include the executable path and arguments, including input and output URLs; these reach `Cause.pretty` and exported exception stack traces. The `binary` field keeps the configured path for callers. Treat explicitly inspected diagnostics as potentially sensitive.
 
 ## Streaming output
 
@@ -98,20 +98,24 @@ The exit code is also recorded when cleanup terminates the process, for example 
 
 ## Configuration and testing
 
-Both services offer `layerConfig` for application-owned configuration:
+Both services offer `layerConfig` for application-owned configuration. It takes a `Config` per option, or a single `Config` of all options:
 
 ```ts
 import { Config } from "effect"
-import { FFmpeg } from "ffmpegu"
+import { FFmpeg, FFprobe } from "ffmpegu"
 
-const FFmpegLive = FFmpeg.layerConfig(
-  Config.all({
-    binary: Config.String("FFMPEG_PATH").pipe(Config.withDefault("ffmpeg"))
-  })
-)
+const FFmpegLive = FFmpeg.layerConfig({
+  binary: Config.String("FFMPEG_PATH").pipe(Config.withDefault("ffmpeg")),
+  forceKillAfter: Config.Duration("FFMPEG_KILL_AFTER"),
+  stderrTailBytes: Config.ByteSize("FFMPEG_STDERR_TAIL")
+})
+
+const FFprobeLive = FFprobe.layerConfig({
+  maxOutputBytes: Config.ByteSize("FFPROBE_MAX_OUTPUT")
+})
 ```
 
-A configuration provider can be replaced in tests. Byte limits must be non-negative safe integers; invalid programmatic settings are defects during Layer construction. No binary is started until an execution Effect runs.
+Byte limits (`stderrTailBytes`, and FFprobe's `maxOutputBytes`) take a byte count or a size such as `"64 KiB"` (binary units) or `"64 kB"` (decimal units); `Config.ByteSize` reads the same sizes, and `Config.Int` reads plain counts. They must be non-negative safe integers. A record field that is `undefined` means the option is omitted, so it can be set conditionally. Invalid configured values fail Layer construction with a `ConfigError` naming the option; invalid programmatic settings passed to `layer` are defects. No binary is started until an execution Effect runs. A configuration provider can be replaced in tests.
 
 For deterministic tests, supply a fake `ChildProcessSpawner` to the live service Layer and use `@effect/vitest`'s `it.effect`. Real process tests use `it.live` so process shutdown and platform timers advance normally. Applications can also provide a fake `FFmpeg` or `FFprobe` service when testing higher-level workflows without testing process behavior.
 
