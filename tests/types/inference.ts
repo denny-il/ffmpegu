@@ -555,6 +555,17 @@ failing.pipe(
   Effect.catchReason("CommandError", "SinkEndedEarly", () => Effect.void)
 )
 
+// ExitError names the failed binary when probing and transcoding together.
+Effect.gen(function* () {
+  yield* probe("in.mp4")
+  return yield* run(files)
+}).pipe(
+  Effect.catchTag("ExitError", (error) => {
+    const binary: string | undefined = error.binary
+    return Effect.succeed(binary)
+  })
+)
+
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)
 const anyInput: FFmpeguAnyInput = typedInput

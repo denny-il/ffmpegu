@@ -478,6 +478,7 @@ const execute = (
         )
         const stderrExit = yield* Fiber.await(stderrFiber)
         const exitError = new ExitError({
+          binary: settings.binary,
           exitCode: exit.exitCode,
           stderr: stderr.text(),
           cause: exit.cause

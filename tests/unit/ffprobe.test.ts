@@ -500,13 +500,42 @@ describe("FFprobe", () => {
       )
       const error = yield* Effect.flip(exit)
       assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "ffprobe")
       assert.strictEqual(error.exitCode, 1)
       assert.strictEqual(
         error.stderr,
         "/test/input.mp4: No such file or directory"
       )
+      assert.strictEqual(
+        error.message,
+        "ffprobe exited with exit code 1: /test/input.mp4: No such file or directory"
+      )
     })
   )
+
+  it.effect("reports the configured binary in ExitError", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup({
+        binary: "/home/user/secret-token/bin/ffprobe-7"
+      })
+      const fiber = yield* Effect.forkChild(
+        probe("x").pipe(Effect.provide(layer))
+      )
+      const process = yield* next
+      yield* process.exitWithSignal()
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "/home/user/secret-token/bin/ffprobe-7")
+      // Only the file name reaches the message, which tracing exports.
+      assert.strictEqual(error.message, "ffprobe-7 exited without an exit code")
+    })
+  )
+
+  it("keeps ExitError constructible without a binary", () => {
+    const error = new ExitError({ exitCode: 1, stderr: "" })
+    assert.strictEqual(error.binary, undefined)
+    assert.strictEqual(error.message, "Process exited with exit code 1")
+  })
 
   it.effect("fails and kills ffprobe when stdout exceeds the limit", () =>
     Effect.gen(function* () {

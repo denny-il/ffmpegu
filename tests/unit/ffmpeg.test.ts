@@ -238,8 +238,13 @@ describe("FFmpeg", () => {
 
       const error = yield* Fiber.join(fiber).pipe(Effect.flip)
       assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "ffmpeg")
       assert.strictEqual(error.exitCode, 1)
       assert.strictEqual(error.stderr, "Invalid data found")
+      assert.strictEqual(
+        error.message,
+        "ffmpeg exited with exit code 1: Invalid data found"
+      )
     })
   )
 
@@ -762,7 +767,24 @@ describe("FFmpeg", () => {
         assert.instanceOf(error, ExitError)
         assert.isNull(error.exitCode)
         assert.strictEqual(error.cause, cause)
+        assert.strictEqual(error.message, "ffmpeg exited without an exit code")
       })
+  )
+
+  it.effect("names only the file name of a configured binary path", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup({
+        binary: "/home/user/secret-token/bin/ffmpeg-7"
+      })
+      const fiber = yield* Effect.forkChild(ffmpeg.run(toFile))
+      const process = yield* next
+      yield* process.exit(1)
+
+      const error = yield* Fiber.join(fiber).pipe(Effect.flip)
+      assert.instanceOf(error, ExitError)
+      assert.strictEqual(error.binary, "/home/user/secret-token/bin/ffmpeg-7")
+      assert.strictEqual(error.message, "ffmpeg-7 exited with exit code 1")
+    })
   )
 
   it.effect("keeps defects reported with a signal termination", () =>
