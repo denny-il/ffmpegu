@@ -25,11 +25,6 @@ export interface FakeProcess {
   readonly inputEnded: (fd: number) => Effect.Effect<boolean>
   /** Await the first write to `fd`. */
   readonly awaitWrite: (fd: number) => Effect.Effect<void>
-  /** Block writes to `fd` (as a full pipe would) until `releaseInput`. */
-  readonly holdInput: (fd: number) => Effect.Effect<void>
-  readonly releaseInput: (fd: number) => Effect.Effect<void>
-  /** Await a write to `fd` being attempted. */
-  readonly awaitWriteAttempt: (fd: number) => Effect.Effect<void>
   /** Make further writes to `fd` fail as if the reader closed its end. */
   readonly closeInput: (fd: number, code?: string) => Effect.Effect<void>
   /** Emit chunks on an output descriptor (stdout is fd 1 when piped, stderr fd 2), in one batch. */
@@ -60,6 +55,10 @@ export interface FakeSpawnerOptions {
   readonly spawnError?: PlatformError.PlatformError
   /** Keep running when killed (a process ignoring SIGTERM). */
   readonly ignoreKill?: boolean
+  /** Replace the in-memory input sinks (e.g. with a platform adapter). */
+  readonly inputSink?: (
+    fd: number
+  ) => Sink.Sink<void, Uint8Array, never, PlatformError.PlatformError>
 }
 
 const encoder = new TextEncoder()
@@ -104,8 +103,6 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         {
           readonly written: Array<number>
           readonly firstWrite: Deferred.Deferred<void>
-          readonly attempted: Deferred.Deferred<void>
-          gate: Deferred.Deferred<void> | undefined
           ended: boolean
           closed: string | undefined
         }
@@ -133,8 +130,6 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         inputs.set(Number(name.slice(2)), {
           written: [],
           firstWrite: yield* Deferred.make<void>(),
-          attempted: yield* Deferred.make<void>(),
-          gate: undefined,
           ended: false,
           closed: undefined
         })
@@ -163,24 +158,15 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
       const inputSink = (fd: number) => {
         const state = input(fd)
         return Sink.forEach((chunk: Uint8Array) =>
-          Deferred.succeed(state.attempted, undefined).pipe(
-            Effect.andThen(
-              Effect.suspend(() =>
-                state.gate ? Deferred.await(state.gate) : Effect.void
+          Effect.suspend(() => {
+            if (state.closed !== undefined) {
+              return Effect.fail(
+                platformError(`fromWritable(fd${fd})`, state.closed)
               )
-            ),
-            Effect.andThen(
-              Effect.suspend(() => {
-                if (state.closed !== undefined) {
-                  return Effect.fail(
-                    platformError(`fromWritable(fd${fd})`, state.closed)
-                  )
-                }
-                state.written.push(...chunk)
-                return Deferred.succeed(state.firstWrite, undefined)
-              })
-            )
-          )
+            }
+            state.written.push(...chunk)
+            return Deferred.succeed(state.firstWrite, undefined)
+          })
         ).pipe(
           Sink.mapEffect(() => Effect.sync(() => void (state.ended = true)))
         )
@@ -192,21 +178,6 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         written: (fd) => Effect.sync(() => [...input(fd).written]),
         inputEnded: (fd) => Effect.sync(() => input(fd).ended),
         awaitWrite: (fd) => Deferred.await(input(fd).firstWrite),
-        holdInput: (fd) =>
-          Deferred.make<void>().pipe(
-            Effect.flatMap((gate) =>
-              Effect.sync(() => void (input(fd).gate = gate))
-            )
-          ),
-        releaseInput: (fd) =>
-          Effect.suspend(() => {
-            const gate = input(fd).gate
-            input(fd).gate = undefined
-            return gate
-              ? Deferred.succeed(gate, undefined).pipe(Effect.asVoid)
-              : Effect.void
-          }),
-        awaitWriteAttempt: (fd) => Deferred.await(input(fd).attempted),
         closeInput: (fd, code = "EPIPE") =>
           Effect.sync(() => void (input(fd).closed = code)),
         emit: (fd, ...chunks) =>
@@ -262,7 +233,10 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         stdout: outputs.has(1) ? Stream.fromQueue(output(1)) : Stream.empty,
         stderr: Stream.fromQueue(output(2)),
         all: Stream.fromQueue(output(2)),
-        getInputFd: (fd) => (inputs.has(fd) ? inputSink(fd) : Sink.drain),
+        getInputFd: (fd) =>
+          inputs.has(fd)
+            ? (options.inputSink?.(fd) ?? inputSink(fd))
+            : Sink.drain,
         getOutputFd: (fd) =>
           outputs.has(fd) ? Stream.fromQueue(output(fd)) : Stream.empty,
         unref: Effect.succeed(Effect.void)

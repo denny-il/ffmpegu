@@ -364,7 +364,8 @@ const execute = (
       // the feeders: the source is interrupted and the descriptor ended, so a
       // process blocked on reading sees EOF, and defects raised by the
       // source's finalizers are still reported. Completes once the end is
-      // flushed or the pipe breaks (after exit, or through the kill).
+      // flushed, the pipe breaks or ffmpeg has exited (by itself or through
+      // the kill).
       const stopInputs = Deferred.succeed(closeInputs, undefined).pipe(
         Effect.andThen(Fiber.await(inputsFiber))
       )
@@ -517,10 +518,10 @@ const execute = (
  *
  * Closing stops the producer and ends the queue; the consumer then flushes
  * what was queued and ends the descriptor, which completes once the end is
- * flushed or the pipe breaks. The reader closing its end is not an error by
- * itself: the exit code decides the outcome. All waiting is interruptible;
- * collecting and combining the fibers' exits is not, so every failure and
- * cleanup defect is reported.
+ * flushed, the pipe breaks or ffmpeg has exited. The reader closing its end is
+ * not an error by itself: the exit code decides the outcome. All waiting is
+ * interruptible; collecting and combining the fibers' exits is not, so every
+ * failure and cleanup defect is reported.
  */
 const feedInput = (
   handle: ChildProcessHandle,
@@ -652,16 +653,27 @@ const feedInput = (
         case "closed": {
           const producerExit = yield* settle(producer)
           yield* Queue.end(queue)
-          const consumerExit = yield* Effect.exit(
-            restore(Fiber.await(consumer))
-          )
-          return yield* Exit.isSuccess(consumerExit)
-            ? done([], producerExit, consumerExit.value)
-            : done(
-                consumerExit.cause.reasons,
-                producerExit,
-                yield* settle(consumer)
+          // Once ffmpeg has exited nothing reads the descriptor, and the
+          // platform sink does not settle on a descriptor that closed without
+          // an error (it waits for a `drain` or `finish` that never comes).
+          // A write still pending then is abandoned; the exit code decides
+          // the outcome, as for a reader closing its end. An error the
+          // descriptor reported is not: the sink resumes from the stream's
+          // event and fails the consumer without yielding (short of
+          // exhausting the scheduler's operation budget).
+          const waitedConsumer = yield* Effect.exit(
+            restore(
+              Effect.raceFirst(
+                Fiber.await(consumer),
+                Effect.exit(handle.exitCode)
               )
+            )
+          )
+          return yield* done(
+            Exit.isFailure(waitedConsumer) ? waitedConsumer.cause.reasons : [],
+            producerExit,
+            yield* settle(consumer)
+          )
         }
       }
     })
