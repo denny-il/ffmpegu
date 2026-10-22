@@ -24,7 +24,8 @@ import {
   type ProjectedProbeResult,
   type Progress,
   run,
-  type RunResult
+  type RunResult,
+  stream
 } from "../../src/index.ts"
 import type { FFmpeguTemporalDuration } from "../../src/utils.ts"
 
@@ -75,7 +76,8 @@ assertType<
     typeof literal,
     FFmpeguCommand<
       SourceError | OtherSourceError | SinkError,
-      Storage | Uploader
+      Storage | Uploader,
+      0
     >
   >
 >(true)
@@ -89,7 +91,8 @@ assertType<
     typeof separate,
     FFmpeguCommand<
       SourceError | OtherSourceError | SinkError,
-      Storage | Uploader
+      Storage | Uploader,
+      0
     >
   >
 >(true)
@@ -103,7 +106,7 @@ const chained = Command.make({})
 assertType<
   Equals<
     typeof chained,
-    FFmpeguCommand<SourceError | SinkError, Storage | Uploader>
+    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
@@ -124,7 +127,7 @@ const dataFirst = Command.withOutput(
 assertType<
   Equals<
     typeof dataFirst,
-    FFmpeguCommand<SourceError | SinkError, Storage | Uploader>
+    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
@@ -133,8 +136,8 @@ const overwrite = Command.withGlobal(options.overwrite())
 const addSink = Command.withOutput(Output.toSink(sink))
 assertType<
   Equals<
-    ReturnType<typeof addSink<OtherSourceError, Metrics>>,
-    FFmpeguCommand<OtherSourceError | SinkError, Metrics | Uploader>
+    ReturnType<typeof addSink<OtherSourceError, Metrics, 1>>,
+    FFmpeguCommand<OtherSourceError | SinkError, Metrics | Uploader, 1>
   >
 >(true)
 const pipedWithStreamInput = Command.make({
@@ -143,7 +146,7 @@ const pipedWithStreamInput = Command.make({
 assertType<
   Equals<
     typeof pipedWithStreamInput,
-    FFmpeguCommand<OtherSourceError | SinkError, Uploader>
+    FFmpeguCommand<OtherSourceError | SinkError, Uploader, 0>
   >
 >(true)
 
@@ -152,8 +155,65 @@ const files = Command.make({
   inputs: [Input.fromFile("in.mp4")],
   outputs: [Output.toFile("out.mp4")]
 })
-assertType<Equals<typeof files, FFmpeguCommand<never, never>>>(true)
+assertType<Equals<typeof files, FFmpeguCommand<never, never, 0>>>(true)
 assertType<Equals<typeof Command.make, typeof Command.create>>(true)
+
+// Output.toStream outputs are counted (`2` means two or more) through every
+// way of building a command.
+const streamed = Command.make({
+  inputs: [Input.fromStream(source)],
+  outputs: [Output.toFile("out.mp4"), Output.toStream()]
+})
+assertType<Equals<typeof streamed, FFmpeguCommand<SourceError, Storage, 1>>>(
+  true
+)
+const streamedByMethod = files.withOutput(Output.toStream())
+assertType<Equals<typeof streamedByMethod, FFmpeguCommand<never, never, 1>>>(
+  true
+)
+const twoStreams = streamed.pipe(
+  Command.withOutput(Output.toStream()),
+  Command.withOutput(Output.toFile("other.mp4"))
+)
+assertType<Equals<typeof twoStreams, FFmpeguCommand<SourceError, Storage, 2>>>(
+  true
+)
+const threeStreams = Command.withOutput(twoStreams, Output.toStream())
+assertType<
+  Equals<typeof threeStreams, FFmpeguCommand<SourceError, Storage, 2>>
+>(true)
+declare const flag: boolean
+const maybeStreamed = Command.make({
+  outputs: [flag ? Output.toStream() : Output.toFile("out.mp4")]
+})
+assertType<Equals<typeof maybeStreamed, FFmpeguCommand<never, never, 0 | 1>>>(
+  true
+)
+// Counting stays within the instantiation depth limit for long output tuples.
+type Repeat<
+  T,
+  N extends number,
+  Acc extends ReadonlyArray<T> = []
+> = Acc["length"] extends N ? Acc : Repeat<T, N, readonly [...Acc, T]>
+declare const manyFiles: Repeat<Output<never, never, 0>, 100>
+const manyOutputs = Command.make({
+  outputs: [...manyFiles, Output.toStream(), ...manyFiles]
+})
+assertType<Equals<typeof manyOutputs, FFmpeguCommand<never, never, 1>>>(true)
+// Explicit type arguments written before the count existed still apply.
+const explicitOutput = files.withOutput<SinkError, Uploader>(
+  Output.toSink(sink)
+)
+assertType<
+  Equals<typeof explicitOutput, FFmpeguCommand<SinkError, Uploader, any>>
+>(true)
+const streamedOutput = stream(streamed)
+assertType<
+  Equals<
+    typeof streamedOutput,
+    Stream.Stream<Uint8Array, FFmpegError | SourceError, FFmpeg | Storage>
+  >
+>(true)
 
 // compile is synchronous and typed.
 const compiled = literal.compile()
@@ -321,3 +381,35 @@ Effect.runPromise(files)
 options.duration([1, 0])
 // @ts-expect-error inputs are not outputs
 Command.withOutput(Input.fromFile("in.mp4"))
+// @ts-expect-error run cannot consume an Output.toStream output
+run(streamed)
+// @ts-expect-error run cannot consume an Output.toStream output
+run(twoStreams)
+// @ts-expect-error stream needs an Output.toStream output
+stream(files)
+// @ts-expect-error stream reads exactly one Output.toStream output
+stream(twoStreams)
+// @ts-expect-error the output may be a stream output
+run(maybeStreamed)
+// @ts-expect-error the output may not be a stream output
+stream(maybeStreamed)
+Effect.flatMap(Effect.service(FFmpeg), (ffmpeg) => {
+  // @ts-expect-error the service checks like run
+  ffmpeg.run(streamedByMethod)
+  // @ts-expect-error the service checks like stream
+  return Effect.succeed(ffmpeg.stream(chained))
+})
+
+// Commands whose count is unknown are accepted by both and checked at runtime:
+// explicitly typed commands, arrays of unknown length that may contain stream
+// outputs, and outputs built with the constructor.
+const annotated: FFmpeguCommand<SourceError, Storage> = streamed
+const mixedOutputs = [Output.toFile("out.mp4"), Output.toStream()]
+const fromArray = Command.make({ outputs: mixedOutputs })
+const constructed = files.withOutput(new Output("out.mkv"))
+run(annotated)
+stream(annotated)
+run(fromArray)
+stream(fromArray)
+run(constructed)
+stream(constructed)

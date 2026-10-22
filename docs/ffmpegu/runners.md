@@ -10,6 +10,8 @@ Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and
 
 `stream(command, options?)` runs a command with exactly one `Output.toStream` output and returns its bytes as a `Stream<Uint8Array, FFmpegError | E, FFmpeg | R>`. Other outputs can still be files or sinks; `run` rejects commands with a stream output.
 
+Commands count their `Output.toStream` outputs in their type, so both mistakes are compile errors: `run` accepts only `Command<E, R, 0>` and `stream` only `Command<E, R, 1>`. When the count is unknown, the command is accepted and checked when it runs, failing with `CommandError` (reason `StreamOutput`). The count is unknown for commands typed as `Command<E, R>`, for output arrays of unknown length that may contain a stream output, and for outputs built with the `Output` constructor.
+
 ```ts
 import { Stream } from "effect"
 import { Command, Input, Options, Output, stream } from "ffmpegu"

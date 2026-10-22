@@ -1528,6 +1528,8 @@ describe("FFmpeg.stream", () => {
     )
   })
 
+  // The compile-time count is unknown for widened commands, so the runtime
+  // checks below are what rejects them.
   it.effect("requires exactly one stream output", () =>
     Effect.gen(function* () {
       const { ffmpeg } = yield* setup(
@@ -1539,9 +1541,13 @@ describe("FFmpeg.stream", () => {
         [Output.toFile("out.mp4")],
         [Output.toStream(), Output.toStream()]
       ]) {
-        const error = yield* Stream.runDrain(
-          ffmpeg.stream(Command.make({ inputs: [input], outputs }))
-        ).pipe(Effect.flip)
+        const command: FFmpeguCommand = Command.make({
+          inputs: [input],
+          outputs
+        })
+        const error = yield* Stream.runDrain(ffmpeg.stream(command)).pipe(
+          Effect.flip
+        )
         assert.instanceOf(error, CommandError)
         assert.strictEqual(error.reason, "StreamOutput")
       }
@@ -1554,14 +1560,11 @@ describe("FFmpeg.stream", () => {
         {},
         { spawnError: platformError("spawn") }
       )
-      const error = yield* ffmpeg
-        .run(
-          Command.make({
-            inputs: [Input.fromFile("in.mp4")],
-            outputs: [Output.toStream()]
-          })
-        )
-        .pipe(Effect.flip)
+      const command: FFmpeguCommand = Command.make({
+        inputs: [Input.fromFile("in.mp4")],
+        outputs: [Output.toStream()]
+      })
+      const error = yield* ffmpeg.run(command).pipe(Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason, "StreamOutput")
     })

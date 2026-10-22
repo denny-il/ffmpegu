@@ -6,7 +6,11 @@ import type * as Stream from "effect/Stream"
 import { CommandError } from "../errors.ts"
 import { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguInput } from "./input.ts"
-import { type FFmpeguOutput, STREAM_DESTINATION } from "./output.ts"
+import {
+  type FFmpeguOutput,
+  STREAM_DESTINATION,
+  StreamOutputs
+} from "./output.ts"
 import { CommandReferences, ForeignReference } from "./references.ts"
 import { isDescriptorPath, isReservedInputPath } from "./validation.ts"
 
@@ -40,12 +44,55 @@ export interface CompiledCommand<E, R> {
 }
 
 type AnyInput = FFmpeguInput<any, any>
-type AnyOutput = FFmpeguOutput<any, any>
+type AnyOutput = FFmpeguOutput<any, any, any>
 
 type InputError<I> = I extends FFmpeguInput<infer E, infer _R> ? E : never
 type InputContext<I> = I extends FFmpeguInput<infer _E, infer R> ? R : never
 type OutputError<O> = O extends FFmpeguOutput<infer E, infer _R> ? E : never
 type OutputContext<O> = O extends FFmpeguOutput<infer _E, infer R> ? R : never
+type OutputStreams<O> =
+  O extends FFmpeguOutput<infer _E, infer _R, infer S> ? S : never
+
+/**
+ * Number of `Output.toStream` outputs of a command: `0`, `1`, or `2` for two
+ * or more. `any` means unknown and is not checked at compile time.
+ */
+type StreamOutputCount = 0 | 1 | 2
+
+// `0 extends 1 & X` holds only when `X` is `any`: an unknown count stays
+// unknown. Otherwise distributes, so a possible stream output (`0 | 1`) keeps
+// both outcomes and neither runner accepts the command.
+type AddStreamOutputs<S, O> = 0 extends 1 & (S | O)
+  ? any
+  : S extends unknown
+    ? O extends 0
+      ? S
+      : S extends 0
+        ? 1
+        : 2
+    : never
+
+/**
+ * Counts tuples element by element into the accumulator `S`. Arrays of unknown
+ * length add nothing only when none of their elements can be a stream output.
+ * Tail-recursive so that long output tuples stay within the instantiation
+ * depth limit.
+ */
+type CountStreamOutputs<
+  O extends ReadonlyArray<AnyOutput>,
+  S extends StreamOutputCount = 0
+> = O extends readonly [
+  infer Head,
+  ...infer Tail extends ReadonlyArray<AnyOutput>
+]
+  ? CountStreamOutputs<Tail, AddStreamOutputs<S, OutputStreams<Head>>>
+  : O extends readonly []
+    ? S
+    : 0 extends 1 & OutputStreams<O[number]>
+      ? any
+      : [OutputStreams<O[number]>] extends [0]
+        ? S
+        : any
 
 export interface FFmpeguCommandOptions<E, R> {
   readonly global?: FFmpeguOptions | undefined
@@ -58,13 +105,22 @@ export interface FFmpeguCommandOptions<E, R> {
  * `[global options] ([input options] -i input)* ([output options] output)*`.
  *
  * `E` and `R` are the unions of the error and requirement types of all stream
- * inputs and sink outputs.
+ * inputs and sink outputs. `S` counts `Output.toStream` outputs so that `run`
+ * accepts only `0` and `stream` only `1`. It defaults to `any` (unknown), which
+ * leaves the check to runtime, e.g. for commands typed as `FFmpeguCommand<E, R>`.
  *
  * Pipeable: `withGlobal`, `withInput` and `withOutput` are also available as
  * data-first or data-last statics, e.g.
  * `command.pipe(Command.withOutput(output))`.
  */
-export class FFmpeguCommand<E = never, R = never> extends Pipeable.Class {
+export class FFmpeguCommand<
+  E = never,
+  R = never,
+  S extends StreamOutputCount = any
+>
+  extends Pipeable.Class
+{
+  declare readonly [StreamOutputs]: S
   readonly global: FFmpeguOptions | undefined
   readonly inputs: ReadonlyArray<FFmpeguInput<E, R>>
   readonly outputs: ReadonlyArray<FFmpeguOutput<E, R>>
@@ -89,7 +145,8 @@ export class FFmpeguCommand<E = never, R = never> extends Pipeable.Class {
     readonly outputs?: O | undefined
   }): FFmpeguCommand<
     InputError<I[number]> | OutputError<O[number]>,
-    InputContext<I[number]> | OutputContext<O[number]>
+    InputContext<I[number]> | OutputContext<O[number]>,
+    CountStreamOutputs<O>
   > {
     return new FFmpeguCommand(options)
   }
@@ -108,47 +165,61 @@ export class FFmpeguCommand<E = never, R = never> extends Pipeable.Class {
   static withGlobal: {
     (
       options: FFmpeguOptions
-    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E, R>
-    <E, R>(
-      self: FFmpeguCommand<E, R>,
+    ): <E, R, S extends StreamOutputCount = any>(
+      self: FFmpeguCommand<E, R, S>
+    ) => FFmpeguCommand<E, R, S>
+    <E, R, S extends StreamOutputCount = any>(
+      self: FFmpeguCommand<E, R, S>,
       options: FFmpeguOptions
-    ): FFmpeguCommand<E, R>
-  } = dual(2, <E, R>(self: FFmpeguCommand<E, R>, options: FFmpeguOptions) =>
-    self.withGlobal(options)
+    ): FFmpeguCommand<E, R, S>
+  } = dual(
+    2,
+    <E, R, S extends StreamOutputCount>(
+      self: FFmpeguCommand<E, R, S>,
+      options: FFmpeguOptions
+    ) => self.withGlobal(options)
   )
 
   /** Data-first or data-last {@link FFmpeguCommand.prototype.withInput}. */
   static withInput: {
     <E2, R2>(
       input: FFmpeguInput<E2, R2>
-    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E | E2, R | R2>
-    <E, R, E2, R2>(
-      self: FFmpeguCommand<E, R>,
+    ): <E, R, S extends StreamOutputCount = any>(
+      self: FFmpeguCommand<E, R, S>
+    ) => FFmpeguCommand<E | E2, R | R2, S>
+    <E, R, E2, R2, S extends StreamOutputCount = any>(
+      self: FFmpeguCommand<E, R, S>,
       input: FFmpeguInput<E2, R2>
-    ): FFmpeguCommand<E | E2, R | R2>
+    ): FFmpeguCommand<E | E2, R | R2, S>
   } = dual(
     2,
-    <E, R, E2, R2>(self: FFmpeguCommand<E, R>, input: FFmpeguInput<E2, R2>) =>
-      self.withInput(input)
+    <E, R, E2, R2, S extends StreamOutputCount>(
+      self: FFmpeguCommand<E, R, S>,
+      input: FFmpeguInput<E2, R2>
+    ) => self.withInput(input)
   )
 
   /** Data-first or data-last {@link FFmpeguCommand.prototype.withOutput}. */
   static withOutput: {
-    <E2, R2>(
-      output: FFmpeguOutput<E2, R2>
-    ): <E, R>(self: FFmpeguCommand<E, R>) => FFmpeguCommand<E | E2, R | R2>
-    <E, R, E2, R2>(
-      self: FFmpeguCommand<E, R>,
-      output: FFmpeguOutput<E2, R2>
-    ): FFmpeguCommand<E | E2, R | R2>
+    <E2, R2, S2 extends 0 | 1 = any>(
+      output: FFmpeguOutput<E2, R2, S2>
+    ): <E, R, S extends StreamOutputCount = any>(
+      self: FFmpeguCommand<E, R, S>
+    ) => FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>
+    <E, R, E2, R2, S extends StreamOutputCount = any, S2 extends 0 | 1 = any>(
+      self: FFmpeguCommand<E, R, S>,
+      output: FFmpeguOutput<E2, R2, S2>
+    ): FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>
   } = dual(
     2,
-    <E, R, E2, R2>(self: FFmpeguCommand<E, R>, output: FFmpeguOutput<E2, R2>) =>
-      self.withOutput(output)
+    <E, R, E2, R2, S extends StreamOutputCount, S2 extends 0 | 1>(
+      self: FFmpeguCommand<E, R, S>,
+      output: FFmpeguOutput<E2, R2, S2>
+    ) => self.withOutput(output)
   )
 
-  withGlobal(options: FFmpeguOptions): FFmpeguCommand<E, R> {
-    return new FFmpeguCommand<E, R>({
+  withGlobal(options: FFmpeguOptions): FFmpeguCommand<E, R, S> {
+    return new FFmpeguCommand<E, R, S>({
       inputs: this.inputs,
       outputs: this.outputs,
       global: this.global ? FFmpeguOptions.merge(this.global, options) : options
@@ -157,18 +228,18 @@ export class FFmpeguCommand<E = never, R = never> extends Pipeable.Class {
 
   withInput<E2, R2>(
     input: FFmpeguInput<E2, R2>
-  ): FFmpeguCommand<E | E2, R | R2> {
-    return new FFmpeguCommand<E | E2, R | R2>({
+  ): FFmpeguCommand<E | E2, R | R2, S> {
+    return new FFmpeguCommand<E | E2, R | R2, S>({
       global: this.global,
       inputs: [...this.inputs, input],
       outputs: this.outputs
     })
   }
 
-  withOutput<E2, R2>(
-    output: FFmpeguOutput<E2, R2>
-  ): FFmpeguCommand<E | E2, R | R2> {
-    return new FFmpeguCommand<E | E2, R | R2>({
+  withOutput<E2, R2, S2 extends 0 | 1 = any>(
+    output: FFmpeguOutput<E2, R2, S2>
+  ): FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>> {
+    return new FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>({
       global: this.global,
       inputs: this.inputs,
       outputs: [...this.outputs, output]
