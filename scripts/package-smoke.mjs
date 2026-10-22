@@ -36,11 +36,13 @@ try {
     `
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { Effect, Layer, Result, Sink, Stream } from 'effect'
-import { Command, Input, Output, Options, FFmpeg, FFprobe, run, probe, probeWith } from 'ffmpegu'
+import { Duration, Effect, Layer, Result, Sink, Stream } from 'effect'
+import { Command, Input, Output, Options, FFmpeg, FFprobe, run, probe, probeWith, options } from 'ffmpegu'
 const input = Input.fromFile('input.mp4')
 const command = Command.make({ inputs: [input], outputs: [Output.toFile('output.mp4', Options.create({map: input.video}))] })
 assert.equal(Result.isSuccess(command.compile()), true)
+const timed = Command.make({ global: Options.merge(options.startTime(Duration.millis(1500)), options.duration(Temporal.Duration.from({ seconds: 2, microseconds: 5 }))) })
+assert.deepEqual(Result.getOrThrow(timed.compile()).args, ['-ss', '00:00:01.500', '-t', '00:00:02.000005'])
 assert.equal(Effect.isEffect(run(command)), true)
 assert.equal(Effect.isEffect(probe('input.mp4')), true)
 assert.equal(typeof FFmpeg.layer, 'function')
@@ -93,17 +95,45 @@ const selected: Effect.Effect<ProjectedProbeResult, unknown, FFprobe> = probeWit
 void selected
 `
   )
-  execute(process.execPath, [
-    join(root, "node_modules/typescript/bin/tsc"),
-    "--noEmit",
-    "--strict",
-    "--skipLibCheck",
-    "--module",
-    "nodenext",
-    "--target",
-    "es2024",
-    "smoke.ts"
-  ])
+  // Duration values must type-check whether or not the consumer's lib
+  // declares Temporal. These checks include the package declarations: with
+  // skipLibCheck, an unresolved Temporal reference would pass silently.
+  writeFileSync(
+    join(temporary, "smoke-duration.ts"),
+    `
+import { Duration } from 'effect'
+import { filters, options } from 'ffmpegu'
+options.startTime(Duration.seconds(1))
+filters.atrim({ duration: Duration.millis(500) })
+`
+  )
+  writeFileSync(
+    join(temporary, "smoke-temporal.ts"),
+    `
+import { filters, options } from 'ffmpegu'
+options.startTime(Temporal.Duration.from({ seconds: 1 }))
+filters.atrim({ duration: Temporal.Duration.from({ milliseconds: 500 }) })
+`
+  )
+  const typecheck = (file, flags) =>
+    execute(process.execPath, [
+      join(root, "node_modules/typescript/bin/tsc"),
+      "--noEmit",
+      "--strict",
+      "--module",
+      "nodenext",
+      "--target",
+      "es2024",
+      "--types",
+      "",
+      ...flags,
+      file
+    ])
+  typecheck("smoke.ts", ["--skipLibCheck"])
+  // Effect's declarations need the DOM and disposable libs.
+  const lib = "es2024,dom,esnext.disposable"
+  typecheck("smoke-duration.ts", ["--lib", lib])
+  typecheck("smoke-temporal.ts", ["--lib", `${lib},esnext.temporal`])
   const runtimes = process.env.FFMPEGU_PACKAGE_RUNTIME
     ? [process.env.FFMPEGU_PACKAGE_RUNTIME]
     : ["node", "bun"]

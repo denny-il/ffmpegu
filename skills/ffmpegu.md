@@ -63,6 +63,8 @@ File paths are passed to FFmpeg to retain seeking. Use Effect FileSystem for app
 
 **Audio:** `volume(opts)`, `atempo(opts)`, `aresample(opts)`, `atrim(opts)`, `asetpts(opts)`, `afade(opts)`, `highpass(opts)`, `lowpass(opts)`, `aformat(opts)`
 
+Time values for `startTime`/`duration`/`to` and for the `fps`/`atrim`/`afade` time fields: numbers are seconds; strings pass through; also time objects `{ hours?, minutes?, seconds?, milliseconds? }`, Effect `Duration` values (not `Duration.Input`), and `Temporal.Duration`. Durations keep microseconds. Infinite durations, durations beyond ±(2^63 − 1) µs, and Temporal years/months/weeks fail `compile()` with `CommandError` reason `InvalidArgument`.
+
 All filter helpers accept an optional second argument `{ inputs?: label[], outputs?: label[] }` for filtergraph labeling.
 
 ## Example

@@ -11,6 +11,19 @@ Filters are used to build `-vf`, `-af`, and `-filter_complex` graphs.
 - `ffmpegu.filters.builder()`
 - Common helpers: `ffmpegu.filters.scale`, `ffmpegu.filters.fps`, `ffmpegu.filters.select`, `ffmpegu.filters.setpts`, `ffmpegu.filters.volume`, etc.
 
+## Time options
+
+The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `start_time`, `end_time`, `duration`), and `afade` (`start_time`, `duration`) accept time objects, Effect `Duration` values, and `Temporal.Duration` values in addition to plain filter values. They render as seconds (`start_time=1.25`), with microsecond precision for durations. Invalid durations fail compilation as for [time options](options.md#time-values).
+
+```ts
+import { Duration } from "effect"
+
+ffmpegu.filters.atrim({
+  start: Duration.seconds(5),
+  duration: Temporal.Duration.from({ milliseconds: 1500 })
+})
+```
+
 ## Simple chain
 
 ```ts

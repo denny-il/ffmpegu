@@ -1,3 +1,5 @@
+import vm from "node:vm"
+import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import {
@@ -40,6 +42,15 @@ describe("Filters Common", { concurrent: false }, () => {
         refs
       )
     ).toEqual(["fps=fps=30:start_time=1.25"])
+    expect(
+      fps({ fps: 30, start_time: Duration.millis(1_250) }).getArgs(refs)
+    ).toEqual(["fps=fps=30:start_time=1.25"])
+    expect(
+      fps({
+        fps: 30,
+        start_time: Temporal.Duration.from({ hours: 1, microseconds: 1 })
+      }).getArgs(refs)
+    ).toEqual(["fps=fps=30:start_time=3600.000001"])
     expect(crop({ w: 100, h: 80, x: 1, y: 2 }).getArgs(refs)).toEqual([
       "crop=w=100:h=80:x=1:y=2"
     ])
@@ -110,6 +121,64 @@ describe("Filters Common", { concurrent: false }, () => {
         duration: { milliseconds: 750 }
       }).getArgs(refs)
     ).toEqual(["afade=type=in:start_time=2:duration=0.75"])
+    expect(
+      afade({
+        type: "out",
+        start_time: Duration.millis(2_500),
+        duration: Temporal.Duration.from({ milliseconds: 750 })
+      }).getArgs(refs)
+    ).toEqual(["afade=type=out:start_time=2.5:duration=0.75"])
+    expect(
+      atrim({
+        start: Temporal.Duration.from({ minutes: 1 }),
+        end_time: Duration.micros(61_000_001n),
+        duration: Duration.seconds(30.5)
+      }).getArgs(refs)
+    ).toEqual(["atrim=start=60:end_time=61.000001:duration=30.5"])
+    expect(
+      atrim({
+        start: Duration.micros(9_007_199_254_740_993n),
+        end: Duration.millis(-1_500),
+        duration: Duration.micros(500n)
+      }).getArgs(refs)
+    ).toEqual(["atrim=start=9007199254.740993:end=-1.5:duration=0.0005"])
+    expect(
+      atrim({
+        start: Temporal.Duration.from({
+          seconds: 9_007_199_254,
+          microseconds: 740_993
+        }),
+        end: Temporal.Duration.from({
+          seconds: -20_000_000,
+          nanoseconds: -999
+        }),
+        duration: vm.runInNewContext("Temporal.Duration.from({ days: 1 })")
+      }).getArgs(refs)
+    ).toEqual(["atrim=start=9007199254.740993:end=-20000000:duration=86400"])
+    // A throwing Effect brand probe neither throws nor hides the value.
+    const timeObject = new Proxy(
+      { seconds: 1 },
+      {
+        has(target, key) {
+          if (key === "~effect/Duration") throw new Error("unsupported probe")
+          return Reflect.has(target, key)
+        }
+      }
+    )
+    const foreign = vm.runInNewContext(
+      "Temporal.Duration.from({ microseconds: 1 })"
+    )
+    Object.setPrototypeOf(
+      foreign,
+      new Proxy(Object.getPrototypeOf(foreign), {
+        has() {
+          throw new Error("unsupported probe")
+        }
+      })
+    )
+    expect(atrim({ start: timeObject, end: foreign }).getArgs(refs)).toEqual([
+      "atrim=start=1:end=0.000001"
+    ])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([

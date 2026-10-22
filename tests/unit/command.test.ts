@@ -1,9 +1,11 @@
-import { Effect, Result, Sink, Stream } from "effect"
+import vm from "node:vm"
+import { Duration, Effect, Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguCommand } from "../../src/core/command.ts"
 import { FFmpeguInput } from "../../src/core/input.ts"
 import { FFmpeguOutput } from "../../src/core/output.ts"
+import { FFmpeguReferences } from "../../src/core/references.ts"
 import type { CommandError } from "../../src/errors.ts"
 import { filters, options } from "../../src/index.ts"
 import { FFmpeguOptions } from "../../src/options/core.ts"
@@ -415,6 +417,109 @@ describe("Command", () => {
 
     expect(error.reason).toBe("InvalidArgument")
     expect(error.cause).toBe(boom)
+  })
+
+  it("should fail compilation, not construction, for invalid time values", () => {
+    const input = FFmpeguInput.fromFile("/test/in.wav")
+    const cases = [
+      FFmpeguCommand.make({
+        global: options.startTime(Duration.infinity),
+        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.duration(Temporal.Duration.from({ weeks: 1 }))
+          )
+        ]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.audioFilter(
+              filters.chain(
+                filters.atrim({ end: Temporal.Duration.from({ months: 1 }) })
+              )
+            )
+          )
+        ]
+      }),
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "/test/out.wav",
+            options.audioFilter(
+              filters.chain(
+                filters.afade({ duration: Duration.negativeInfinity })
+              )
+            )
+          )
+        ]
+      }),
+      FFmpeguCommand.make({
+        global: options.startTime(
+          vm.runInNewContext("Temporal.Duration.from({ years: 1 })")
+        ),
+        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+      })
+    ]
+
+    for (const command of cases) {
+      const error = compileError(command)
+      expect(error.reason).toBe("InvalidArgument")
+      expect(error.cause).toBeInstanceOf(RangeError)
+    }
+  })
+
+  it("should fail compilation for time values outside FFmpeg's range", () => {
+    // FFmpeg parses the magnitude into an int64 before negating, so -2^63 µs
+    // is rejected along with 2^63 µs.
+    const max = 9_223_372_036_854_775_807n
+    const refs = new FFmpeguReferences()
+
+    for (const [value, seconds] of [
+      [Duration.micros(max), "9223372036854.775807"],
+      [Duration.micros(-max), "-9223372036854.775807"]
+    ] as const) {
+      expect(options.startTime(value).getArgs(refs)).toEqual(["-ss", seconds])
+      expect(filters.atrim({ start: value }).getArgs(refs)).toEqual([
+        `atrim=start=${seconds}`
+      ])
+    }
+
+    for (const value of [
+      Duration.micros(max + 1n),
+      Duration.micros(-max - 1n),
+      Temporal.Duration.from({ seconds: 9_223_372_036_855 }),
+      Temporal.Duration.from({ seconds: -9_223_372_036_855 })
+    ]) {
+      for (const command of [
+        FFmpeguCommand.make({
+          global: options.startTime(value),
+          outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+        }),
+        FFmpeguCommand.make({
+          inputs: [FFmpeguInput.fromFile("/test/in.wav")],
+          outputs: [
+            FFmpeguOutput.toFile(
+              "/test/out.wav",
+              options.audioFilter(
+                filters.chain(filters.atrim({ start: value }))
+              )
+            )
+          ]
+        })
+      ]) {
+        const error = compileError(command)
+        expect(error.reason).toBe("InvalidArgument")
+        expect(error.cause).toBeInstanceOf(RangeError)
+      }
+    }
   })
 
   it("should expose compiled args through toArgs", () => {

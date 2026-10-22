@@ -1,4 +1,5 @@
 import {
+  type FFmpeguDurationValue,
   type FFmpeguTimeObject,
   resolveFilterTimeOptions
 } from "../../utils.ts"
@@ -12,7 +13,10 @@ type FilterLabels = {
 }
 
 type FilterOptionValue = FilterArgument
-type FilterTimeValue = FilterOptionValue | FFmpeguTimeObject
+type FilterTimeValue =
+  | FilterOptionValue
+  | FFmpeguTimeObject
+  | FFmpeguDurationValue
 
 const create = (
   name: string,
