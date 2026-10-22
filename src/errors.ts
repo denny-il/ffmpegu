@@ -127,9 +127,8 @@ export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
   binary: Schema.String,
   cause: Schema.Unknown
 }) {
-  override get message() {
-    return `Failed to spawn ${this.binary}`
-  }
+  // See `CommandError.message`.
+  override readonly message: string = `Failed to spawn ${this.binary}`
 }
 
 /**
@@ -144,7 +143,8 @@ export class ExitError extends Schema.TaggedError<ExitError>()("ExitError", {
   stderr: Schema.String,
   cause: Schema.optional(Schema.Unknown)
 }) {
-  override get message() {
+  // See `CommandError.message`.
+  override readonly message: string = (() => {
     const status =
       this.exitCode === null
         ? "without an exit code"
@@ -152,7 +152,7 @@ export class ExitError extends Schema.TaggedError<ExitError>()("ExitError", {
     return this.stderr.length > 0
       ? `Process exited ${status}: ${this.stderr}`
       : `Process exited ${status}`
-  }
+  })()
 }
 
 /**
@@ -165,9 +165,8 @@ export class PipeError extends Schema.TaggedError<PipeError>()("PipeError", {
   direction: Schema.Literals(["input", "output"]),
   cause: Schema.Unknown
 }) {
-  override get message() {
-    return `Failed to ${this.direction === "input" ? "write to" : "read from"} fd ${this.fd}`
-  }
+  // See `CommandError.message`.
+  override readonly message: string = `Failed to ${this.direction === "input" ? "write to" : "read from"} fd ${this.fd}`
 }
 
 /** The output sink for `fd` completed before the end of the output stream. */
@@ -198,9 +197,8 @@ export class ProbeOutputError extends Schema.TaggedError<ProbeOutputError>()(
     maxOutputBytes: Schema.Number
   }
 ) {
-  override get message() {
-    return `ffprobe output exceeded ${this.maxOutputBytes} bytes`
-  }
+  // See `CommandError.message`.
+  override readonly message: string = `ffprobe output exceeded ${this.maxOutputBytes} bytes`
 }
 
 /**
