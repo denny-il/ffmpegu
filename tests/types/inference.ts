@@ -158,6 +158,61 @@ const files = Command.make({
 assertType<Equals<typeof files, FFmpeguCommand<never, never, 0>>>(true)
 assertType<Equals<typeof Command.make, typeof Command.create>>(true)
 
+// Inputs and outputs built inline with the constructor contribute their own
+// types, `never` without a stream or sink, instead of `any`.
+const constructedFiles = Command.make({
+  inputs: [new Input("in.mp4")],
+  outputs: [new Output("out.mp4")]
+})
+assertType<Equals<typeof constructedFiles, FFmpeguCommand<never, never, any>>>(
+  true
+)
+const constructedInput = Command.make({ inputs: [new Input("in.mp4")] })
+assertType<Equals<typeof constructedInput, FFmpeguCommand<never, never, 0>>>(
+  true
+)
+const constructedDrain = Command.make({ outputs: [new Output(Sink.drain)] })
+assertType<Equals<typeof constructedDrain, FFmpeguCommand<never, never, any>>>(
+  true
+)
+const constructedMixed = Command.make({
+  inputs: [new Input(source), new Input("in.mp4"), Input.fromFile("b.mp4")],
+  outputs: [new Output(sink), new Output("out.mp4"), Output.toStream()]
+})
+assertType<
+  Equals<
+    typeof constructedMixed,
+    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, any>
+  >
+>(true)
+const constructedByConstructor = new Command({
+  inputs: [new Input("in.mp4"), new Input(source)],
+  outputs: [new Output("out.mp4")]
+})
+assertType<
+  Equals<
+    typeof constructedByConstructor,
+    FFmpeguCommand<SourceError, Storage, any>
+  >
+>(true)
+const constructedPiped = Command.make({}).pipe(
+  Command.withInput(new Input("in.mp4")),
+  Command.withOutput(new Output("out.mp4")),
+  Command.withOutput(new Output(sink))
+)
+assertType<
+  Equals<typeof constructedPiped, FFmpeguCommand<SinkError, Uploader, any>>
+>(true)
+const constructedRun = run(
+  Command.make({
+    inputs: [new Input("in.mp4")],
+    outputs: [Output.toFile("out.mp4")]
+  })
+)
+assertType<
+  Equals<typeof constructedRun, Effect.Effect<RunResult, FFmpegError, FFmpeg>>
+>(true)
+
 // Output.toStream outputs are counted (`2` means two or more) through every
 // way of building a command.
 const streamed = Command.make({
@@ -381,6 +436,16 @@ Effect.runPromise(files)
 options.duration([1, 0])
 // @ts-expect-error inputs are not outputs
 Command.withOutput(Input.fromFile("in.mp4"))
+// @ts-expect-error inputs are not outputs
+Command.make({ outputs: [Input.fromFile("in.mp4")] })
+// @ts-expect-error outputs are not inputs
+Command.make({ inputs: [Output.toFile("out.mp4")] })
+// @ts-expect-error input streams carry bytes
+Command.make({ inputs: [{ ...Input.fromFile("in.mp4"), source: strings }] })
+Command.make({
+  // @ts-expect-error output destinations are paths, sinks or streams
+  outputs: [{ ...Output.toFile("out.mp4"), destination: 1 }]
+})
 // @ts-expect-error run cannot consume an Output.toStream output
 run(streamed)
 // @ts-expect-error run cannot consume an Output.toStream output

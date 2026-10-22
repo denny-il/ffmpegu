@@ -43,8 +43,23 @@ export interface CompiledCommand<E, R> {
   readonly streamOutputFds: ReadonlyArray<number>
 }
 
-type AnyInput = FFmpeguInput<any, any>
-type AnyOutput = FFmpeguOutput<any, any, any>
+type ValidInput = FFmpeguInput<unknown, unknown>
+type ValidOutput = FFmpeguOutput<unknown, unknown, any>
+
+// Constraints of `make` that do not mention `E`/`R`: `new FFmpeguInput(path)`
+// has no argument to infer them from and would otherwise adopt them from its
+// contextual type, i.e. `any` from `FFmpeguInput<any, any>`. `ValidElements`
+// checks sources and destinations once the arrays are inferred.
+type AnyInput = Omit<ValidInput, "source"> & { readonly source: unknown }
+type AnyOutput = Omit<ValidOutput, "destination"> & {
+  readonly destination: unknown
+}
+type ValidElements<I, O> = ([I] extends [ReadonlyArray<ValidInput>]
+  ? unknown
+  : { readonly inputs?: ReadonlyArray<ValidInput> | undefined }) &
+  ([O] extends [ReadonlyArray<ValidOutput>]
+    ? unknown
+    : { readonly outputs?: ReadonlyArray<ValidOutput> | undefined })
 
 type InputError<I> = I extends FFmpeguInput<infer E, infer _R> ? E : never
 type InputContext<I> = I extends FFmpeguInput<infer _E, infer R> ? R : never
@@ -139,16 +154,18 @@ export class FFmpeguCommand<
   static make<
     const I extends ReadonlyArray<AnyInput> = readonly [],
     const O extends ReadonlyArray<AnyOutput> = readonly []
-  >(options: {
-    readonly global?: FFmpeguOptions | undefined
-    readonly inputs?: I | undefined
-    readonly outputs?: O | undefined
-  }): FFmpeguCommand<
+  >(
+    options: {
+      readonly global?: FFmpeguOptions | undefined
+      readonly inputs?: I | undefined
+      readonly outputs?: O | undefined
+    } & ValidElements<I, O>
+  ): FFmpeguCommand<
     InputError<I[number]> | OutputError<O[number]>,
     InputContext<I[number]> | OutputContext<O[number]>,
     CountStreamOutputs<O>
   > {
-    return new FFmpeguCommand(options)
+    return new FFmpeguCommand(options as FFmpeguCommandOptions<any, any>)
   }
 
   /** Alias of {@link FFmpeguCommand.make}. */
