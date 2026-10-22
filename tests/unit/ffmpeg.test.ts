@@ -38,6 +38,7 @@ import {
   platformError
 } from "./fake-spawner.ts"
 import { Writable } from "node:stream"
+import { makeRecordingTracer } from "./tracer.ts"
 
 const setup = Effect.fnUntraced(function* (
   options?: FFmpegOptions,
@@ -1161,6 +1162,142 @@ describe("FFmpeg", () => {
       assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
     })
   )
+})
+
+describe("FFmpeg tracing", () => {
+  // Paths and URLs can carry credentials; none of them may reach the span.
+  const command = Command.make({
+    inputs: [
+      Input.fromFile("https://user:secret@example.com/in.mp4"),
+      Input.fromStream(Stream.make(bytes(1)))
+    ],
+    outputs: [Output.toSink(Sink.drain), Output.toFile("/private/out.mp4")]
+  })
+
+  it.effect("annotates the run span with counts and the exit code", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup({ binary: "/home/user/bin/ffmpeg" })
+      const recorder = makeRecordingTracer()
+      const fiber = yield* Effect.forkChild(
+        ffmpeg
+          .run(command, { onProgress: () => Effect.void })
+          .pipe(Effect.withTracer(recorder.tracer))
+      )
+      const process = yield* next
+      yield* process.exit(0)
+      yield* Fiber.join(fiber)
+
+      assert.deepStrictEqual(recorder.attributes("ffmpegu/FFmpeg.run"), {
+        "process.executable.name": "ffmpeg",
+        "ffmpegu.inputs": 2,
+        "ffmpegu.outputs": 2,
+        "ffmpegu.input_streams": 1,
+        "ffmpegu.output_streams": 1,
+        "ffmpegu.progress": true,
+        "process.exit.code": 0
+      })
+    })
+  )
+
+  it.effect("annotates the stream span, including a failed exit", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const recorder = makeRecordingTracer()
+      const fiber = yield* Effect.forkChild(
+        Stream.runDrain(
+          ffmpeg.stream(command.withOutput(Output.toStream()))
+        ).pipe(Effect.withTracer(recorder.tracer))
+      )
+      const process = yield* next
+      yield* process.exit(1)
+      yield* Fiber.await(fiber)
+
+      assert.deepStrictEqual(recorder.attributes("ffmpegu/FFmpeg.stream"), {
+        "process.executable.name": "ffmpeg",
+        "ffmpegu.inputs": 2,
+        "ffmpegu.outputs": 3,
+        "ffmpegu.input_streams": 1,
+        "ffmpegu.output_streams": 2,
+        "ffmpegu.progress": false,
+        "process.exit.code": 1
+      })
+    })
+  )
+
+  describe("records the exit code of a terminated process", () => {
+    // ffmpeg exits with 255 when terminated by SIGTERM.
+    const terminated = { killExitCode: 255 }
+    const sinkError = new Error("sink failed")
+
+    it.effect("when the run is interrupted", () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup({}, terminated)
+        const recorder = makeRecordingTracer()
+        const fiber = yield* Effect.forkChild(
+          ffmpeg.run(toFile).pipe(Effect.withTracer(recorder.tracer))
+        )
+        yield* next
+        yield* Fiber.interrupt(fiber)
+
+        const exit = yield* Fiber.await(fiber)
+        assert.isTrue(
+          Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        )
+        assert.strictEqual(
+          recorder.attributes("ffmpegu/FFmpeg.run")["process.exit.code"],
+          255
+        )
+      })
+    )
+
+    it.effect("when a sink fails", () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup({}, terminated)
+        const recorder = makeRecordingTracer()
+        const command = Command.make({
+          inputs: [Input.fromStream(Stream.never)],
+          outputs: [Output.toSink(Sink.forEach(() => Effect.fail(sinkError)))]
+        })
+        const fiber = yield* Effect.forkChild(
+          ffmpeg.run(command).pipe(Effect.withTracer(recorder.tracer))
+        )
+        const process = yield* next
+        yield* process.emit(5, bytes(1))
+
+        assert.deepStrictEqual(describeCause(yield* Fiber.await(fiber)), [
+          ["Fail", sinkError]
+        ])
+        assert.strictEqual(
+          recorder.attributes("ffmpegu/FFmpeg.run")["process.exit.code"],
+          255
+        )
+      })
+    )
+
+    it.effect("when consumption ends early", () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup({}, terminated)
+        const recorder = makeRecordingTracer()
+        const command = Command.make({
+          inputs: [Input.fromStream(Stream.never)],
+          outputs: [Output.toStream()]
+        })
+        const fiber = yield* Effect.forkChild(
+          Stream.runCollect(Stream.take(ffmpeg.stream(command), 1)).pipe(
+            Effect.withTracer(recorder.tracer)
+          )
+        )
+        const process = yield* next
+        yield* process.emit(5, bytes(1), bytes(2))
+
+        assert.strictEqual((yield* Fiber.join(fiber)).length, 1)
+        assert.strictEqual(
+          recorder.attributes("ffmpegu/FFmpeg.stream")["process.exit.code"],
+          255
+        )
+      })
+    )
+  })
 })
 
 describe("FFmpeg progress", () => {

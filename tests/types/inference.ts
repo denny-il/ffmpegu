@@ -598,6 +598,27 @@ filters.custom("null", {}, readonlyLabels, readonlyLabels)
 // @ts-expect-error option bundles are immutable
 options.custom("-y").args.push("-n")
 
+// Partial mocks of the generic service methods for code under test.
+const ffmpegMock = Layer.mock(FFmpeg, {
+  run: () => Effect.succeed({ args: [], stderr: "" }),
+  stream: () => Stream.make(new Uint8Array([1]))
+})
+assertType<Equals<typeof ffmpegMock, Layer.Layer<FFmpeg>>>(true)
+const mockedRun = run(files).pipe(Effect.provide(ffmpegMock))
+assertType<Equals<typeof mockedRun, Effect.Effect<RunResult, FFmpegError>>>(
+  true
+)
+const mockedStream = stream(streamedByMethod).pipe(Stream.provide(ffmpegMock))
+assertType<Equals<typeof mockedStream, Stream.Stream<Uint8Array, FFmpegError>>>(
+  true
+)
+const ffprobeMock = Layer.mock(FFprobe, {
+  probe: () => Effect.succeed({ streams: [] })
+})
+assertType<Equals<typeof ffprobeMock, Layer.Layer<FFprobe>>>(true)
+// @ts-expect-error mocked results keep the service's result type
+Layer.mock(FFmpeg, { run: () => Effect.succeed({ stderr: "" }) })
+
 // Contract violations.
 declare const strings: Stream.Stream<string>
 declare const readable: Readable

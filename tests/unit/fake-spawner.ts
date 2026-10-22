@@ -63,6 +63,8 @@ export interface FakeSpawnerOptions {
   readonly inputSink?: (
     fd: number
   ) => Sink.Sink<void, Uint8Array, never, PlatformError.PlatformError>
+  /** Exit with this code when killed (a process handling SIGTERM). */
+  readonly killExitCode?: number
 }
 
 const encoder = new TextEncoder()
@@ -220,7 +222,11 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
       const kill = (killOptions?: ChildProcess.KillOptions) =>
         Ref.update(kills, (all) => [...all, killOptions]).pipe(
           Effect.andThen(
-            options.ignoreKill ? Effect.void : Effect.asVoid(signalExit)
+            options.ignoreKill
+              ? Effect.void
+              : options.killExitCode === undefined
+                ? Effect.asVoid(signalExit)
+                : process.exit(options.killExitCode)
           )
         )
 
