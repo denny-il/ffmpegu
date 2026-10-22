@@ -96,6 +96,89 @@ it.live("decodes unavailable timestamps with show_optional_fields always", () =>
 )
 
 it.live(
+  "decodes N/A dimensions and timestamps across stream kinds with show_optional_fields always",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const subtitles = `${dir}/subtitles.srt`
+        yield* fs.writeFileString(
+          subtitles,
+          "1\n00:00:00,000 --> 00:00:00,500\nhello\n"
+        )
+        const mixed = `${dir}/mixed.mkv`
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile("./assets/video.mp4"),
+              Input.fromFile(
+                "sine=duration=0.5",
+                Options.create({ f: "lavfi" })
+              ),
+              Input.fromFile(subtitles)
+            ],
+            outputs: [
+              Output.toFile(
+                mixed,
+                Options.create(
+                  ["-map", "0:v"],
+                  ["-map", "1:a"],
+                  ["-map", "2:s"],
+                  { "c:v": "copy", "c:a": "flac", "c:s": "srt" },
+                  ["-attach", subtitles],
+                  ["-metadata:s:t", "mimetype=text/plain"]
+                )
+              )
+            ]
+          })
+        )
+        const timecoded = `${dir}/timecoded.mov`
+        yield* run(
+          Command.make({
+            inputs: [Input.fromFile("./assets/video.mp4")],
+            outputs: [
+              Output.toFile(
+                timecoded,
+                Options.create({ "c:v": "copy", timecode: "00:00:00:00" })
+              )
+            ]
+          })
+        )
+        const always = Options.create({
+          show_optional_fields: "always",
+          show_streams: true,
+          show_format: true,
+          v: "error"
+        })
+
+        const srt = yield* probeWith(subtitles, always)
+        expect(srt.streams).toMatchObject([
+          {
+            codec_type: "subtitle",
+            width: "N/A",
+            height: "N/A",
+            start_pts: "N/A",
+            duration_ts: "N/A"
+          }
+        ])
+        const mkv = yield* probeWith(mixed, always)
+        expect(mkv.streams).toMatchObject([
+          { codec_type: "video", width: 640, height: 360, duration_ts: "N/A" },
+          { codec_type: "audio", channels: 1 },
+          { codec_type: "subtitle", width: "N/A", height: "N/A" },
+          { codec_type: "attachment", codec_name: "unknown" }
+        ])
+        const mov = yield* probeWith(timecoded, always)
+        expect(mov.streams.map((stream) => stream.codec_type)).toEqual([
+          "video",
+          "data"
+        ])
+      })
+    ).pipe(Effect.provide(MediaLive))
+)
+
+it.live(
   "projects real metadata, omits stream indexes and unselected sections, and can run again",
   () =>
     Effect.gen(function* () {
