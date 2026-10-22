@@ -57,7 +57,7 @@ For Bun, substitute `BunServices` and `BunRuntime` from `@effect/platform-bun`. 
 
 ## Runtime requirements
 
-The minimum runtimes are Node.js 26.3.0 and Bun 1.4.3, which provide the global `Temporal`. Earlier releases supported Node.js 24 and Bun 1.4. Applications on older runtimes must upgrade them; the API is otherwise unchanged. The package `engines` field declares both minimums.
+The minimum runtimes are Node.js 26.3.0 and Bun 1.4.3, which provide the global `Temporal`. Earlier releases supported Node.js 24 and Bun 1.4. Applications on older runtimes must upgrade them; the runtime change itself needs no code changes. The package `engines` field declares both minimums.
 
 ## Migrating from the Promise API
 

@@ -18,7 +18,7 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 - `probeWith(path, options, schema?)` replaces the default selection with FFprobe options. It yields `ProjectedProbeResult`, or `schema`'s type when one is given; decode failures are `ProbeDecodeError`.
 - Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration. `layerConfig` takes a `Config` per option (e.g. `{ binary: Config.String("FFMPEG_PATH"), stderrTailBytes: Config.ByteSize("FFMPEG_STDERR_TAIL") }`); invalid configured values fail with `ConfigError`. Byte limits accept counts or sizes such as `"64 KiB"`.
 - Application owns runtime execution. Use Effect fibers, interruption, and timeout for cancellation.
-- Spans `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream` and `ffmpegu/FFprobe.probe` carry only the binary's file name, input/output counts, the progress flag and the exit code. Never add argv, paths, URLs or stderr to spans or logs.
+- Spans `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream` and `ffmpegu/FFprobe.probe` carry only the binary's file name and the exit code; the FFmpeg spans also carry input/output counts and the progress flag. Never add argv, paths, URLs or stderr to spans or logs.
 - Test code depending on the services with `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` or `Layer.mock(FFprobe, { probe: ... })`.
 - Never introduce old Promise runners, AbortSignal options, FIFO transport, Node streams directly in commands, or `.json`/`.result` probe wrappers.
 

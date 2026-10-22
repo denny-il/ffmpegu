@@ -91,7 +91,7 @@ Timeouts, queue admission, and concurrency belong to caller Effect composition. 
 
 A probe can be executed repeatedly. There is no consumed-command state and no `.json` or `.result` wrapper.
 
-## Compatibility after 0.3.0
+## Compatibility in 0.4.0
 
 `FFprobeService` gains a required `probeJson(input, options)` method returning FFprobe's parsed JSON document as `unknown`. This is a breaking addition for custom implementations and mocks of `FFprobeService`, which must add it; `probe`, `probeWith`, and their free functions keep their signatures.
 
