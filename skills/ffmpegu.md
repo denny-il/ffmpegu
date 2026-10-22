@@ -8,7 +8,7 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 
 - Named exports: `Command`, `Input`, `Output`, `Options`, `FFmpeg`, `FFprobe`, `run`, `stream`, `probe`, `options`, `filters`.
 - Pure builders also remain accessible through `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, and `ffmpegu.filters`.
-- `Command.make({ global?, inputs?, outputs? })`, `withInput`, `withOutput`, `withGlobal` preserve error and service types.
+- `Command.make({ global?, inputs?, outputs? })`, `withInput`, `withOutput`, `withGlobal` preserve error and service types. Commands are pipeable; `Command.withInput`/`withOutput`/`withGlobal` are data-first or data-last: `command.pipe(Command.withOutput(output))`.
 - `Input.fromFile(path, options?)`; `Input.fromStream(Stream<Uint8Array,E,R>, options?)`.
 - `Output.toFile(path, options?)`; `Output.toSink(Sink<void,Uint8Array,never,E,R>, options?)`; `Output.toStream(options?)`.
 - `run(command, { onProgress? })` returns an Effect requiring `FFmpeg`; callback returns an Effect too. It receives `Progress` with camelCase fields (`frame`, `fps`, `bitrate`, `totalSize`, `outTime` as a `Duration`, `dupFrames`, `dropFrames`, `speed`), `progress: "continue" | "end"`, and the original strings in `raw`.

@@ -59,6 +59,27 @@ describe("Command", () => {
     ])
   })
 
+  it("should pipe data-last combinators and accept data-first calls", () => {
+    const input = FFmpeguInput.fromFile("/test/input.mp4")
+    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const expected = ["-y", "-vn", "-i", "/test/input.mp4", "/test/output.mp4"]
+    const base = FFmpeguCommand.make({ global: FFmpeguOptions.create("-y") })
+
+    const piped = base.pipe(
+      FFmpeguCommand.withInput(input),
+      FFmpeguCommand.withOutput(output),
+      FFmpeguCommand.withGlobal(FFmpeguOptions.create("-vn"))
+    )
+    const dataFirst = FFmpeguCommand.withGlobal(
+      FFmpeguCommand.withOutput(FFmpeguCommand.withInput(base, input), output),
+      FFmpeguOptions.create("-vn")
+    )
+
+    expect(base.inputs).toEqual([])
+    expect(Result.getOrThrow(piped.compile()).args).toEqual(expected)
+    expect(Result.getOrThrow(dataFirst.compile()).args).toEqual(expected)
+  })
+
   it("should merge global options when adding", () => {
     const command = FFmpeguCommand.create({
       global: FFmpeguOptions.create("-y"),
