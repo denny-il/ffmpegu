@@ -1,5 +1,5 @@
 import { it, expect } from "@effect/vitest"
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Schema } from "effect"
 import {
   Command,
   FFprobe,
@@ -207,6 +207,46 @@ it.live(
       )
       expect(empty).toEqual({ streams: [] })
     }).pipe(Effect.provide(MediaLive))
+)
+
+it.live("decodes real projected metadata with a caller schema", () =>
+  Effect.gen(function* () {
+    const Dims = Schema.Struct({
+      streams: Schema.Array(
+        Schema.Struct({ width: Schema.Number, height: Schema.Number })
+      ),
+      format: Schema.Struct({ duration: Schema.NumberFromString })
+    })
+    const dims = yield* probeWith(
+      "./assets/video.mp4",
+      Options.create({
+        show_entries: "stream=width,height:format=duration",
+        select_streams: "v:0",
+        v: "error"
+      }),
+      Dims
+    )
+    expect(dims.streams).toEqual([{ width: 640, height: 360 }])
+    expect(dims.format.duration).toBeGreaterThan(0)
+
+    // The raw document keeps FFprobe's string duration.
+    const raw = yield* FFprobe.use((service) =>
+      service.probeJson(
+        "./assets/video.mp4",
+        Options.create({ show_entries: "format=duration", v: "error" })
+      )
+    )
+    expect(raw).toEqual({ format: { duration: expect.any(String) } })
+
+    const missing = yield* Effect.flip(
+      probeWith(
+        "./assets/video.mp4",
+        Options.create({ show_entries: "format=duration", v: "error" }),
+        Dims
+      )
+    )
+    expect(missing).toMatchObject({ _tag: "ProbeDecodeError" })
+  }).pipe(Effect.provide(MediaLive))
 )
 
 it.live("passes protocol restrictions to FFprobe", () =>

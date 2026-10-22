@@ -3,7 +3,16 @@
  * `tsc -p tests/types`, never executed.
  */
 import type { Readable } from "node:stream"
-import { Context, Duration, Effect, type Result, Sink, Stream } from "effect"
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  type Result,
+  Schema,
+  Sink,
+  Stream
+} from "effect"
 import {
   Command,
   type CommandError,
@@ -12,7 +21,9 @@ import {
   type FFmpegError,
   type FFmpeguAnyInput,
   type FFmpeguCommand,
+  type FFmpeguOptions,
   FFprobe,
+  type FFprobeService,
   filters,
   Input,
   options,
@@ -396,6 +407,114 @@ assertType<
     Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
   >
 >(true)
+
+// A caller schema replaces the projected result and adds its decoding services.
+const Dims = Schema.Struct({
+  streams: Schema.Array(
+    Schema.Struct({ width: Schema.Number, height: Schema.Number })
+  )
+})
+const dims = probeWith(
+  "in.mp4",
+  options.custom({ show_entries: "stream=width,height" }),
+  Dims
+)
+assertType<
+  Equals<
+    typeof dims,
+    Effect.Effect<
+      {
+        readonly streams: ReadonlyArray<{
+          readonly width: number
+          readonly height: number
+        }>
+      },
+      ProbeError,
+      FFprobe
+    >
+  >
+>(true)
+declare const StoredDims: Schema.Codec<
+  { readonly width: number },
+  unknown,
+  Storage
+>
+const storedDims = probeWith(
+  "in.mp4",
+  options.custom("-show_streams"),
+  StoredDims
+)
+assertType<
+  Equals<
+    typeof storedDims,
+    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
+  >
+>(true)
+// The service returns raw JSON; only the library decodes with the schema.
+const rawViaService = FFprobe.use((service) =>
+  service.probeJson("in.mp4", options.custom("-show_streams"))
+)
+assertType<
+  Equals<typeof rawViaService, Effect.Effect<unknown, ProbeError, FFprobe>>
+>(true)
+// Generic helpers and schema unions keep the schema's types.
+const probeWithHelper = <S extends Schema.Top>(schema: S) =>
+  probeWith("in.mp4", options.custom("-show_streams"), schema)
+const helperDims = probeWithHelper(StoredDims)
+assertType<
+  Equals<
+    typeof helperDims,
+    Effect.Effect<{ readonly width: number }, ProbeError, FFprobe | Storage>
+  >
+>(true)
+declare const eitherSchema: typeof Schema.String | typeof Schema.Number
+const either = probeWith(
+  "in.mp4",
+  options.custom("-show_streams"),
+  eitherSchema
+)
+assertType<
+  Equals<typeof either, Effect.Effect<string | number, ProbeError, FFprobe>>
+>(true)
+// @ts-expect-error the third argument must be a Schema
+probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
+// `Parameters`/`ReturnType` read the last overload, so wrappers derived from
+// them keep the two-argument API.
+const forwardProbeWith = (
+  ...args: Parameters<typeof probeWith>
+): ReturnType<typeof probeWith> => probeWith(...args)
+const forwarded = forwardProbeWith("in.mp4", options.custom("-show_streams"))
+assertType<
+  Equals<
+    typeof forwarded,
+    Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+  >
+>(true)
+// The documented mock: fixed raw JSON is enough, since `probeWith` decodes it.
+const fixture = { streams: [] }
+const mockProbeService: FFprobeService = {
+  probe: () => Effect.succeed(fixture),
+  probeWith: () => Effect.succeed(fixture),
+  probeJson: () => Effect.succeed(fixture)
+}
+export const FFprobeMock = Layer.succeed(FFprobe, mockProbeService)
+// @ts-expect-error custom implementations must provide probeJson
+export const withoutProbeJson: FFprobeService = {
+  probe: mockProbeService.probe,
+  probeWith: mockProbeService.probeWith
+}
+// A generic helper that claims to return the schema's type without decoding
+// no longer fits the service: it never receives a schema.
+const ignoresSchema = <S extends Schema.Top>(
+  _input: string,
+  _options: FFmpeguOptions,
+  _schema: S
+): Effect.Effect<S["Type"]> => Effect.succeed({ streams: [] })
+export const schemaIgnoringService: FFprobeService = {
+  ...mockProbeService,
+  // @ts-expect-error probeJson takes no schema
+  probeJson: ignoresSchema
+}
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)

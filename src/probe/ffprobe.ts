@@ -51,6 +51,17 @@ export interface FFprobeService {
     input: string,
     options: FFmpeguOptions
   ) => Effect.Effect<ProjectedProbeResult, ProbeError>
+  /**
+   * Like `probeWith`, returning FFprobe's parsed JSON document undecoded.
+   *
+   * `probeWith(input, options, schema)` decodes this output with the caller's
+   * schema. Decoding stays in the library so a custom implementation cannot
+   * return a value that does not match the schema's type.
+   */
+  readonly probeJson: (
+    input: string,
+    options: FFmpeguOptions
+  ) => Effect.Effect<unknown, ProbeError>
 }
 
 export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
@@ -75,19 +86,56 @@ export const probe = (
 ): Effect.Effect<ProbeResult, ProbeError, FFprobe> =>
   FFprobe.use((ffprobe) => ffprobe.probe(input))
 
-/** Probe selected metadata using the existing options builder. */
-export const probeWith = (
+/**
+ * Probe selected metadata using the existing options builder, optionally
+ * decoding the output with a caller-supplied schema. A schema decodes the
+ * service's `probeJson` output here, not in the service.
+ */
+export function probeWith<S extends Schema.Top>(
+  input: string,
+  options: FFmpeguOptions,
+  schema: S
+): Effect.Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
+// Kept last: `Parameters`/`ReturnType` resolve to the final overload, so
+// wrappers derived from them keep the two-argument API.
+export function probeWith(
   input: string,
   options: FFmpeguOptions
-): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe> =>
-  FFprobe.use((ffprobe) => ffprobe.probeWith(input, options))
+): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+export function probeWith(
+  input: string,
+  options: FFmpeguOptions,
+  schema?: Schema.Top
+): Effect.Effect<unknown, ProbeError, unknown> {
+  return schema === undefined
+    ? FFprobe.use((ffprobe) => ffprobe.probeWith(input, options))
+    : FFprobe.use((ffprobe) => ffprobe.probeJson(input, options)).pipe(
+        Effect.flatMap(decodeOutput(schema)),
+        // The service span ends before this decode; this one covers both.
+        Effect.withSpan("ffmpegu/probeWith")
+      )
+}
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
-const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ProbeResult))
-const decodeProjected = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(ProjectedProbeResult)
-)
+/** Decodes parsed FFprobe output, reporting failures as `ProbeDecodeError`. */
+const decodeOutput = <S extends Schema.Top>(schema: S) => {
+  const decode = Schema.decodeUnknownEffect(schema)
+  return (output: unknown) =>
+    decode(output).pipe(
+      mapEffectErrors(
+        (cause) =>
+          new ProbeDecodeError({
+            message: `Invalid ffprobe output: ${cause.message}`,
+            cause
+          })
+      )
+    )
+}
+
+const parseJson = decodeOutput(Schema.fromJsonString(Schema.Unknown))
+const decode = decodeOutput(ProbeResult)
+const decodeProjected = decodeOutput(ProjectedProbeResult)
 
 const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
   const spawner = yield* ChildProcessSpawner
@@ -108,9 +156,9 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
     DEFAULT_STDERR_TAIL_BYTES
   )
 
-  const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A>(
+  const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A, R>(
     input: string,
-    decodeOutput: (json: string) => Effect.Effect<A, Schema.SchemaError>,
+    decodeOutput: (output: unknown) => Effect.Effect<A, ProbeDecodeError, R>,
     options?: FFmpeguOptions
   ) {
     const compiled = probeArgs(input, options)
@@ -166,20 +214,13 @@ const make = Effect.fnUntraced(function* (options: FFprobeOptions) {
       )
     }
 
-    const json = new TextDecoder().decode(stdout.bytes())
-    return yield* decodeOutput(json).pipe(
-      mapEffectErrors(
-        (cause) =>
-          new ProbeDecodeError({
-            message: `Invalid ffprobe output: ${cause.message}`,
-            cause
-          })
-      )
-    )
+    const output = yield* parseJson(new TextDecoder().decode(stdout.bytes()))
+    return yield* decodeOutput(output)
   })
 
   return FFprobe.of({
     probe: (input) => execute(input, decode),
-    probeWith: (input, options) => execute(input, decodeProjected, options)
+    probeWith: (input, options) => execute(input, decodeProjected, options),
+    probeJson: (input, options) => execute(input, Effect.succeed, options)
   })
 })
