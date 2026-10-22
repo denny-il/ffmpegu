@@ -11,7 +11,7 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 - `Command.make({ global?, inputs?, outputs? })`, `withInput`, `withOutput`, `withGlobal` preserve error and service types.
 - `Input.fromFile(path, options?)`; `Input.fromStream(Stream<Uint8Array,E,R>, options?)`.
 - `Output.toFile(path, options?)`; `Output.toSink(Sink<void,Uint8Array,never,E,R>, options?)`; `Output.toStream(options?)`.
-- `run(command, { onProgress? })` returns an Effect requiring `FFmpeg`; callback returns an Effect too.
+- `run(command, { onProgress? })` returns an Effect requiring `FFmpeg`; callback returns an Effect too. It receives `Progress` with camelCase fields (`frame`, `fps`, `bitrate`, `totalSize`, `outTime` as a `Duration`, `dupFrames`, `dropFrames`, `speed`), `progress: "continue" | "end"`, and the original strings in `raw`.
 - `stream(command, { onProgress? })` returns `Stream<Uint8Array>` of the command's single `Output.toStream` output; `run` rejects commands with one. Stopping consumption terminates FFmpeg.
 - `probe(path)` returns an Effect requiring `FFprobe`, yielding the validated metadata object directly.
 - Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration.

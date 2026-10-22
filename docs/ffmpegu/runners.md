@@ -29,10 +29,13 @@ Ending consumption early (`Stream.take`, interruption, closing its scope) termin
 ## Progress
 
 ```ts
+import { Duration, Effect } from "effect"
+
 const execution = run(command, {
   onProgress: (progress) =>
     Effect.logDebug("Encoding", {
       frame: progress.frame,
+      position: progress.outTime && Duration.format(progress.outTime),
       state: progress.progress
     })
 })
@@ -40,7 +43,24 @@ const execution = run(command, {
 
 The callback returns an Effect. Progress parsing and callback execution are separated by a bounded queue retaining the latest update, so a slow callback does not stop media processing. Updates may be coalesced. Successful completion waits for pending callback work. Callback failure fails the run; callbacks are interrupted on run failure/cancellation. A callback that never completes keeps the run pending: apply your own timeout if needed.
 
-The library only reports parsed updates. It does not fabricate `progress=end` for a killed process or missing/malformed progress. Numeric `N/A` values become `undefined`; original strings remain in `raw`.
+Each update is a `Progress` with camelCase fields: `frame`, `fps`, `bitrate` (as reported, such as `"1234.5kbits/s"`), `totalSize` (bytes), `outTime` (an Effect `Duration` from `out_time_us`), `dupFrames`, `dropFrames`, and `speed` (`1.5` for `1.5x`). `progress` is `"end"` for FFmpeg's final block and `"continue"` otherwise; an unrecognized marker also counts as `"continue"`, so a final block is never inferred, and `raw.progress` keeps the original. `raw` keeps every key of the block as its original string, including keys without a typed field such as per-stream quality.
+
+The library only reports parsed updates. It does not fabricate `progress=end` for a killed process or missing/malformed progress. `N/A` and other unparseable or non-finite values become `undefined`; original strings remain in `raw`.
+
+### Migrating from snake_case progress fields
+
+Earlier releases exposed FFmpeg's key names and kept `out_time` as text. Rename the fields as follows:
+
+| Previous field                         | Current field                                                    |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `progress: string`                     | `progress: "continue" \| "end"`                                  |
+| `total_size`                           | `totalSize`                                                      |
+| `out_time_us` (number of microseconds) | `outTime` (`Duration`), for example `Duration.toMillis(outTime)` |
+| `out_time_ms` (also microseconds)      | `outTime`, or `raw.out_time_ms`                                  |
+| `out_time` (`HH:MM:SS.uuuuuu` text)    | `outTime`, or `raw.out_time`                                     |
+| `dup_frames`                           | `dupFrames`                                                      |
+| `drop_frames`                          | `dropFrames`                                                     |
+| `frame`, `fps`, `bitrate`, `speed`     | Unchanged                                                        |
 
 ## Cancellation
 

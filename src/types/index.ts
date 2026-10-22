@@ -1,3 +1,4 @@
+import type * as Duration from "effect/Duration"
 import type { FFmpeguArgument } from "../core/argument.ts"
 
 /**
@@ -28,17 +29,23 @@ export type FFmpeguUserArg =
  * block with its original string value.
  */
 export interface Progress {
-  /** `"continue"` while running, `"end"` for ffmpeg's final block. */
-  readonly progress: string
+  /**
+   * `"end"` for ffmpeg's final block, `"continue"` otherwise. Unrecognized
+   * markers count as `"continue"`, so a final block is never inferred;
+   * `raw.progress` keeps the original.
+   */
+  readonly progress: "continue" | "end"
   readonly frame?: number
   readonly fps?: number
+  /** As reported, for example `"1234.5kbits/s"`. */
   readonly bitrate?: string
-  readonly total_size?: number
-  readonly out_time_us?: number
-  readonly out_time_ms?: number
-  readonly out_time?: string
-  readonly dup_frames?: number
-  readonly drop_frames?: number
+  /** Bytes written so far. */
+  readonly totalSize?: number
+  /** Output position, from `out_time_us`. */
+  readonly outTime?: Duration.Duration
+  readonly dupFrames?: number
+  readonly dropFrames?: number
+  /** Multiple of real time; `1.5` for `speed=1.5x`. */
   readonly speed?: number
   readonly raw: Readonly<Record<string, string>>
 }

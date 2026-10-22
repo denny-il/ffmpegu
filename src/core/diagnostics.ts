@@ -1,3 +1,4 @@
+import * as Duration from "effect/Duration"
 import type { Progress } from "../types/index.ts"
 
 /**
@@ -140,9 +141,14 @@ export class ProgressParser {
   }
 }
 
+/**
+ * Hand-parsed rather than a Schema: every field is optional and lenient, so
+ * a malformed value is dropped instead of failing the block. A Schema would
+ * wrap this same per-field logic in getters at about 1.5x the per-block cost.
+ */
 function toProgress(fields: ReadonlyMap<string, string>): Progress {
   const progress: { -readonly [K in keyof Progress]: Progress[K] } = {
-    progress: fields.get("progress")!,
+    progress: fields.get("progress") === "end" ? "end" : "continue",
     raw: Object.fromEntries(fields)
   }
   const assign = <K extends keyof Progress>(key: K, value: Progress[K]) => {
@@ -151,12 +157,10 @@ function toProgress(fields: ReadonlyMap<string, string>): Progress {
   assign("frame", number(fields.get("frame")))
   assign("fps", number(fields.get("fps")))
   assign("bitrate", text(fields.get("bitrate")))
-  assign("total_size", number(fields.get("total_size")))
-  assign("out_time_us", number(fields.get("out_time_us")))
-  assign("out_time_ms", number(fields.get("out_time_ms")))
-  assign("out_time", text(fields.get("out_time")))
-  assign("dup_frames", number(fields.get("dup_frames")))
-  assign("drop_frames", number(fields.get("drop_frames")))
+  assign("totalSize", number(fields.get("total_size")))
+  assign("outTime", microseconds(fields.get("out_time_us")))
+  assign("dupFrames", number(fields.get("dup_frames")))
+  assign("dropFrames", number(fields.get("drop_frames")))
   const speed = fields.get("speed")
   assign("speed", number(speed?.endsWith("x") ? speed.slice(0, -1) : speed))
   return progress
@@ -172,4 +176,19 @@ function number(value: string | undefined): number | undefined {
   if (text(value) === undefined) return undefined
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : undefined
+}
+
+const INTEGER = /^[+-]?\d+$/
+
+/**
+ * Parsed straight from the text with `BigInt`: ffmpeg reports an int64 that
+ * can exceed `Number.MAX_SAFE_INTEGER`, and a `Number` round-trip would round
+ * it. The regex also rejects inputs `BigInt` would accept (`""`, `0x10`).
+ */
+function microseconds(
+  value: string | undefined
+): Duration.Duration | undefined {
+  return value !== undefined && INTEGER.test(value)
+    ? Duration.micros(BigInt(value))
+    : undefined
 }

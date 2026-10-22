@@ -1,6 +1,13 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Sink } from "effect"
-import { Command, Input, Options, Output, run } from "../../src/index.ts"
+import { Deferred, Duration, Effect, Fiber, Sink } from "effect"
+import {
+  Command,
+  Input,
+  Options,
+  Output,
+  type Progress,
+  run
+} from "../../src/index.ts"
 import { MediaLive } from "../helpers/platform.ts"
 
 it.live(
@@ -75,4 +82,47 @@ it.live(
       expect(maximumCallbacks).toBe(1)
       expect(activeCallbacks).toBe(0)
     }).pipe(Effect.provide(MediaLive), Effect.timeout("15 seconds"))
+)
+
+it.live("decodes real progress fields into numbers and a Duration", () =>
+  Effect.gen(function* () {
+    let bytes = 0
+    let final: Progress | undefined
+    yield* run(
+      Command.make({
+        inputs: [
+          Input.fromFile(
+            "sine=sample_rate=8000:duration=2",
+            Options.create({ f: "lavfi" })
+          )
+        ],
+        outputs: [
+          Output.toSink(
+            Sink.forEach((chunk: Uint8Array) =>
+              Effect.sync(() => {
+                bytes += chunk.length
+              })
+            ),
+            Options.create({ f: "s16le" })
+          )
+        ]
+      }),
+      {
+        onProgress: (progress) =>
+          Effect.sync(() => {
+            final = progress
+          })
+      }
+    )
+    expect(final?.progress).toBe("end")
+    expect(bytes).toBe(2 * 8000 * 2)
+    expect(final?.totalSize).toBe(bytes)
+    expect(Duration.isDuration(final?.outTime)).toBe(true)
+    expect(Duration.toNanosUnsafe(final!.outTime!)).toBe(
+      BigInt(final!.raw.out_time_us!) * 1000n
+    )
+    // FFmpeg 6.1 reports the last packet's timestamp rather than the end.
+    expect(Duration.toMillis(final!.outTime!)).toBeGreaterThan(1500)
+    expect(Duration.toMillis(final!.outTime!)).toBeLessThan(2100)
+  }).pipe(Effect.provide(MediaLive), Effect.timeout("15 seconds"))
 )
