@@ -4,9 +4,16 @@ import type { Progress } from "../types/index.ts"
 /**
  * Keeps the last `limit` bytes written to it, so diagnostics of long or
  * chatty runs stay bounded.
+ *
+ * The bytes live in a ring buffer: a push copies the chunk in (the producer
+ * may reuse its buffer after emitting it) and overwrites the oldest bytes,
+ * whatever the number or size of chunks. The buffer grows on demand up to
+ * `limit`, so a large limit costs nothing while little is written.
  */
 export class ByteTail {
-  #chunks: Uint8Array[] = []
+  #buffer = new Uint8Array(0)
+  /** Offset of the oldest byte in `#buffer`. */
+  #start = 0
   #size = 0
   #truncated = false
 
@@ -16,25 +23,27 @@ export class ByteTail {
     if (chunk.length === 0) return
     if (chunk.length >= this.limit) {
       this.#truncated ||= chunk.length > this.limit || this.#size > 0
-      // Copy: the producer may reuse its buffer after emitting it.
-      this.#chunks =
-        this.limit > 0 ? [chunk.slice(chunk.length - this.limit)] : []
+      this.#reserve(this.limit)
+      this.#buffer.set(chunk.subarray(chunk.length - this.limit))
+      this.#start = 0
       this.#size = this.limit
       return
     }
-    this.#chunks.push(chunk.slice())
-    this.#size += chunk.length
-    while (this.#size > this.limit) {
+    this.#reserve(Math.min(this.#size + chunk.length, this.limit))
+    // Shorter than the buffer: wraps at most once.
+    const capacity = this.#buffer.length
+    const end = (this.#start + this.#size) % capacity
+    const head = Math.min(chunk.length, capacity - end)
+    this.#buffer.set(chunk.subarray(0, head), end)
+    this.#buffer.set(chunk.subarray(head), 0)
+    const excess = this.#size + chunk.length - capacity
+    if (excess > 0) {
+      // Only once the buffer reached `limit`: the oldest bytes were overwritten.
       this.#truncated = true
-      const head = this.#chunks[0]!
-      const excess = this.#size - this.limit
-      if (head.length <= excess) {
-        this.#chunks.shift()
-        this.#size -= head.length
-      } else {
-        this.#chunks[0] = head.subarray(excess)
-        this.#size -= excess
-      }
+      this.#start = (this.#start + excess) % capacity
+      this.#size = capacity
+    } else {
+      this.#size += chunk.length
     }
   }
 
@@ -44,12 +53,25 @@ export class ByteTail {
 
   bytes(): Uint8Array {
     const bytes = new Uint8Array(this.#size)
-    let offset = 0
-    for (const chunk of this.#chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.length
-    }
+    const head = Math.min(this.#size, this.#buffer.length - this.#start)
+    bytes.set(this.#buffer.subarray(this.#start, this.#start + head))
+    bytes.set(this.#buffer.subarray(0, this.#size - head), head)
     return bytes
+  }
+
+  /**
+   * Grows the buffer to hold at least `capacity` bytes (at most `limit`),
+   * doubling so that growth stays amortized O(1) per byte. The contents are
+   * moved to the start of the new buffer.
+   */
+  #reserve(capacity: number) {
+    if (capacity <= this.#buffer.length) return
+    const buffer = new Uint8Array(
+      Math.min(this.limit, Math.max(capacity, this.#buffer.length * 2))
+    )
+    buffer.set(this.bytes())
+    this.#buffer = buffer
+    this.#start = 0
   }
 
   text(): string {

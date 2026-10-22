@@ -207,6 +207,76 @@ describe("ByteTail", () => {
     expect(tail.text()).toBe("éx")
   })
 
+  it("should keep the bytes already written when the buffer grows", () => {
+    const tail = new ByteTail(8)
+    tail.push(Uint8Array.of(1, 2))
+    tail.push(Uint8Array.of(3, 4))
+    expect(tail.bytes()).toEqual(Uint8Array.of(1, 2, 3, 4))
+
+    tail.push(Uint8Array.of(5, 6, 7))
+    expect(tail.bytes()).toEqual(Uint8Array.of(1, 2, 3, 4, 5, 6, 7))
+
+    // Wrap-around starts only once the buffer reached `limit`, so no growth
+    // follows it.
+    tail.push(Uint8Array.of(8, 9, 10))
+    expect(tail.bytes()).toEqual(Uint8Array.of(3, 4, 5, 6, 7, 8, 9, 10))
+  })
+
+  it("should match the end of everything written across growth and wrap-around", () => {
+    // Deterministic pseudo-random sizes and contents, including UTF-8
+    // continuation bytes, against a reference built by concatenation.
+    let seed = 1
+    const random = (bound: number) => {
+      seed = (Math.imul(seed, 1103515245) + 12345) >>> 0
+      return seed % bound
+    }
+    for (const limit of [1, 2, 7, 64, 1000, 4096]) {
+      const tail = new ByteTail(limit)
+      const written: Array<number> = []
+      for (let push = 0; push < 300; push++) {
+        const chunk = new Uint8Array(random(limit * 2 + 2))
+        for (let i = 0; i < chunk.length; i++) chunk[i] = random(256)
+        tail.push(chunk)
+        written.push(...chunk)
+
+        const expected = Uint8Array.from(written.slice(-limit))
+        expect(tail.size).toBe(expected.length)
+        expect(tail.bytes()).toEqual(expected)
+      }
+      const expected = Uint8Array.from(written.slice(-limit))
+      let start = 0
+      if (written.length > limit) {
+        while (start < expected.length && (expected[start]! & 0xc0) === 0x80) {
+          start++
+        }
+      }
+      expect(tail.text()).toBe(
+        new TextDecoder().decode(expected.subarray(start)).trim()
+      )
+    }
+  })
+
+  it("should keep a large tail of many small chunks in linear time", () => {
+    // ffmpeg writes stderr in pieces of a few hundred bytes. Evicting per
+    // chunk made this quadratic in the number of chunks kept: minutes rather
+    // than milliseconds at this limit, so the test timeout catches it.
+    const limit = 16 * 1024 * 1024
+    const tail = new ByteTail(limit)
+    const chunk = new Uint8Array(80)
+    const pushes = (2 * limit) / chunk.length
+    for (let push = 0; push < pushes; push++) {
+      chunk.fill(push & 0xff)
+      tail.push(chunk)
+    }
+
+    const bytes = tail.bytes()
+    expect(bytes.length).toBe(limit)
+    const first = pushes - limit / chunk.length
+    for (let offset = 0; offset < limit; offset += chunk.length) {
+      expect(bytes[offset]).toBe((first + offset / chunk.length) & 0xff)
+    }
+  })
+
   it("should keep nothing with a zero limit", () => {
     const tail = new ByteTail(0)
     tail.push(bytes("abc"))
