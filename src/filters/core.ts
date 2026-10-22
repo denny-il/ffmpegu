@@ -96,12 +96,22 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
     const options: string[] = []
 
     for (const [key, value] of Object.entries(this.options)) {
+      // An optional key set to undefined means "not set", as in the helpers.
+      if (value === undefined) continue
       if (value instanceof FFmpeguArgument) {
         const args = value.getArgs(refs)
         options.push(`${key}=${args.join(":")}`)
       } else if (typeof value === "boolean") {
         // A bare key is parsed as a positional value, so spell booleans out.
         options.push(`${key}=${value ? 1 : 0}`)
+      } else if (typeof value === "object" || typeof value === "function") {
+        // Helpers convert time values only on their known time keys. Options
+        // passed as a variable skip excess-property checks, so a Duration or
+        // time object can reach any other key, where its string form (e.g.
+        // "2000 millis") would be misread by FFmpeg.
+        throw new TypeError(
+          `Filter option "${key}" must be a string, number, boolean or ffmpegu argument`
+        )
       } else {
         options.push(`${key}=${this.escapeFilterValue(String(value))}`)
       }
