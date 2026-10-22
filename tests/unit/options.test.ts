@@ -403,6 +403,13 @@ describe("Options", { concurrent: false }, () => {
       "-window_size",
       "8"
     ])
+
+    expect(ffmpegu.options.dash({ writePrft: true }).getArgs(refs)).toEqual([
+      "-f",
+      "dash",
+      "-write_prft",
+      "1"
+    ])
   })
 
   it("should format video bitrate with unit", () => {

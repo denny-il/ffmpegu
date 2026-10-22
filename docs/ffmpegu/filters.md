@@ -11,6 +11,8 @@ Filters are used to build `-vf`, `-af`, and `-filter_complex` graphs.
 - `ffmpegu.filters.builder()`
 - Common helpers: `ffmpegu.filters.scale`, `ffmpegu.filters.fps`, `ffmpegu.filters.select`, `ffmpegu.filters.setpts`, `ffmpegu.filters.volume`, etc.
 
+The typed option keys of the common helpers are hints, not a closed list. Any other key is passed to FFmpeg as a raw value, so options from other FFmpeg versions work without a library update. FFmpeg validates option names and values. Time keys such as `atrim`'s `start` also accept time objects.
+
 ## Option values
 
 - Booleans render as `key=1` or `key=0`, so `false` explicitly turns off options that default to on.
@@ -18,7 +20,7 @@ Filters are used to build `-vf`, `-af`, and `-filter_complex` graphs.
 
 ## Time options
 
-The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `start_time`, `end_time`, `duration`), and `afade` (`start_time`, `duration`) accept time objects, Effect `Duration` values, and `Temporal.Duration` values in addition to plain filter values. They render as seconds (`start_time=1.25`), with microsecond precision for durations. Invalid durations fail compilation as for [time options](options.md#time-values).
+The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) accept time objects, Effect `Duration` values, and `Temporal.Duration` values in addition to plain filter values. They render as seconds (`start_time=1.25`), with microsecond precision for durations. Invalid durations fail compilation as for [time options](options.md#time-values).
 
 ```ts
 import { Duration } from "effect"

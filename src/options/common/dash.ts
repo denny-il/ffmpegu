@@ -13,7 +13,8 @@ export type FFmpeguDashFragType =
 
 export type FFmpeguDashMpdProfile = "dash" | "dvb_dash" | ({} & string)
 
-export type FFmpeguDashWritePrft = "auto" | "wallclock" | "pts" | ({} & string)
+// write_prft is a boolean option; "auto" (the default) follows `ldash`.
+export type FFmpeguDashWritePrft = "auto" | ({} & string)
 
 export type FFmpeguDashOptions = {
   adaptationSets?: string
@@ -51,7 +52,7 @@ export type FFmpeguDashOptions = {
   useTimeline?: boolean | number
   utcTimingUrl?: string
   windowSize?: number
-  writePrft?: FFmpeguDashWritePrft
+  writePrft?: FFmpeguDashWritePrft | boolean | number
 }
 
 const boolToInt = (value: boolean | number) =>
@@ -201,7 +202,10 @@ export const dash = (options: FFmpeguDashOptions) => {
   }
 
   if (typeof options.writePrft !== "undefined") {
-    args.write_prft = options.writePrft
+    args.write_prft =
+      typeof options.writePrft === "string"
+        ? options.writePrft
+        : boolToInt(options.writePrft)
   }
 
   return FFmpeguOptions.create(format("dash"), args)

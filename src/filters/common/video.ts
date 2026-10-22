@@ -3,14 +3,13 @@ import {
   type FFmpeguTimeObject,
   resolveFilterTimeOptions
 } from "../../utils.ts"
-import type { FilterArgument, FilterOptions } from "../core.ts"
-import type { FFmpeguFilterLabelRef } from "../label.ts"
+import type {
+  FilterArgument,
+  FilterLabels,
+  FilterOptions,
+  OpenFilterHelper
+} from "../core.ts"
 import { FFmpeguSimpleFilter } from "../simple.ts"
-
-type FilterLabels = {
-  inputs?: ReadonlyArray<FFmpeguFilterLabelRef>
-  outputs?: ReadonlyArray<FFmpeguFilterLabelRef>
-}
 
 type FilterOptionValue = FilterArgument
 type FilterTimeValue =
@@ -74,8 +73,6 @@ export type FormatOptions = {
 export type SetSarOptions = {
   sar?: FilterOptionValue
   max?: FilterOptionValue
-  c?: FilterOptionValue
-  a?: FilterOptionValue
 }
 
 export type SetDarOptions = {
@@ -119,7 +116,6 @@ export type DrawtextOptions = {
 
 export type SelectOptions = {
   expr?: FilterOptionValue
-  eval?: FilterOptionValue
   outputs?: FilterOptionValue
 }
 
@@ -127,21 +123,35 @@ export type SetPtsOptions = {
   expr?: FilterOptionValue
 }
 
-export const scale = (options: ScaleOptions = {}, labels?: FilterLabels) =>
-  create("scale", options, labels)
-export const fps = (options: FpsOptions = {}, labels?: FilterLabels) =>
-  create("fps", resolveFilterTimeOptions(options, ["start_time"]), labels)
-export const crop = (options: CropOptions = {}, labels?: FilterLabels) =>
-  create("crop", options, labels)
-export const pad = (options: PadOptions = {}, labels?: FilterLabels) =>
-  create("pad", options, labels)
-export const format = (options: FormatOptions = {}, labels?: FilterLabels) =>
-  create("format", options, labels)
-export const setsar = (options: SetSarOptions = {}, labels?: FilterLabels) =>
-  create("setsar", options, labels)
-export const setdar = (options: SetDarOptions = {}, labels?: FilterLabels) =>
-  create("setdar", options, labels)
-export const transpose = (
+export const scale: OpenFilterHelper<ScaleOptions> = (
+  options: ScaleOptions = {},
+  labels?: FilterLabels
+) => create("scale", options, labels)
+export const fps: OpenFilterHelper<FpsOptions> = (
+  options: FpsOptions = {},
+  labels?: FilterLabels
+) => create("fps", resolveFilterTimeOptions(options, ["start_time"]), labels)
+export const crop: OpenFilterHelper<CropOptions> = (
+  options: CropOptions = {},
+  labels?: FilterLabels
+) => create("crop", options, labels)
+export const pad: OpenFilterHelper<PadOptions> = (
+  options: PadOptions = {},
+  labels?: FilterLabels
+) => create("pad", options, labels)
+export const format: OpenFilterHelper<FormatOptions> = (
+  options: FormatOptions = {},
+  labels?: FilterLabels
+) => create("format", options, labels)
+export const setsar: OpenFilterHelper<SetSarOptions> = (
+  options: SetSarOptions = {},
+  labels?: FilterLabels
+) => create("setsar", options, labels)
+export const setdar: OpenFilterHelper<SetDarOptions> = (
+  options: SetDarOptions = {},
+  labels?: FilterLabels
+) => create("setdar", options, labels)
+export const transpose: OpenFilterHelper<TransposeOptions> = (
   options: TransposeOptions = {},
   labels?: FilterLabels
 ) => create("transpose", options, labels)
@@ -149,13 +159,19 @@ export const hflip = (options: FilterOptions = {}, labels?: FilterLabels) =>
   create("hflip", options, labels)
 export const vflip = (options: FilterOptions = {}, labels?: FilterLabels) =>
   create("vflip", options, labels)
-export const overlay = (options: OverlayOptions = {}, labels?: FilterLabels) =>
-  create("overlay", options, labels)
-export const drawtext = (
+export const overlay: OpenFilterHelper<OverlayOptions> = (
+  options: OverlayOptions = {},
+  labels?: FilterLabels
+) => create("overlay", options, labels)
+export const drawtext: OpenFilterHelper<DrawtextOptions> = (
   options: DrawtextOptions = {},
   labels?: FilterLabels
 ) => create("drawtext", options, labels)
-export const select = (options: SelectOptions = {}, labels?: FilterLabels) =>
-  create("select", options, labels)
-export const setpts = (options: SetPtsOptions = {}, labels?: FilterLabels) =>
-  create("setpts", options, labels)
+export const select: OpenFilterHelper<SelectOptions> = (
+  options: SelectOptions = {},
+  labels?: FilterLabels
+) => create("select", options, labels)
+export const setpts: OpenFilterHelper<SetPtsOptions> = (
+  options: SetPtsOptions = {},
+  labels?: FilterLabels
+) => create("setpts", options, labels)

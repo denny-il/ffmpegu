@@ -131,10 +131,10 @@ describe("Filters Common", { concurrent: false }, () => {
     expect(
       atrim({
         start: Temporal.Duration.from({ minutes: 1 }),
-        end_time: Duration.micros(61_000_001n),
+        end: Duration.micros(61_000_001n),
         duration: Duration.seconds(30.5)
       }).getArgs(refs)
-    ).toEqual(["atrim=start=60:end_time=61.000001:duration=30.5"])
+    ).toEqual(["atrim=start=60:end=61.000001:duration=30.5"])
     expect(
       atrim({
         start: Duration.micros(9_007_199_254_740_993n),
@@ -179,6 +179,9 @@ describe("Filters Common", { concurrent: false }, () => {
     expect(atrim({ start: timeObject, end: foreign }).getArgs(refs)).toEqual([
       "atrim=start=1:end=0.000001"
     ])
+    expect(
+      afade({ start_time: { seconds: 2 }, silence: 0.1 }).getArgs(refs)
+    ).toEqual(["afade=start_time=2:silence=0.1"])
     expect(highpass({ f: 200 }).getArgs(refs)).toEqual(["highpass=f=200"])
     expect(lowpass({ f: 300 }).getArgs(refs)).toEqual(["lowpass=f=300"])
     expect(aformat({ sample_fmts: "fltp" }).getArgs(refs)).toEqual([
