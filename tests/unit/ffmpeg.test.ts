@@ -1,3 +1,4 @@
+import * as NodeSink from "@effect/platform-node/NodeSink"
 import { assert, describe, it } from "@effect/vitest"
 import {
   Cause,
@@ -36,6 +37,7 @@ import {
   makeFakeSpawner,
   platformError
 } from "./fake-spawner.ts"
+import { Writable } from "node:stream"
 
 const setup = Effect.fnUntraced(function* (
   options?: FFmpegOptions,
@@ -215,6 +217,65 @@ describe("FFmpeg", () => {
       assert.strictEqual(error.stderr, "Invalid data found")
     })
   )
+
+  describe("settles a write pending on a descriptor closed without error", () => {
+    /**
+     * Inputs written through the platform adapter to a descriptor destroyed
+     * during the first write, as Node does once the reader's end reports EOF.
+     * The adapter waits for a `drain` that never comes.
+     */
+    const closingInput = Effect.gen(function* () {
+      const attempted = yield* Deferred.make<void>()
+      const { ffmpeg, next } = yield* setup(undefined, {
+        inputSink: (fd) =>
+          NodeSink.fromWritable({
+            evaluate: () =>
+              new Writable({
+                highWaterMark: 1,
+                write() {
+                  Deferred.doneUnsafe(attempted, Effect.void)
+                  this.destroy()
+                }
+              }),
+            onError: () => platformError(`fromWritable(fd${fd})`)
+          })
+      })
+      const finalized = yield* Ref.make(false)
+      const fiber = yield* Effect.forkChild(
+        ffmpeg.run(
+          Command.make({
+            inputs: [Input.fromStream(endless(finalized))],
+            outputs: [Output.toFile("out.mp4")]
+          })
+        )
+      )
+      const process = yield* next
+      yield* Deferred.await(attempted)
+      return { fiber, process, finalized }
+    })
+
+    it.effect("once ffmpeg exits", () =>
+      Effect.gen(function* () {
+        const { fiber, process, finalized } = yield* closingInput
+        yield* process.exit(0)
+        yield* Fiber.join(fiber)
+        assert.isTrue(yield* Ref.get(finalized))
+      })
+    )
+
+    it.effect("when the run is cancelled", () =>
+      Effect.gen(function* () {
+        const { fiber, process, finalized } = yield* closingInput
+        yield* Fiber.interrupt(fiber)
+        const exit = yield* Fiber.await(fiber)
+        assert.isTrue(
+          Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        )
+        assert.strictEqual((yield* process.kills).length, 1)
+        assert.isTrue(yield* Ref.get(finalized))
+      })
+    )
+  })
 
   it.effect(
     "fails immediately on other input pipe errors and kills ffmpeg",
@@ -429,9 +490,14 @@ describe("FFmpeg", () => {
       Effect.gen(function* () {
         const { ffmpeg, next } = yield* setup()
         const outputDefect = new Error("output cleanup defect")
+        const sourceDefect = new Error("source cleanup defect")
         const consuming = yield* Deferred.make<void>()
         const command = Command.make({
-          inputs: [Input.fromStream(Stream.make(bytes(1)))],
+          inputs: [
+            Input.fromStream(
+              Stream.never.pipe(Stream.ensuring(Effect.die(sourceDefect)))
+            )
+          ],
           outputs: [
             Output.toSink(
               Sink.forEach(() =>
@@ -445,19 +511,15 @@ describe("FFmpeg", () => {
         })
         const fiber = yield* Effect.forkChild(ffmpeg.run(command))
         const process = yield* next
-        // A write is in flight when the process exits, and then fails.
-        yield* process.holdInput(4)
-        yield* process.awaitWriteAttempt(4)
         yield* process.emit(5, bytes(1))
         yield* Deferred.await(consuming)
-        yield* process.closeInput(4, "EIO")
+        // The source fails while being stopped after the exit.
         yield* process.exit(0)
-        yield* process.releaseInput(4)
 
-        const reasons = describeCause(yield* Fiber.await(fiber))
-        assert.strictEqual(reasons.length, 2)
-        assert.instanceOf(reasons[0]?.[1], PipeError)
-        assert.deepStrictEqual(reasons[1], ["Die", outputDefect])
+        assert.deepStrictEqual(describeCause(yield* Fiber.await(fiber)), [
+          ["Die", sourceDefect],
+          ["Die", outputDefect]
+        ])
       })
   )
 
