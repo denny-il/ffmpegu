@@ -2,7 +2,7 @@
 
 `Input.fromFile(path, options?)` and `Output.toFile(path, options?)` pass paths directly to FFmpeg. They preserve seeking and FFmpeg's protocol support. A fake Effect FileSystem does not intercept I/O performed inside FFmpeg itself; use a fake process service for isolated tests.
 
-`Input.fromStream(stream, options?)` accepts an Effect `Stream<Uint8Array, E, R>`. `Output.toSink(sink, options?)` accepts `Sink<void, Uint8Array, never, E, R>`. Both preserve their error and service types in the resulting command.
+`Input.fromStream(stream, options?)` accepts an Effect `Stream<Uint8Array, E, R>`. `Output.toSink(sink, options?)` accepts `Sink<void, Uint8Array, never, E, R>`. Both preserve their error and service types in the resulting command. An input stream is written in the batches it emits, without copying; it is pulled at most three batches ahead of FFmpeg's input pipe, so a source emitting very large batches can bound that with `Stream.rechunk`. Because nothing is copied, a source must not mutate or reuse an emitted batch, neither its array nor its bytes, until the run settles; a producer with reusable buffers must copy each batch before emitting it.
 
 `Output.toStream(options?)` marks the output read by `stream(command)` (see [runners](runners.md#streaming-output)) instead of being written to a file or sink. Commands count these outputs in their type, so `run` and `stream` reject the wrong number at compile time.
 

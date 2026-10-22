@@ -1,4 +1,6 @@
+import type * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
+import * as Channel from "effect/Channel"
 import type * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -512,14 +514,22 @@ const execute = (
 /**
  * Write a caller stream into an input descriptor.
  *
- * The source and the descriptor run in separate fibers joined by a one-chunk
- * queue:
+ * The source and the descriptor run in separate fibers joined by a queue
+ * holding one of the source's batches:
  * - the producer runs the caller stream into the queue; it is only ever
  *   stopped by plain fiber interruption, which keeps defects raised by the
  *   source's finalizers in its exit (`Stream.interruptWhen` would drop them);
  * - the consumer writes the queue into the library-owned sink, so only sink
  *   failures are classified and caller errors never pass through it. Ending
  *   the queue ends the descriptor, so a process blocked on reading sees EOF.
+ *
+ * Batches (the arrays of chunks a stream emits per pull) are handed over
+ * whole: nothing is copied, and the sink writes a batch at once rather than
+ * paying per-chunk Effect work. Backpressure is bounded in batches
+ * accordingly: the source runs at most three of its batches ahead of the
+ * descriptor (one being written, one queued, one waiting for room). A batch
+ * is written after it is emitted, so until the run settles the source must
+ * not mutate or reuse it; producers with reusable buffers copy before emitting.
  *
  * Closing stops the producer and ends the queue; the consumer then flushes
  * what was queued and ends the descriptor, which completes once the end is
@@ -535,21 +545,25 @@ const feedInput = (
 ) =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
-      const queue = yield* Queue.bounded<Uint8Array, Cause.Done>(1)
+      const queue = yield* Queue.bounded<
+        Arr.NonEmptyReadonlyArray<Uint8Array>,
+        Cause.Done
+      >(1)
       // Started immediately so that a source is always running (and owns its
       // resources) by the time the feeder can be stopped.
       const producer = yield* Effect.forkChild(
         Effect.interruptible(
-          Stream.runForEach(source, (chunk) => Queue.offer(queue, chunk)).pipe(
-            Effect.andThen(Queue.end(queue))
-          )
+          Stream.runForEachArray(source, (batch) =>
+            Queue.offer(queue, batch)
+          ).pipe(Effect.andThen(Queue.end(queue)))
         ),
         { startImmediately: true }
       )
       const consumer = yield* Effect.forkChild(
         Effect.interruptible(
           Stream.run(
-            Stream.fromQueue(queue),
+            // Each queued batch is emitted as one array.
+            Stream.fromChannel(Channel.fromQueue(queue)),
             handle.getInputFd(fd).pipe(
               Sink.catchCause((cause) =>
                 Effect.failCause(

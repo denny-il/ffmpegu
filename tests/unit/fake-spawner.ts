@@ -21,6 +21,10 @@ export interface FakeProcess {
   readonly args: ReadonlyArray<string>
   /** Bytes written to an input descriptor, by fd. */
   readonly written: (fd: number) => Effect.Effect<ReadonlyArray<number>>
+  /** The chunks written to an input descriptor, as the batches its sink received. */
+  readonly batches: (
+    fd: number
+  ) => Effect.Effect<ReadonlyArray<ReadonlyArray<Uint8Array>>>
   /** Whether the input stream for `fd` reached its end (EOF was sent). */
   readonly inputEnded: (fd: number) => Effect.Effect<boolean>
   /** Await the first write to `fd`. */
@@ -102,6 +106,7 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         number,
         {
           readonly written: Array<number>
+          readonly batches: Array<ReadonlyArray<Uint8Array>>
           readonly firstWrite: Deferred.Deferred<void>
           ended: boolean
           closed: string | undefined
@@ -129,6 +134,7 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         if (config.type !== "input") continue
         inputs.set(Number(name.slice(2)), {
           written: [],
+          batches: [],
           firstWrite: yield* Deferred.make<void>(),
           ended: false,
           closed: undefined
@@ -157,14 +163,15 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
 
       const inputSink = (fd: number) => {
         const state = input(fd)
-        return Sink.forEach((chunk: Uint8Array) =>
+        return Sink.forEachArray((batch: ReadonlyArray<Uint8Array>) =>
           Effect.suspend(() => {
             if (state.closed !== undefined) {
               return Effect.fail(
                 platformError(`fromWritable(fd${fd})`, state.closed)
               )
             }
-            state.written.push(...chunk)
+            state.batches.push(batch)
+            for (const chunk of batch) state.written.push(...chunk)
             return Deferred.succeed(state.firstWrite, undefined)
           })
         ).pipe(
@@ -176,6 +183,7 @@ export const makeFakeSpawner = Effect.fnUntraced(function* (
         command,
         args: command.args,
         written: (fd) => Effect.sync(() => [...input(fd).written]),
+        batches: (fd) => Effect.sync(() => [...input(fd).batches]),
         inputEnded: (fd) => Effect.sync(() => input(fd).ended),
         awaitWrite: (fd) => Deferred.await(input(fd).firstWrite),
         closeInput: (fd, code = "EPIPE") =>
