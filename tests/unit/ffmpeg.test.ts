@@ -521,6 +521,82 @@ describe("FFmpeg", () => {
     })
   )
 
+  it.live("lets a sink busy with a chunk observe an output read error", () =>
+    Effect.gen(function* () {
+      const { ffmpeg, next } = yield* setup()
+      const busy = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const observed: Array<Exit.Exit<void, unknown>> = []
+      const sink = Sink.forEach(() =>
+        Deferred.succeed(busy, undefined).pipe(
+          Effect.andThen(Deferred.await(release))
+        )
+      ).pipe(
+        Sink.onExit((exit) =>
+          Effect.sync(() => {
+            observed.push(exit)
+          })
+        )
+      )
+      const command = Command.make({
+        inputs: [Input.fromFile("in.mp4")],
+        outputs: [Output.toSink(sink)]
+      })
+      const fiber = yield* Effect.forkChild(ffmpeg.run(command))
+      const process = yield* next
+      yield* process.emit(4, bytes(1))
+      yield* Deferred.await(busy)
+      yield* process.failOutput(4)
+      // Time for the failure to stop the run, had it bypassed the sink.
+      yield* Effect.sleep("50 millis")
+      yield* Deferred.succeed(release, undefined)
+
+      const exit = yield* Fiber.await(fiber)
+      const reasons = describeCause(exit)
+      assert.strictEqual(reasons.length, 1)
+      assert.instanceOf(reasons[0]![1], PipeError)
+      // The sink saw the read error itself, not an interruption.
+      assert.strictEqual(observed.length, 1)
+      assert.deepStrictEqual(describeCause(observed[0]!), reasons)
+    })
+  )
+
+  it.live(
+    "keeps an output read error a busy sink never took when another sink fails",
+    () =>
+      Effect.gen(function* () {
+        const { ffmpeg, next } = yield* setup()
+        const busy = yield* Deferred.make<void>()
+        const failure = { kind: "sink-error" }
+        const command = Command.make({
+          inputs: [Input.fromFile("in.mp4")],
+          outputs: [
+            Output.toSink(
+              Sink.forEach(() =>
+                Deferred.succeed(busy, undefined).pipe(
+                  Effect.andThen(Effect.never)
+                )
+              )
+            ),
+            Output.toSink(Sink.forEach(() => Effect.fail(failure)))
+          ]
+        })
+        const fiber = yield* Effect.forkChild(ffmpeg.run(command))
+        const process = yield* next
+        yield* process.emit(4, bytes(1))
+        yield* Deferred.await(busy)
+        yield* process.failOutput(4)
+        yield* Effect.sleep("50 millis")
+        yield* process.emit(5, bytes(2))
+
+        const reasons = describeCause(yield* Fiber.await(fiber))
+        assert.strictEqual(reasons.length, 2)
+        assert.strictEqual(reasons[0]![1], failure)
+        assert.instanceOf(reasons[1]![1], PipeError)
+        assert.strictEqual((reasons[1]![1] as PipeError).fd, 4)
+      })
+  )
+
   it.effect("reports non-zero exits without waiting for pending outputs", () =>
     Effect.gen(function* () {
       const { ffmpeg, next } = yield* setup()

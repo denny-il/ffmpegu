@@ -4,7 +4,7 @@
 
 Each run starts a fresh scoped process. Input feeders, output sinks, stderr, and progress readers are supervised together. Source/sink errors and defects stop the operation and terminate its child. Nonzero exit codes are typed failures. Successful execution waits for output EOF and sink finalization and returns a bounded stderr tail for diagnostics.
 
-`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output sink pipe may need this escalation, so cancellation can take the configured grace period; stream outputs are drained during termination instead. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
+`forceKillAfter` controls escalation when a child ignores SIGTERM; the default is five seconds. FFmpeg blocked writing to a full output pipe does not act on SIGTERM, so sink and stream outputs keep being drained (and the remaining bytes discarded) during termination, and a cancelled or failed run does not wait out the grace period. `stderrTailBytes` bounds retained diagnostics. Paths and arguments can contain credentials, so automatic tracing does not record argv or stderr. Treat explicitly inspected diagnostics as potentially sensitive.
 
 ## Streaming output
 
@@ -56,7 +56,7 @@ const program = Effect.gen(function* () {
 
 Use `forkScoped` when the operation should belong to a surrounding scope. `Effect.timeout` also interrupts the run and performs cleanup. The library never detaches a process or starts a hidden runtime. Applications may use `NodeRuntime.runMain`, `BunRuntime.runMain`, or their existing managed runtime at the boundary.
 
-Cleanup waits for caller-owned stream, sink, and callback finalizers. As with other scoped Effects, a finalizer that never completes can prevent cancellation from completing; `forceKillAfter` bounds process termination, not arbitrary application finalizers.
+Cleanup waits for caller-owned stream, sink, and callback finalizers. Sinks and callbacks are stopped, inputs are closed and FFmpeg is terminated together, so a sink finalizer may wait for a resource the input stream releases. As with other scoped Effects, a finalizer that never completes can prevent cancellation from completing; `forceKillAfter` bounds process termination, not arbitrary application finalizers.
 
 ## Configuration and testing
 

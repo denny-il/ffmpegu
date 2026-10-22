@@ -1,8 +1,18 @@
-import { expect, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Stream } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Sink,
+  Stream
+} from "effect"
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync
@@ -343,6 +353,184 @@ it.live(
         expect(hasDefect(exit, defect)).toBe(true)
         expect(cleanups.count).toBe(1)
         expect(pids().filter(alive)).toEqual([])
+      })
+    ),
+  20_000
+)
+
+/** Real ffmpeg with the default SIGKILL grace (5 seconds). */
+const withDefaultGrace = <A, E>(
+  effect: Effect.Effect<A, E, FFmpeg>
+): Effect.Effect<A, E> =>
+  effect.pipe(
+    Effect.provide(
+      FFmpeg.layer({ binary: ffmpeg }).pipe(Layer.provide(PlatformLive))
+    )
+  )
+
+/** Well under the default grace: the shutdown did not wait for SIGKILL. */
+const SHUTDOWN_BOUND = 3_000
+
+const openFds = () => readdirSync("/dev/fd").length
+
+/**
+ * Fails if the run left descriptors open. The platform releases them
+ * asynchronously after the process exited, so the count may lag briefly.
+ */
+const expectNoLeakedFds = (before: number) =>
+  Effect.gen(function* () {
+    for (let poll = 0; poll < 40 && openFds() > before; poll++) {
+      yield* Effect.sleep("25 millis")
+    }
+    expect(openFds()).toBeLessThanOrEqual(before)
+  })
+
+/**
+ * Endless raw video into a sink. ffmpeg produces it far faster than any sink
+ * reads it, so an unread output pipe fills within milliseconds and ffmpeg
+ * blocks writing, where it does not act on SIGTERM.
+ */
+const videoIntoSink = <E>(sink: Sink.Sink<void, Uint8Array, never, E>) =>
+  Command.make({
+    inputs: [
+      Input.fromFile("testsrc2=s=640x360:r=30", Options.create({ f: "lavfi" }))
+    ],
+    outputs: [Output.toSink(sink, Options.create({ f: "rawvideo" }))]
+  })
+
+describe("abandoning a run with a sink output drains it instead of waiting for SIGKILL", () => {
+  it.live("when interrupted while the sink is blocked", () =>
+    withDefaultGrace(
+      Effect.gen(function* () {
+        const fds = openFds()
+        const received = yield* Deferred.make<void>()
+        const fiber = yield* Effect.forkChild(
+          run(
+            videoIntoSink(
+              Sink.forEach(() =>
+                Deferred.succeed(received, undefined).pipe(
+                  Effect.andThen(Effect.never)
+                )
+              )
+            )
+          )
+        )
+        yield* Deferred.await(received)
+        // Long enough for ffmpeg to fill the pipe and block writing.
+        yield* Effect.sleep("200 millis")
+
+        const started = Date.now()
+        const exit = yield* Fiber.interrupt(fiber).pipe(
+          Effect.andThen(Fiber.await(fiber))
+        )
+        expect(Date.now() - started).toBeLessThan(SHUTDOWN_BOUND)
+        expect(
+          Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        ).toBe(true)
+        expect(pids().filter(alive)).toEqual([])
+        yield* expectNoLeakedFds(fds)
+      })
+    )
+  )
+
+  it.live("when the sink fails", () =>
+    withDefaultGrace(
+      Effect.gen(function* () {
+        const fds = openFds()
+        const failure = { kind: "sink-error" }
+        let chunks = 0
+        const started = Date.now()
+        const error = yield* run(
+          videoIntoSink(
+            Sink.forEach(() =>
+              ++chunks > 5 ? Effect.fail(failure) : Effect.void
+            )
+          )
+        ).pipe(Effect.flip)
+        expect(Date.now() - started).toBeLessThan(SHUTDOWN_BOUND)
+        expect(error).toBe(failure)
+        expect(pids().filter(alive)).toEqual([])
+        yield* expectNoLeakedFds(fds)
+      })
+    )
+  )
+
+  it.live("when a caller deadline expires on a slow sink", () =>
+    withDefaultGrace(
+      Effect.gen(function* () {
+        const fds = openFds()
+        const started = Date.now()
+        const error = yield* run(
+          videoIntoSink(Sink.forEach(() => Effect.sleep("50 millis")))
+        ).pipe(Effect.timeout("500 millis"), Effect.flip)
+        expect(Date.now() - started).toBeLessThan(500 + SHUTDOWN_BOUND)
+        expect(error).toMatchObject({ _tag: "TimeoutError" })
+        expect(pids().filter(alive)).toEqual([])
+        yield* expectNoLeakedFds(fds)
+      })
+    )
+  )
+})
+
+it.live(
+  "cancelling a run completes when a sink's finalizer waits for an input to be released",
+  () =>
+    withDefaultGrace(
+      Effect.gen(function* () {
+        const fds = openFds()
+        const released = yield* Deferred.make<void>()
+        const received = yield* Deferred.make<void>()
+        const finalized = { sink: 0 }
+        // E.g. a sink and a source sharing a connection: the sink can only
+        // close once the source let go of it.
+        const source = Stream.forever(Stream.sync(chunk)).pipe(
+          Stream.ensuring(Deferred.succeed(released, undefined))
+        )
+        const sink = Sink.forEach(() =>
+          Deferred.succeed(received, undefined)
+        ).pipe(
+          Sink.ensuring(
+            Deferred.await(released).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  finalized.sink++
+                })
+              )
+            )
+          )
+        )
+        const fiber = yield* Effect.forkChild(
+          run(
+            Command.make({
+              inputs: [Input.fromStream(source, raw)],
+              outputs: [
+                Output.toSink(
+                  sink,
+                  Options.create({ "c:a": "copy", f: "s16le" })
+                )
+              ]
+            })
+          )
+        )
+        yield* Deferred.await(received)
+
+        const started = Date.now()
+        // Interrupting waits for the run's finalizers, so it is forked: a hung
+        // shutdown fails the bound below rather than the test timeout.
+        yield* Effect.forkChild(Fiber.interrupt(fiber))
+        const exit = yield* Fiber.await(fiber).pipe(
+          Effect.timeoutOrElse({
+            duration: "10 seconds",
+            orElse: () => Effect.die(new Error("cancellation did not complete"))
+          })
+        )
+        expect(Date.now() - started).toBeLessThan(SHUTDOWN_BOUND)
+        expect(
+          Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        ).toBe(true)
+        expect(finalized.sink).toBe(1)
+        expect(pids().filter(alive)).toEqual([])
+        yield* expectNoLeakedFds(fds)
       })
     ),
   20_000

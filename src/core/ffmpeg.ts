@@ -306,6 +306,18 @@ const execute = (
       const closeInputs = yield* Deferred.make<void>()
       const draining = yield* Deferred.make<void>()
 
+      // Sink outputs are read like the stream output: by a forwarder into a
+      // one-chunk queue the sink consumes, so that the descriptor keeps being
+      // drained when the sink is interrupted (see `forwardOutput`).
+      const sinkOutputs = yield* Effect.forEach(
+        compiled.outputStreams,
+        (output) =>
+          Effect.map(
+            Queue.bounded<Uint8Array, PipeError | Cause.Done>(1),
+            (queue) => ({ output, queue })
+          )
+      )
+
       const stderrFiber = yield* Effect.forkScoped(
         drainToTail(handle.stderr, 2, stderr)
       )
@@ -320,8 +332,8 @@ const execute = (
         Effect.all(
           [
             Effect.forEach(
-              compiled.outputStreams,
-              (output) => drainOutput(handle, output),
+              sinkOutputs,
+              ({ output, queue }) => drainOutput(output, queue),
               { concurrency: "unbounded", discard: true }
             ),
             onProgress ? deliverProgress(handle, onProgress) : Effect.void
@@ -329,14 +341,23 @@ const execute = (
           { concurrency: "unbounded", discard: true }
         )
       )
-      const forwardFiber = yield* Effect.forkScoped(
-        target ? forwardOutput(handle, target, draining) : Effect.void
+      // One fiber per descriptor: interrupting a reader stops it from reading,
+      // so a forwarder failing must not interrupt the others. Forked before the
+      // finalizer below is added, so that they still drain while it runs.
+      const forwardFibers = yield* Effect.forEach(
+        [
+          ...(target ? [forwardOutput(handle, target, draining)] : []),
+          ...sinkOutputs.map(({ output, queue }) =>
+            forwardToSink(handle, output.fd, queue, draining, pumpsFiber)
+          )
+        ],
+        (forward) => Effect.forkScoped(forward)
       )
       const fibers = [
         stderrFiber,
         inputsFiber,
         pumpsFiber,
-        forwardFiber
+        ...forwardFibers
       ] as const
 
       // Inputs are always stopped by closing them rather than by interrupting
@@ -347,19 +368,22 @@ const execute = (
       const stopInputs = Deferred.succeed(closeInputs, undefined).pipe(
         Effect.andThen(Fiber.await(inputsFiber))
       )
-      // Abandons the run: output readers and the progress callback stop, a
-      // stream output is drained (see `forwardOutput`), inputs are closed,
-      // and a still-running process is terminated with the configured SIGKILL
-      // escalation.
+      // Abandons the run: output descriptors are drained (see
+      // `forwardOutput`), sinks and the progress callback stop, inputs are
+      // closed, and a still-running process is terminated with the configured
+      // SIGKILL escalation. The last three start together and are all
+      // awaited: a caller's finalizer may wait for another caller resource
+      // (e.g. a sink for the source sharing its connection) that is only
+      // released by one of the others.
       const abandon = Effect.gen(function* () {
         const running = yield* Effect.orElseSucceed(
           handle.isRunning,
           () => false
         )
         yield* Deferred.succeed(draining, undefined)
-        yield* Fiber.interrupt(pumpsFiber)
         yield* Effect.all(
           [
+            Fiber.interrupt(pumpsFiber),
             stopInputs,
             running
               ? Effect.ignore(
@@ -435,7 +459,7 @@ const execute = (
         // diagnostics. The exit is reported first, along with any genuine
         // failure of the other tasks.
         const outputExits = yield* Effect.forEach(
-          [pumpsFiber, forwardFiber],
+          [pumpsFiber, ...forwardFibers],
           settle
         )
         const stderrExit = yield* Fiber.await(stderrFiber)
@@ -452,7 +476,7 @@ const execute = (
 
       if (failureReasons(inputsExit).length > 0) {
         const others = yield* Effect.forEach(
-          [pumpsFiber, forwardFiber, stderrFiber],
+          [pumpsFiber, ...forwardFibers, stderrFiber],
           settle
         )
         return yield* failWith([], [inputsExit, ...others])
@@ -461,7 +485,7 @@ const execute = (
       // Remaining output, the last progress update and stderr are still in
       // flight; they stay supervised until they complete. A stream output
       // completes as its consumer takes the rest.
-      const remaining = [pumpsFiber, forwardFiber, stderrFiber] as const
+      const remaining = [pumpsFiber, ...forwardFibers, stderrFiber] as const
       const drained = yield* Effect.exit(
         Effect.forEach(remaining, Fiber.join, {
           concurrency: "unbounded",
@@ -647,20 +671,17 @@ const feedInput = (
 class InputClosed {}
 
 /**
- * Read an output descriptor into a caller sink. A `Sink` may complete before
- * its upstream ends (even within a chunk), so completion is only accepted
- * after the upstream reached its end marker.
+ * Run an output descriptor's chunks, read by `forwardToSink`, into a caller
+ * sink. A `Sink` may complete before its upstream ends (even within a chunk),
+ * so completion is only accepted after the upstream reached its end marker.
  */
 const drainOutput = (
-  handle: ChildProcessHandle,
-  { fd, sink }: CompiledOutputStream<unknown, unknown>
+  { fd, sink }: CompiledOutputStream<unknown, unknown>,
+  queue: Queue.Dequeue<Uint8Array, PipeError | Cause.Done>
 ) =>
   Effect.gen(function* () {
     const ended = yield* Ref.make(false)
-    const upstream = handle.getOutputFd(fd).pipe(
-      mapStreamErrors(
-        (cause) => new PipeError({ fd, direction: "output", cause })
-      ),
+    const upstream = Stream.fromQueue(queue).pipe(
       Stream.concat(Stream.drain(Stream.fromEffect(Ref.set(ended, true))))
     )
     yield* Stream.run(upstream, sink)
@@ -670,13 +691,14 @@ const drainOutput = (
   })
 
 /**
- * Read a stream output descriptor into the queue behind the stream returned
- * by `stream`, one chunk at a time.
+ * Read an output descriptor into a queue, one chunk at a time: the queue
+ * behind the stream returned by `stream`, or the one a sink reads from.
  *
- * Once the run is abandoned (the consumer stopped, or the run failed) chunks
- * are discarded instead of interrupting the reader: a pipe nobody reads
- * stays full, and ffmpeg blocked writing to it does not act on SIGTERM, so
- * termination would wait out `forceKillAfter`. Draining unblocks it.
+ * Once the run is abandoned (cancelled, a consumer stopped, or the run
+ * failed) chunks are discarded instead of interrupting the reader: a pipe
+ * nobody reads stays full, and ffmpeg blocked writing to it does not act on
+ * SIGTERM, so termination would wait out `forceKillAfter`. Draining unblocks
+ * it.
  */
 const forwardOutput = (
   handle: ChildProcessHandle,
@@ -697,6 +719,43 @@ const forwardOutput = (
               Queue.offer(queue, chunk),
               Deferred.await(draining)
             )
+      )
+    )
+  )
+
+/**
+ * `forwardOutput` for a sink output, which sees the end of the descriptor or
+ * the reader's failure through the queue. Once draining, chunks may have been
+ * discarded, so the queue is not ended: the sink must not complete on a cut
+ * output, it is interrupted instead.
+ *
+ * A failure is reported by the sink once it takes it from the queue; failing
+ * right away would make the supervisor interrupt a sink still busy with a
+ * chunk, which would then not observe it. The forwarder still fails with it
+ * after the sinks stopped (the same error, reported once), so that it is
+ * kept should the sink have stopped before taking it.
+ */
+const forwardToSink = (
+  handle: ChildProcessHandle,
+  fd: number,
+  queue: Queue.Enqueue<Uint8Array, PipeError | Cause.Done>,
+  draining: Deferred.Deferred<void>,
+  sinks: Fiber.Fiber<unknown, unknown>
+) =>
+  forwardOutput(handle, { fd, queue }, draining).pipe(
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.flatMap(Deferred.isDone(draining), (done) =>
+            done ? Effect.void : Queue.end(queue)
+          )
+        : Queue.failCause(queue, exit.cause)
+    ),
+    // Failed from a finalizer, so also when the wait is interrupted: a sink
+    // stopped while still busy never took the failure. Finalizers have no
+    // typed error channel; the cause is merged into the forwarder's exit.
+    Effect.catchCause((cause) =>
+      Fiber.await(sinks).pipe(
+        Effect.ensuring(Effect.failCause(cause) as Effect.Effect<never>)
       )
     )
   )
