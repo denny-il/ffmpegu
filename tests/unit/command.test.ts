@@ -252,9 +252,9 @@ describe("Command", () => {
       ]
     })
 
-    expect(compileError(command).reason).toBe("ForeignReference")
+    expect(compileError(command).reason._tag).toBe("ForeignReference")
     // Compiling again must not have registered the foreign input.
-    expect(compileError(command).reason).toBe("ForeignReference")
+    expect(compileError(command).reason._tag).toBe("ForeignReference")
   })
 
   it("should reject foreign references nested in filter graphs", () => {
@@ -270,7 +270,7 @@ describe("Command", () => {
       inputs: [FFmpeguInput.fromFile("/test/own.mp4")]
     })
 
-    expect(compileError(command).reason).toBe("ForeignReference")
+    expect(compileError(command).reason._tag).toBe("ForeignReference")
   })
 
   it("should reject duplicate inputs and outputs", () => {
@@ -279,14 +279,17 @@ describe("Command", () => {
 
     expect(
       compileError(FFmpeguCommand.make({ inputs: [input, input] })).reason
-    ).toBe("DuplicateInput")
+    ).toMatchObject({ _tag: "DuplicateInput", index: 1, firstIndex: 0 })
     expect(
-      compileError(FFmpeguCommand.make({ inputs: [input] }).withInput(input))
-        .reason
-    ).toBe("DuplicateInput")
+      compileError(
+        FFmpeguCommand.make({
+          inputs: [FFmpeguInput.fromFile("a.mp4"), input]
+        }).withInput(input)
+      ).reason
+    ).toMatchObject({ _tag: "DuplicateInput", index: 2, firstIndex: 1 })
     expect(
       compileError(FFmpeguCommand.make({ outputs: [output, output] })).reason
-    ).toBe("DuplicateOutput")
+    ).toMatchObject({ _tag: "DuplicateOutput", index: 1, firstIndex: 0 })
   })
 
   it.each([
@@ -331,7 +334,48 @@ describe("Command", () => {
       FFmpeguCommand.make({ global: options.custom("-f", "pipe:0") })
     ]
   ])("should reject runner-owned descriptors (%s)", (_, command) => {
-    expect(compileError(command).reason).toBe("ReservedPath")
+    expect(compileError(command).reason._tag).toBe("ReservedPath")
+  })
+
+  it("should report where a runner-owned descriptor is used", () => {
+    const input = FFmpeguInput.fromFile("in.mp4")
+    const output = FFmpeguOutput.toFile("out.mp4")
+
+    expect(
+      compileError(
+        FFmpeguCommand.make({
+          inputs: [input, FFmpeguInput.fromFile("fd:3")]
+        })
+      ).reason
+    ).toMatchObject({
+      _tag: "ReservedPath",
+      path: "fd:3",
+      location: { _tag: "Input", index: 1 }
+    })
+    expect(
+      compileError(
+        FFmpeguCommand.make({
+          inputs: [input],
+          outputs: [
+            output,
+            FFmpeguOutput.toFile("b.mp4", options.custom(["-attach", "pipe:3"]))
+          ]
+        })
+      ).reason
+    ).toMatchObject({
+      _tag: "ReservedPath",
+      path: "pipe:3",
+      location: { _tag: "Output", index: 1 }
+    })
+    expect(
+      compileError(
+        FFmpeguCommand.make({ global: options.custom("-f", "pipe:0") })
+      ).reason
+    ).toMatchObject({
+      _tag: "ReservedPath",
+      path: "pipe:0",
+      location: { _tag: "Global" }
+    })
   })
 
   it.each([
@@ -358,7 +402,7 @@ describe("Command", () => {
     ]
   ])("should reject runner-owned options (%s)", (_, global, hint) => {
     const error = compileError(FFmpeguCommand.make({ global }))
-    expect(error.reason).toBe("ReservedOption")
+    expect(error.reason._tag).toBe("ReservedOption")
     expect(error.message).toContain(hint)
   })
 
@@ -383,7 +427,16 @@ describe("Command", () => {
                 outputs: command.outputs
               })
             : command.withOutput(FFmpeguOutput.toFile("other.mp4", injected))
-      expect(compileError(variant).reason).toBe("ReservedOption")
+      expect(compileError(variant).reason).toMatchObject({
+        _tag: "ReservedOption",
+        option: "-i",
+        location:
+          at === "global"
+            ? { _tag: "Global" }
+            : at === "input"
+              ? { _tag: "Input", index: 0 }
+              : { _tag: "Output", index: 1 }
+      })
     }
   })
 
@@ -421,7 +474,7 @@ describe("Command", () => {
       FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-out.mp4")] })
     )
 
-    expect(error.reason).toBe("InvalidArgument")
+    expect(error.reason._tag).toBe("InvalidArgument")
     expect(error.message).toContain("./-out.mp4")
   })
 
@@ -436,7 +489,7 @@ describe("Command", () => {
       FFmpeguCommand.make({ global: options.custom(new Broken()) })
     )
 
-    expect(error.reason).toBe("InvalidArgument")
+    expect(error.reason._tag).toBe("InvalidArgument")
     expect(error.cause).toBe(boom)
   })
 
@@ -492,7 +545,7 @@ describe("Command", () => {
 
     for (const command of cases) {
       const error = compileError(command)
-      expect(error.reason).toBe("InvalidArgument")
+      expect(error.reason._tag).toBe("InvalidArgument")
       expect(error.cause).toBeInstanceOf(RangeError)
     }
   })
@@ -537,7 +590,7 @@ describe("Command", () => {
         })
       ]) {
         const error = compileError(command)
-        expect(error.reason).toBe("InvalidArgument")
+        expect(error.reason._tag).toBe("InvalidArgument")
         expect(error.cause).toBeInstanceOf(RangeError)
       }
     }

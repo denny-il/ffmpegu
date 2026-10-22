@@ -391,7 +391,11 @@ describe("FFprobe", () => {
           Options.create(token, "value")
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
-        assert.strictEqual(error.reason, "ReservedOption")
+        assert.deepInclude(error.reason, {
+          _tag: "ReservedOption",
+          option: token,
+          location: { _tag: "Probe" }
+        })
       }
     })
   )
@@ -417,10 +421,15 @@ describe("FFprobe", () => {
           Effect.flip
         )
         assert.instanceOf(error, CommandError)
-        assert.strictEqual(
-          error.reason,
-          input.includes("\0") ? "InvalidArgument" : "ReservedPath"
-        )
+        if (input.includes("\0")) {
+          assert.strictEqual(error.reason._tag, "InvalidArgument")
+        } else {
+          assert.deepInclude(error.reason, {
+            _tag: "ReservedPath",
+            path: input,
+            location: { _tag: "Probe" }
+          })
+        }
         const optionError = yield* probeWith(
           "x",
           Options.create({ custom: input })
@@ -443,7 +452,7 @@ describe("FFprobe", () => {
           options.duration(Duration.infinity)
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
-        assert.strictEqual(error.reason, "InvalidArgument")
+        assert.strictEqual(error.reason._tag, "InvalidArgument")
         assert.instanceOf(error.cause, RangeError)
       })
   )
@@ -456,7 +465,7 @@ describe("FFprobe", () => {
         Options.create({ select_streams: Input.fromFile("x").video })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
-      assert.strictEqual(error.reason, "ForeignReference")
+      assert.strictEqual(error.reason._tag, "ForeignReference")
     })
   )
 

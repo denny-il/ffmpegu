@@ -24,7 +24,9 @@ import {
   type FFmpegError,
   OutputError,
   PipeError,
-  SpawnError
+  SinkEndedEarly,
+  SpawnError,
+  StreamOutput
 } from "../errors.ts"
 import type { Progress, RunResult } from "../types/index.ts"
 import {
@@ -154,9 +156,11 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
     // known; commands typed with an unknown count reach this check.
     if (compiled.streamOutputFds.length > 0) {
       return yield* new CommandError({
-        reason: "StreamOutput",
-        message:
-          "The command has an Output.toStream output, which run cannot consume. Use stream(command) instead."
+        reason: new StreamOutput({
+          count: compiled.streamOutputFds.length,
+          message:
+            "The command has an Output.toStream output, which run cannot consume. Use stream(command) instead."
+        })
       })
     }
     return yield* execute(
@@ -180,11 +184,13 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
         // type system; see `run`.
         if (fds.length !== 1) {
           return yield* new CommandError({
-            reason: "StreamOutput",
-            message:
-              fds.length === 0
-                ? "The command has no Output.toStream output to stream."
-                : `The command has ${fds.length} Output.toStream outputs; stream reads exactly one. Write the others to files or sinks.`
+            reason: new StreamOutput({
+              count: fds.length,
+              message:
+                fds.length === 0
+                  ? "The command has no Output.toStream output to stream."
+                  : `The command has ${fds.length} Output.toStream outputs; stream reads exactly one. Write the others to files or sinks.`
+            })
           })
         }
         // A single chunk in flight: the forwarder waits for the consumer to
@@ -717,7 +723,7 @@ const drainOutput = (
     )
     yield* Stream.run(upstream, sink)
     if (!(yield* Ref.get(ended))) {
-      return yield* new OutputError({ reason: "SinkEndedEarly", fd })
+      return yield* new OutputError({ reason: new SinkEndedEarly({ fd }) })
     }
   })
 

@@ -3,7 +3,17 @@ import * as Pipeable from "effect/Pipeable"
 import * as Result from "effect/Result"
 import type * as Sink from "effect/Sink"
 import type * as Stream from "effect/Stream"
-import { CommandError } from "../errors.ts"
+import {
+  CommandError,
+  type CommandErrorReason,
+  type CommandLocation,
+  DuplicateInput,
+  DuplicateOutput,
+  ForeignReference as ForeignReferenceReason,
+  InvalidArgument,
+  ReservedOption,
+  ReservedPath
+} from "../errors.ts"
 import { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguInput } from "./input.ts"
 import {
@@ -270,10 +280,14 @@ export class FFmpeguCommand<
   compile(): Result.Result<CompiledCommand<E, R>, CommandError> {
     const indices = new Map<object, number>()
     for (const [index, input] of this.inputs.entries()) {
-      if (indices.has(input)) {
+      const firstIndex = indices.get(input)
+      if (firstIndex !== undefined) {
         return fail(
-          "DuplicateInput",
-          `Input[${index}] is already part of the command as Input[${indices.get(input)}]. Create a separate input instead.`
+          new DuplicateInput({
+            index,
+            firstIndex,
+            message: `Input[${index}] is already part of the command as Input[${firstIndex}]. Create a separate input instead.`
+          })
         )
       }
       indices.set(input, index)
@@ -281,10 +295,14 @@ export class FFmpeguCommand<
 
     const outputs = new Map<object, number>()
     for (const [index, output] of this.outputs.entries()) {
-      if (outputs.has(output)) {
+      const firstIndex = outputs.get(output)
+      if (firstIndex !== undefined) {
         return fail(
-          "DuplicateOutput",
-          `Output[${index}] is already part of the command as Output[${outputs.get(output)}]. Create a separate output instead.`
+          new DuplicateOutput({
+            index,
+            firstIndex,
+            message: `Output[${index}] is already part of the command as Output[${firstIndex}]. Create a separate output instead.`
+          })
         )
       }
       outputs.set(output, index)
@@ -299,14 +317,14 @@ export class FFmpeguCommand<
 
     try {
       if (this.global) {
-        const error = pushOptions(args, this.global, refs, "global options")
+        const error = pushOptions(args, this.global, refs, GLOBAL)
         if (error) return Result.fail(error)
       }
 
       for (const [index, input] of this.inputs.entries()) {
-        const at = `Input[${index}]`
+        const at: CommandLocation = { _tag: "Input", index }
         if (input.options) {
-          const error = pushOptions(args, input.options, refs, `${at} options`)
+          const error = pushOptions(args, input.options, refs, at)
           if (error) return Result.fail(error)
         }
         if (typeof input.source === "string") {
@@ -320,9 +338,9 @@ export class FFmpeguCommand<
       }
 
       for (const [index, output] of this.outputs.entries()) {
-        const at = `Output[${index}]`
+        const at: CommandLocation = { _tag: "Output", index }
         if (output.options) {
-          const error = pushOptions(args, output.options, refs, `${at} options`)
+          const error = pushOptions(args, output.options, refs, at)
           if (error) return Result.fail(error)
         }
         if (typeof output.destination === "string") {
@@ -340,14 +358,15 @@ export class FFmpeguCommand<
     } catch (cause) {
       if (cause instanceof ForeignReference) {
         return fail(
-          "ForeignReference",
-          "A stream reference points to an input that is not part of the command. Add the input to the command or reference one of its inputs.",
+          new ForeignReferenceReason({
+            message:
+              "A stream reference points to an input that is not part of the command. Add the input to the command or reference one of its inputs."
+          }),
           cause
         )
       }
       return fail(
-        "InvalidArgument",
-        "Failed to render command arguments",
+        new InvalidArgument({ message: "Failed to render command arguments" }),
         cause
       )
     }
@@ -361,16 +380,26 @@ export class FFmpeguCommand<
   }
 }
 
-const fail = (
-  reason: CommandError["reason"],
-  message: string,
-  cause?: unknown
-) => Result.fail(new CommandError({ reason, message, cause }))
+const fail = (reason: CommandErrorReason, cause?: unknown) =>
+  Result.fail(new CommandError({ reason, cause }))
 
-const reservedPath = (what: string, value: string) =>
+const GLOBAL: CommandLocation = { _tag: "Global" }
+
+const describeLocation = (location: CommandLocation) =>
+  location._tag === "Input" || location._tag === "Output"
+    ? `${location._tag}[${location.index}]`
+    : location._tag.toLowerCase()
+
+const describeOptions = (location: CommandLocation) =>
+  `${describeLocation(location)} options`
+
+const reservedPath = (location: CommandLocation, what: string, path: string) =>
   new CommandError({
-    reason: "ReservedPath",
-    message: `${what} uses "${value}", which addresses a file descriptor owned by ffmpegu. Use Input.fromStream/Output.toSink/Output.toStream for piped data.`
+    reason: new ReservedPath({
+      path,
+      location,
+      message: `${what} uses "${path}", which addresses a file descriptor owned by ffmpegu. Use Input.fromStream/Output.toSink/Output.toStream for piped data.`
+    })
   })
 
 /**
@@ -401,18 +430,22 @@ function pushOptions(
   args: string[],
   options: FFmpeguOptions,
   refs: CommandReferences,
-  what: string
+  location: CommandLocation
 ): CommandError | undefined {
+  const what = describeOptions(location)
   const rendered = options.getArgs(refs)
   for (const token of rendered) {
-    if (isDescriptorPath(token)) return reservedPath(what, token)
+    if (isDescriptorPath(token)) return reservedPath(location, what, token)
     const hint = token.startsWith("-")
       ? ENGINE_OPTIONS.get(optionName(token))
       : undefined
     if (hint !== undefined) {
       return new CommandError({
-        reason: "ReservedOption",
-        message: `${what} set "${token}", which is managed by ffmpegu. ${hint}`
+        reason: new ReservedOption({
+          option: token,
+          location,
+          message: `${what} set "${token}", which is managed by ffmpegu. ${hint}`
+        })
       })
     }
   }
@@ -420,23 +453,25 @@ function pushOptions(
   return undefined
 }
 
-function validateInputPath(path: string, what: string) {
+function validateInputPath(path: string, location: CommandLocation) {
   // "-" is stdin, which the runner does not provide.
   if (isReservedInputPath(path)) {
-    return reservedPath(what, path)
+    return reservedPath(location, describeLocation(location), path)
   }
   return undefined
 }
 
-function validateOutputPath(path: string, what: string) {
+function validateOutputPath(path: string, location: CommandLocation) {
+  const what = describeLocation(location)
   if (isReservedInputPath(path)) {
-    return reservedPath(what, path)
+    return reservedPath(location, what, path)
   }
   // Output names are positional, so ffmpeg would parse them as options.
   if (path.startsWith("-")) {
     return new CommandError({
-      reason: "InvalidArgument",
-      message: `${what} path "${path}" starts with "-" and would be parsed as an option. Use "./${path}" instead.`
+      reason: new InvalidArgument({
+        message: `${what} path "${path}" starts with "-" and would be parsed as an option. Use "./${path}" instead.`
+      })
     })
   }
   return undefined

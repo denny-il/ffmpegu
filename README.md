@@ -69,7 +69,7 @@ Explicit probe options replace the default format/stream selection. Output stays
 ## Behavior
 
 - `run(command)` succeeds only after FFmpeg exits successfully and every output sink finishes.
-- Nonzero exits, spawn failures, invalid commands, and invalid probe data are typed failures.
+- Nonzero exits, spawn failures, invalid commands, and invalid probe data are typed failures. `CommandError` and `OutputError` carry a tagged `reason` for `Effect.catchReason`; see [errors](docs/ffmpegu/types.md) for the reasons and the migration from string reasons.
 - Inputs accept `Stream<Uint8Array, E, R>`; outputs accept `Sink<void, Uint8Array, never, E, R>`. Errors and service requirements are preserved.
 - Interruption releases resources and terminates the child process, escalating if it ignores SIGTERM.
 - File paths retain FFmpeg's seekable file behavior. Streams use additional descriptors and require suitable container options.

@@ -1,24 +1,124 @@
 import { Schema } from "effect"
 
 /**
+ * Part of a command a rejected value belongs to: the global options, the
+ * input or output at `index` (its path or options), or an FFprobe invocation
+ * (its input or options).
+ */
+export const CommandLocation = Schema.Union([
+  Schema.TaggedStruct("Global", {}),
+  Schema.TaggedStruct("Input", { index: Schema.Int }),
+  Schema.TaggedStruct("Output", { index: Schema.Int }),
+  Schema.TaggedStruct("Probe", {})
+])
+export type CommandLocation = typeof CommandLocation.Type
+
+// Reasons keep the message written where they are detected, since it carries
+// the remedy for that call site; the other fields are for programmatic use.
+
+/** An input object appears more than once in a command. */
+export class DuplicateInput extends Schema.TaggedClass<DuplicateInput>()(
+  "DuplicateInput",
+  {
+    index: Schema.Int,
+    /** Position of the first occurrence. */
+    firstIndex: Schema.Int,
+    message: Schema.String
+  }
+) {}
+
+/** An output object appears more than once in a command. */
+export class DuplicateOutput extends Schema.TaggedClass<DuplicateOutput>()(
+  "DuplicateOutput",
+  {
+    index: Schema.Int,
+    /** Position of the first occurrence. */
+    firstIndex: Schema.Int,
+    message: Schema.String
+  }
+) {}
+
+/** A stream reference points to an input that is not part of the command. */
+export class ForeignReference extends Schema.TaggedClass<ForeignReference>()(
+  "ForeignReference",
+  { message: Schema.String }
+) {}
+
+/** A path or option value addresses a descriptor owned by ffmpegu. */
+export class ReservedPath extends Schema.TaggedClass<ReservedPath>()(
+  "ReservedPath",
+  {
+    path: Schema.String,
+    location: CommandLocation,
+    message: Schema.String
+  }
+) {}
+
+/** An option managed by ffmpegu is set by the caller. */
+export class ReservedOption extends Schema.TaggedClass<ReservedOption>()(
+  "ReservedOption",
+  {
+    /** The option as given, including any stream specifier. */
+    option: Schema.String,
+    location: CommandLocation,
+    message: Schema.String
+  }
+) {}
+
+/**
+ * Any other invalid value, including a builder that failed to render; the
+ * failure is then the `cause` of the {@link CommandError}.
+ */
+export class InvalidArgument extends Schema.TaggedClass<InvalidArgument>()(
+  "InvalidArgument",
+  { message: Schema.String }
+) {}
+
+/**
+ * The command's `Output.toStream` outputs do not fit the runner: `run`
+ * accepts none, `stream` exactly one.
+ */
+export class StreamOutput extends Schema.TaggedClass<StreamOutput>()(
+  "StreamOutput",
+  {
+    /** Number of `Output.toStream` outputs in the command. */
+    count: Schema.Int,
+    message: Schema.String
+  }
+) {}
+
+export type CommandErrorReason =
+  | DuplicateInput
+  | DuplicateOutput
+  | ForeignReference
+  | ReservedPath
+  | ReservedOption
+  | InvalidArgument
+  | StreamOutput
+
+/**
  * The command cannot be compiled into a safe ffmpeg or ffprobe invocation.
+ * Handle a single reason with `Effect.catchReason("CommandError", tag, f)`.
  */
 export class CommandError extends Schema.TaggedError<CommandError>()(
   "CommandError",
   {
-    reason: Schema.Literals([
-      "DuplicateInput",
-      "DuplicateOutput",
-      "ForeignReference",
-      "ReservedPath",
-      "ReservedOption",
-      "InvalidArgument",
-      "StreamOutput"
+    reason: Schema.Union([
+      DuplicateInput,
+      DuplicateOutput,
+      ForeignReference,
+      ReservedPath,
+      ReservedOption,
+      InvalidArgument,
+      StreamOutput
     ]),
-    message: Schema.String,
     cause: Schema.optional(Schema.Unknown)
   }
-) {}
+) {
+  // An own property rather than a getter so `toJSON` and `stack` include it.
+  // Field initializers run after `super`, once `reason` is assigned.
+  override readonly message: string = this.reason.message
+}
 
 /**
  * The binary could not be started (missing, not executable, bad cwd, ...).
@@ -70,19 +170,23 @@ export class PipeError extends Schema.TaggedError<PipeError>()("PipeError", {
   }
 }
 
-/**
- * A caller-provided output sink completed before consuming the whole output.
- */
-export class OutputError extends Schema.TaggedError<OutputError>()(
-  "OutputError",
-  {
-    reason: Schema.Literal("SinkEndedEarly"),
-    fd: Schema.Number
-  }
+/** The output sink for `fd` completed before the end of the output stream. */
+export class SinkEndedEarly extends Schema.TaggedClass<SinkEndedEarly>()(
+  "SinkEndedEarly",
+  { fd: Schema.Number }
 ) {
-  override get message() {
+  get message() {
     return `Output sink for fd ${this.fd} completed before the end of the output stream`
   }
+}
+
+/** A caller-provided output sink completed before consuming the whole output. */
+export class OutputError extends Schema.TaggedError<OutputError>()(
+  "OutputError",
+  { reason: SinkEndedEarly }
+) {
+  // See `CommandError.message`.
+  override readonly message: string = this.reason.message
 }
 
 /**

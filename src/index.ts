@@ -49,14 +49,24 @@ export {
 } from "./probe/schema.ts"
 export {
   CommandError,
+  type CommandErrorReason,
+  CommandLocation,
+  DuplicateInput,
+  DuplicateOutput,
   ExitError,
   type FFmpegError,
+  ForeignReference,
+  InvalidArgument,
   OutputError,
   PipeError,
   ProbeDecodeError,
   type ProbeError,
   ProbeOutputError,
-  SpawnError
+  ReservedOption,
+  ReservedPath,
+  SinkEndedEarly,
+  SpawnError,
+  StreamOutput
 } from "./errors.ts"
 export { FFmpeguFilterBuilder } from "./filters/builder.ts"
 export { FFmpeguFilterChain } from "./filters/chain.ts"

@@ -1,5 +1,13 @@
 import * as Result from "effect/Result"
-import { CommandError } from "../errors.ts"
+import {
+  CommandError,
+  type CommandErrorReason,
+  type CommandLocation,
+  ForeignReference as ForeignReferenceReason,
+  InvalidArgument,
+  ReservedOption,
+  ReservedPath
+} from "../errors.ts"
 import type { FFmpeguOptions } from "../options/core.ts"
 import { CommandReferences, ForeignReference } from "../core/references.ts"
 import { isReservedInputPath } from "../core/validation.ts"
@@ -18,12 +26,17 @@ export const probeArgs = (
   options?: FFmpeguOptions
 ): Result.Result<ReadonlyArray<string>, CommandError> => {
   if (input.includes("\0")) {
-    return invalid("InvalidArgument", "Probe input contains a NUL byte.")
+    return fail(
+      new InvalidArgument({ message: "Probe input contains a NUL byte." })
+    )
   }
   if (isReservedInputPath(input)) {
-    return invalid(
-      "ReservedPath",
-      `Probe input "${input}" addresses a process-owned descriptor.`
+    return fail(
+      new ReservedPath({
+        path: input,
+        location: PROBE,
+        message: `Probe input "${input}" addresses a process-owned descriptor.`
+      })
     )
   }
 
@@ -35,25 +48,27 @@ export const probeArgs = (
       "-show_streams"
     ]
   } catch (cause) {
-    return Result.fail(
-      new CommandError({
-        reason:
-          cause instanceof ForeignReference
-            ? "ForeignReference"
-            : "InvalidArgument",
-        message: "Failed to render probe options.",
-        cause
-      })
+    const message = "Failed to render probe options."
+    return fail(
+      cause instanceof ForeignReference
+        ? new ForeignReferenceReason({ message })
+        : new InvalidArgument({ message }),
+      cause
     )
   }
 
   for (const token of args) {
     if (token.includes("\0"))
-      return invalid("InvalidArgument", "Probe option contains a NUL byte.")
+      return fail(
+        new InvalidArgument({ message: "Probe option contains a NUL byte." })
+      )
     if (isReservedInputPath(token)) {
-      return invalid(
-        "ReservedPath",
-        `Probe option "${token}" addresses a process-owned descriptor.`
+      return fail(
+        new ReservedPath({
+          path: token,
+          location: PROBE,
+          message: `Probe option "${token}" addresses a process-owned descriptor.`
+        })
       )
     }
     // Normalize stream specifiers and FFmpeg's file-loaded option spelling.
@@ -63,9 +78,12 @@ export const probeArgs = (
       token === "--" ||
       (token.startsWith("-") && RESERVED_OPTIONS.has(name))
     ) {
-      return invalid(
-        "ReservedOption",
-        `Probe option "${token}" is managed by ffmpegu. Pass the input to probe; JSON output is collected from stdout.`
+      return fail(
+        new ReservedOption({
+          option: token,
+          location: PROBE,
+          message: `Probe option "${token}" is managed by ffmpegu. Pass the input to probe; JSON output is collected from stdout.`
+        })
       )
     }
   }
@@ -79,5 +97,7 @@ export const probeArgs = (
   return Result.succeed(["-hide_banner", "-of", "json", "-i", input, ...args])
 }
 
-const invalid = (reason: CommandError["reason"], message: string) =>
-  Result.fail(new CommandError({ reason, message }))
+const PROBE: CommandLocation = { _tag: "Probe" }
+
+const fail = (reason: CommandErrorReason, cause?: unknown) =>
+  Result.fail(new CommandError({ reason, cause }))
