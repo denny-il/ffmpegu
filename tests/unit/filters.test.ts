@@ -63,24 +63,24 @@ describe("Filters", { concurrent: false }, () => {
     expect(filter.getArgs(refs)).toEqual(["select=expr=between(t\\,0\\,1)"])
   })
 
-  it("should include boolean options when true", () => {
+  it("should render true boolean options as 1", () => {
     const filter = FFmpeguSimpleFilter.create("scale", {
       w: 640,
       h: 360,
       eval: true
     })
 
-    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360:eval"])
+    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360:eval=1"])
   })
 
-  it("should omit boolean options when false", () => {
+  it("should render false boolean options as 0", () => {
     const filter = FFmpeguSimpleFilter.create("scale", {
       w: 640,
       h: 360,
       eval: false
     })
 
-    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360"])
+    expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360:eval=0"])
   })
 
   it("should support argumentable option values", () => {

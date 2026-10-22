@@ -8,6 +8,14 @@ export interface FilterOptions {
   [key: string]: FilterArgument
 }
 
+// Each parsing layer trims unescaped boundary whitespace from its tokens.
+const boundaryWhitespace = /^[ \t\n\r]+|[ \t\n\r]+$/g
+
+const escapeLayer = (value: string, special: RegExp): string =>
+  value
+    .replace(special, "\\$&")
+    .replace(boundaryWhitespace, (run) => run.replace(/./gs, "\\$&"))
+
 /**
  * Base class for all FFmpeg filters
  * Follows the FFmpeg filtergraph syntax: [inputs]filter_name=arguments[outputs]
@@ -59,7 +67,8 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
         const args = value.getArgs(refs)
         options.push(`${key}=${args.join(":")}`)
       } else if (typeof value === "boolean") {
-        if (value) options.push(key)
+        // A bare key is parsed as a positional value, so spell booleans out.
+        options.push(`${key}=${value ? 1 : 0}`)
       } else {
         options.push(`${key}=${this.escapeFilterValue(String(value))}`)
       }
@@ -75,6 +84,6 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
     // FFmpeg parses the graph first, then each filter's option values. Escape
     // both layers so graph parsing does not consume the option-level escapes.
     // Arguments go directly to the process, so no shell escaping is needed.
-    return value.replace(/[\\':]/g, "\\$&").replace(/[\\'[\],;]/g, "\\$&")
+    return escapeLayer(escapeLayer(value, /[\\':]/g), /[\\'[\],;]/g)
   }
 }
