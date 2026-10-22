@@ -43,7 +43,7 @@
 	},
 	"scripts": {
 		"brand:render": "node scripts/render-brand.mjs",
-		"build": "rm -rf dist && tsc -p tsconfig.build.json",
+		"build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/rewrite-declaration-specifiers.mjs",
 		"dev": "tsc --watch",
 		"test": "vitest run",
 		"test:integration": "vitest run tests/integration",
