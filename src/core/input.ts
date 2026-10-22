@@ -3,6 +3,7 @@ import type { FFmpeguOptions } from "../options/core.ts"
 import type { FFmpeguReferencesInterface } from "../types/index.ts"
 import { FFmpeguArgument } from "./argument.ts"
 import { StreamType } from "./enums.ts"
+import { InvalidStreamIndex, MAX_STREAM_INDEX } from "./references.ts"
 
 /**
  * A file path, URL or ffmpeg pseudo input (e.g. `lavfi` sources), passed to
@@ -19,17 +20,27 @@ export class FFmpeguStreamTrackReference extends FFmpeguArgument {
     readonly streamType: StreamType,
     readonly index: number
   ) {
-    if (!Number.isInteger(index) || index < 0) {
-      throw new RangeError(
-        `Stream index must be a non-negative integer, got: ${index}`
-      )
-    }
     super()
   }
 
+  // Validated when rendered rather than constructed, so that commands report
+  // an invalid index through `compile` like any other invalid argument.
+  // FFmpeg parses the index as a C int: larger values wrap to another stream
+  // and values beyond 1e21 render in exponent notation.
   getArgs(refs: FFmpeguReferencesInterface): string[] {
+    // Read once: a getter could return a valid index to the check and a
+    // different value to the rendered argument.
+    const track: unknown = this.index
+    if (
+      typeof track !== "number" ||
+      !Number.isInteger(track) ||
+      track < 0 ||
+      track > MAX_STREAM_INDEX
+    ) {
+      throw new InvalidStreamIndex(track)
+    }
     const index = refs.get(this.input)
-    return [`${index}:${getStreamType(this.streamType)}:${this.index}`]
+    return [`${index}:${getStreamType(this.streamType)}:${track}`]
   }
 }
 
