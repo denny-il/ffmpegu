@@ -1,4 +1,5 @@
 import type * as Arr from "effect/Array"
+import type * as ByteSize from "effect/ByteSize"
 import * as Cause from "effect/Cause"
 import * as Channel from "effect/Channel"
 import type * as Config from "effect/Config"
@@ -51,8 +52,10 @@ import {
   isClosedByReader,
   mapEffectErrors,
   mapStreamErrors,
+  orDieInvalid,
   settle,
-  uniqueReasons
+  uniqueReasons,
+  validatedConfig
 } from "./process.ts"
 
 export interface RunOptions<PE = never, PR = never> {
@@ -70,10 +73,19 @@ export interface RunOptions<PE = never, PR = never> {
 export interface FFmpegOptions {
   /** Binary name or path. Defaults to `"ffmpeg"`. */
   readonly binary?: string | undefined
-  /** Grace period after SIGTERM before SIGKILL. Defaults to 5 seconds. */
+  /**
+   * Grace period after SIGTERM before SIGKILL. Defaults to 5 seconds. Must
+   * not be negative or NaN; `0` (or `-0`) escalates at once, `"Infinity"`
+   * never does. Strings with a leading `-` are rejected. Every element of a tuple and field of a duration object must
+   * be non-negative (mixed signs are rejected), with a total of at most
+   * `Number.MAX_SAFE_INTEGER` nanoseconds (about 104 days).
+   */
   readonly forceKillAfter?: Duration.Input | undefined
-  /** Bytes of stderr kept for results and errors. Defaults to 64 KiB. */
-  readonly stderrTailBytes?: number | undefined
+  /**
+   * Bytes of stderr kept for results and errors, as a byte count or a size
+   * such as `"64 KiB"`. Defaults to 64 KiB.
+   */
+  readonly stderrTailBytes?: ByteSize.Input | undefined
 }
 
 export interface FFmpegService {
@@ -98,17 +110,30 @@ export interface FFmpegService {
 export class FFmpeg extends Context.Service<FFmpeg, FFmpegService>()(
   "ffmpegu/FFmpeg"
 ) {
-  /** Layer running `ffmpeg` through the provided `ChildProcessSpawner`. */
+  /**
+   * Layer running `ffmpeg` through the provided `ChildProcessSpawner`.
+   * Invalid options are defects.
+   */
   static layer = (
     options: FFmpegOptions = {}
   ): Layer.Layer<FFmpeg, never, ChildProcessSpawner> =>
-    Layer.effect(FFmpeg, make(options))
+    Layer.effect(
+      FFmpeg,
+      Effect.flatMap(orDieInvalid(toSettings(options)), make)
+    )
 
-  /** Like {@link FFmpeg.layer}, reading options from `Config`. */
+  /**
+   * Like {@link FFmpeg.layer}, reading options from `Config`: either a
+   * `Config` of all options or a record of a `Config` per option. Invalid
+   * values fail with `ConfigError`.
+   */
   static layerConfig = (
-    options: Config.Config<FFmpegOptions>
+    options: Config.Wrap<FFmpegOptions>
   ): Layer.Layer<FFmpeg, Config.ConfigError, ChildProcessSpawner> =>
-    Layer.effect(FFmpeg, Effect.flatMap(options, make))
+    Layer.effect(
+      FFmpeg,
+      Effect.flatMap(validatedConfig(options, toSettings), make)
+    )
 }
 
 /** Run a command with the `FFmpeg` service from the context. */
@@ -133,9 +158,8 @@ interface Settings {
   readonly stderrTailBytes: number
 }
 
-const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
-  const spawner = yield* ChildProcessSpawner
-  const settings: Settings = {
+const toSettings = Effect.fnUntraced(function* (options: FFmpegOptions) {
+  return {
     binary: options.binary ?? "ffmpeg",
     forceKillAfter: yield* durationOption(
       "forceKillAfter",
@@ -147,7 +171,11 @@ const make = Effect.fnUntraced(function* (options: FFmpegOptions) {
       options.stderrTailBytes,
       DEFAULT_STDERR_TAIL_BYTES
     )
-  }
+  } satisfies Settings
+})
+
+const make = Effect.fnUntraced(function* (settings: Settings) {
+  const spawner = yield* ChildProcessSpawner
 
   const run = Effect.fn("ffmpegu/FFmpeg.run")(function* (
     command: FFmpeguCommand<unknown, unknown>,

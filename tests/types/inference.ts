@@ -4,6 +4,7 @@
  */
 import type { Readable } from "node:stream"
 import {
+  Config,
   Context,
   Duration,
   Effect,
@@ -14,6 +15,7 @@ import {
   Stream,
   type Types
 } from "effect"
+import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import {
   Command,
   type CommandError,
@@ -619,6 +621,26 @@ assertType<Equals<typeof ffprobeMock, Layer.Layer<FFprobe>>>(true)
 // @ts-expect-error mocked results keep the service's result type
 Layer.mock(FFmpeg, { run: () => Effect.succeed({ stderr: "" }) })
 
+// Service options: byte limits accept sizes, Config layers accept a Config
+// per option or one Config of all options.
+const ffmpegLayer = FFmpeg.layer({ stderrTailBytes: "64 KiB" })
+assertType<
+  Equals<typeof ffmpegLayer, Layer.Layer<FFmpeg, never, ChildProcessSpawner>>
+>(true)
+const ffmpegConfigLayer = FFmpeg.layerConfig({
+  binary: Config.String("FFMPEG_PATH"),
+  forceKillAfter: Config.Duration("FFMPEG_KILL_AFTER"),
+  stderrTailBytes: Config.ByteSize("FFMPEG_STDERR_TAIL")
+})
+assertType<
+  Equals<
+    typeof ffmpegConfigLayer,
+    Layer.Layer<FFmpeg, Config.ConfigError, ChildProcessSpawner>
+  >
+>(true)
+FFmpeg.layerConfig(Config.all({ binary: Config.String("FFMPEG_PATH") }))
+FFprobe.layerConfig({ maxOutputBytes: Config.Int("FFPROBE_MAX_OUTPUT") })
+
 // Contract violations.
 declare const strings: Stream.Stream<string>
 declare const readable: Readable
@@ -632,6 +654,10 @@ Output.toSink(Sink.collect<Uint8Array>())
 Output.toSink(Sink.take<Uint8Array>(1).pipe(Sink.as(undefined)))
 // @ts-expect-error progress callbacks return Effects
 run(files, { onProgress: () => undefined })
+// @ts-expect-error byte sizes need a known unit
+FFprobe.layer({ maxOutputBytes: "16 MB/s" })
+// @ts-expect-error configured binaries are strings
+FFmpeg.layerConfig({ binary: Config.Int("FFMPEG_PATH") })
 // @ts-expect-error commands are not Effects
 Effect.runPromise(files)
 // @ts-expect-error time values take Duration values, not other Duration.Input forms

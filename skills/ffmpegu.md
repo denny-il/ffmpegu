@@ -16,7 +16,7 @@ Install `ffmpegu`, `effect`, and the application platform package (`@effect/plat
 - `Command<E, R, S>` counts `Output.toStream` outputs in `S` (`0`, `1`, `2` for two or more), so `run` (needs `0`) and `stream` (needs `1`) reject the wrong count at compile time. `Command<E, R>` annotations default `S` to unknown and defer the check to runtime.
 - `probe(path)` returns an Effect requiring `FFprobe`, yielding the validated metadata object directly.
 - `probeWith(path, options, schema?)` replaces the default selection with FFprobe options. It yields `ProjectedProbeResult`, or `schema`'s type when one is given; decode failures are `ProbeDecodeError`.
-- Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration.
+- Provide `FFmpeg.layer`/`FFprobe.layer` with the matching platform services; binary paths are Layer configuration. `layerConfig` takes a `Config` per option (e.g. `{ binary: Config.String("FFMPEG_PATH"), stderrTailBytes: Config.ByteSize("FFMPEG_STDERR_TAIL") }`); invalid configured values fail with `ConfigError`. Byte limits accept counts or sizes such as `"64 KiB"`.
 - Application owns runtime execution. Use Effect fibers, interruption, and timeout for cancellation.
 - Spans `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream` and `ffmpegu/FFprobe.probe` carry only the binary's file name, input/output counts, the progress flag and the exit code. Never add argv, paths, URLs or stderr to spans or logs.
 - Test code depending on the services with `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` or `Layer.mock(FFprobe, { probe: ... })`.

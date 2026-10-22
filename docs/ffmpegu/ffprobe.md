@@ -31,7 +31,7 @@ const selection = Options.create({
 
 const metadata = probeWith("input.mp4", selection).pipe(
   Effect.timeout("10 seconds"),
-  Effect.provide(FFprobe.layer({ maxOutputBytes: 2 * 1024 * 1024 })),
+  Effect.provide(FFprobe.layer({ maxOutputBytes: "2 MiB" })),
   Effect.provide(NodeServices.layer)
 )
 ```
@@ -85,7 +85,7 @@ The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`. Attempt
 
 Spawning, output collection, and cleanup are scoped. Spawn and nonzero exit errors are typed failures; interruption terminates the child. Probe output is size-limited so an unexpected binary cannot cause unbounded JSON accumulation. Configure `maxOutputBytes` in `FFprobe.layer` when probing unusually large metadata.
 
-`FFprobeOptions` configures the process service: `binary` (default `"ffprobe"`), `maxOutputBytes` (16 MiB), `stderrTailBytes` (64 KiB), and `forceKillAfter` (5 seconds). These defaults are unchanged. Stderr is drained even with a zero-byte tail; `v: "quiet"` suppresses FFprobe's diagnostics at the source. Output overflow fails with `ProbeOutputError` and closes the process scope.
+`FFprobeOptions` configures the process service: `binary` (default `"ffprobe"`), `maxOutputBytes` (16 MiB), `stderrTailBytes` (64 KiB), and `forceKillAfter` (5 seconds). Byte limits take a byte count or a size such as `"2 MiB"`. `FFprobe.layerConfig` reads the same options from `Config`; see [Configuration and testing](runners.md#configuration-and-testing). Stderr is drained even with a zero-byte tail; `v: "quiet"` suppresses FFprobe's diagnostics at the source. Output overflow fails with `ProbeOutputError` and closes the process scope.
 
 Timeouts, queue admission, and concurrency belong to caller Effect composition. For example, `Effect.forEach(inputs, input => probeWith(input, selection), { concurrency: 2 })` limits that batch to two probes. Place a timeout around each probe for a per-operation deadline, or around a larger operation to include queue waiting. Interruption from a timeout, cancelled fiber, or enclosing scope closes the process scope and waits for cleanup. The spawner sends SIGTERM, escalating to SIGKILL after `forceKillAfter` if needed; cleanup can extend past the operation's timeout by that grace period. No additional runtime, queue, or kill-signal configuration is introduced.
 
