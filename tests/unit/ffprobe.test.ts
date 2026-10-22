@@ -15,6 +15,8 @@ import {
   probeWith,
   SpawnError
 } from "../../src/index.ts"
+import { FFmpeguArgument } from "../../src/core/argument.ts"
+import type { FFmpeguReferencesInterface } from "../../src/types/index.ts"
 import { makeFakeSpawner, platformError } from "./fake-spawner.ts"
 import { makeRecordingTracer } from "./tracer.ts"
 
@@ -468,6 +470,128 @@ describe("FFprobe", () => {
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "ForeignReference")
+    })
+  )
+
+  it.effect("rejects an invalid track index in probe options", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup()
+      const error = yield* probeWith(
+        "x",
+        Options.create({ select_streams: Input.fromFile("x").video.track(-1) })
+      ).pipe(Effect.provide(layer), Effect.flip)
+      assert.instanceOf(error, CommandError)
+      assert.strictEqual(error.reason._tag, "InvalidArgument")
+      assert.instanceOf(error.cause, RangeError)
+      assert.include(error.message, "Stream index must be")
+      assert.include(error.message, "got: -1")
+    })
+  )
+
+  it.effect(
+    "keeps custom render failure messages out of the error message",
+    () =>
+      Effect.gen(function* () {
+        const { layer } = yield* setup()
+        const boom = new Error("https://user:secret@example.com")
+        class Broken extends FFmpeguArgument {
+          getArgs(): string[] {
+            throw boom
+          }
+        }
+        const error = yield* probeWith(
+          "x",
+          Options.create({ select_streams: new Broken() })
+        ).pipe(Effect.provide(layer), Effect.flip)
+        assert.instanceOf(error, CommandError)
+        assert.strictEqual(error.reason._tag, "InvalidArgument")
+        assert.strictEqual(error.message, "Failed to render probe options.")
+        assert.strictEqual(error.cause, boom)
+      })
+  )
+
+  it.effect("reports custom render failures with a throwing message", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup()
+      const boom = new Error()
+      Object.defineProperty(boom, "message", {
+        get() {
+          throw new Error("unreadable")
+        }
+      })
+      class Broken extends FFmpeguArgument {
+        getArgs(): string[] {
+          throw boom
+        }
+      }
+      const error = yield* probeWith(
+        "x",
+        Options.create({ select_streams: new Broken() })
+      ).pipe(Effect.provide(layer), Effect.flip)
+      assert.instanceOf(error, CommandError)
+      assert.strictEqual(error.reason._tag, "InvalidArgument")
+      assert.strictEqual(error.cause, boom)
+    })
+  )
+
+  it.effect("reports a tampered track index error in probe options", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup()
+      let tampered: unknown
+      class Wrapper extends FFmpeguArgument {
+        getArgs(refs: FFmpeguReferencesInterface): string[] {
+          try {
+            return Input.fromFile("x").video.track(-1).getArgs(refs)
+          } catch (error) {
+            Object.defineProperty(error, "message", {
+              get() {
+                throw new Error("unreadable")
+              }
+            })
+            tampered = error
+            throw error
+          }
+        }
+      }
+      const error = yield* probeWith(
+        "x",
+        Options.create({ select_streams: new Wrapper() })
+      ).pipe(Effect.provide(layer), Effect.flip)
+      assert.instanceOf(error, CommandError)
+      assert.strictEqual(error.reason._tag, "InvalidArgument")
+      assert.strictEqual(
+        error.message,
+        "Failed to render probe options: Stream index must be an integer from 0 to 2147483647, got: -1"
+      )
+      assert.strictEqual(error.cause, tampered)
+    })
+  )
+
+  it.effect("does not copy an annotated track index error message", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* setup()
+      const input = Input.fromFile("https://user:secret@example.com/input.mp4")
+      let annotated: unknown
+      class Contextual extends FFmpeguArgument {
+        getArgs(refs: FFmpeguReferencesInterface): string[] {
+          try {
+            return input.video.track(-1).getArgs(refs)
+          } catch (error) {
+            ;(error as Error).message += ` while reading ${input.source}`
+            annotated = error
+            throw error
+          }
+        }
+      }
+      const error = yield* probeWith(
+        "x",
+        Options.create({ select_streams: new Contextual() })
+      ).pipe(Effect.provide(layer), Effect.flip)
+      assert.instanceOf(error, CommandError)
+      assert.strictEqual(error.reason._tag, "InvalidArgument")
+      assert.notInclude(error.message, "secret")
+      assert.include(error.message, "got: -1")
+      assert.strictEqual(error.cause, annotated)
     })
   )
 

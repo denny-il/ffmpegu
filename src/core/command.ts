@@ -21,7 +21,11 @@ import {
   STREAM_DESTINATION,
   StreamOutputs
 } from "./output.ts"
-import { CommandReferences, ForeignReference } from "./references.ts"
+import {
+  CommandReferences,
+  ForeignReference,
+  invalidStreamIndexDetail
+} from "./references.ts"
 import { isDescriptorPath, isReservedInputPath } from "./validation.ts"
 
 /** File descriptor reserved for `-progress`; set up only when progress is requested. */
@@ -365,8 +369,14 @@ export class FFmpeguCommand<
           cause
         )
       }
+      const detail = invalidStreamIndexDetail(cause)
       return fail(
-        new InvalidArgument({ message: "Failed to render command arguments" }),
+        new InvalidArgument({
+          message:
+            detail === undefined
+              ? "Failed to render command arguments"
+              : `Failed to render command arguments: ${detail}`
+        }),
         cause
       )
     }

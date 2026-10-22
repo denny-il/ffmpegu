@@ -9,6 +9,7 @@ import { FFmpeguReferences } from "../../src/core/references.ts"
 import type { CommandError } from "../../src/errors.ts"
 import { filters, options } from "../../src/index.ts"
 import { FFmpeguOptions } from "../../src/options/core.ts"
+import type { FFmpeguReferencesInterface } from "../../src/types/index.ts"
 
 const compileError = (command: FFmpeguCommand<any, any>): CommandError => {
   const result = command.compile()
@@ -490,6 +491,7 @@ describe("Command", () => {
     )
 
     expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).toBe("Failed to render command arguments")
     expect(error.cause).toBe(boom)
   })
 
@@ -595,6 +597,194 @@ describe("Command", () => {
       }
     }
   })
+
+  it("should report custom failures with a throwing message as CommandError", () => {
+    const boom = new Error()
+    Object.defineProperty(boom, "message", {
+      get() {
+        throw new Error("unreadable")
+      }
+    })
+    class Broken extends FFmpeguArgument {
+      getArgs(): string[] {
+        throw boom
+      }
+    }
+    const error = compileError(
+      FFmpeguCommand.make({ global: options.custom(new Broken()) })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.cause).toBe(boom)
+  })
+
+  it("should report a tampered track index error as CommandError", () => {
+    const input = FFmpeguInput.fromFile("in.mp4")
+    let tampered: unknown
+    class Wrapper extends FFmpeguArgument {
+      getArgs(refs: FFmpeguReferencesInterface): string[] {
+        try {
+          return input.video.track(-1).getArgs(refs)
+        } catch (error) {
+          Object.defineProperty(error, "message", {
+            get() {
+              throw new Error("unreadable")
+            }
+          })
+          tampered = error
+          throw error
+        }
+      }
+    }
+    const error = compileError(
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile("out.mp4", options.custom(new Wrapper()))
+        ]
+      })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).toBe(
+      "Failed to render command arguments: Stream index must be an integer from 0 to 2147483647, got: -1"
+    )
+    expect(error.cause).toBe(tampered)
+  })
+
+  it("should not copy an annotated track index error message into CommandError", () => {
+    const input = FFmpeguInput.fromFile(
+      "https://user:secret@example.com/input.mp4"
+    )
+    let annotated: unknown
+    class Contextual extends FFmpeguArgument {
+      getArgs(refs: FFmpeguReferencesInterface): string[] {
+        try {
+          return input.video.track(-1).getArgs(refs)
+        } catch (error) {
+          ;(error as Error).message += ` while reading ${input.source}`
+          annotated = error
+          throw error
+        }
+      }
+    }
+    const error = compileError(
+      FFmpeguCommand.make({
+        inputs: [input],
+        global: options.custom(new Contextual())
+      })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).not.toContain("secret")
+    expect(error.message).toContain("got: -1")
+    expect(error.cause).toBe(annotated)
+  })
+
+  it("should not render a non-numeric track index into CommandError", () => {
+    const input = FFmpeguInput.fromFile("in.mp4")
+    const error = compileError(
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [
+          FFmpeguOutput.toFile(
+            "out.mp4",
+            options.map(input.video.track("secret" as unknown as number))
+          )
+        ]
+      })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).not.toContain("secret")
+    expect(error.message).toContain("got: string")
+  })
+
+  it("should not copy caller text passed to a recovered track index error constructor", () => {
+    const input = FFmpeguInput.fromFile(
+      "https://user:secret@example.com/input.mp4"
+    )
+    class Rewrapping extends FFmpeguArgument {
+      getArgs(refs: FFmpeguReferencesInterface): string[] {
+        try {
+          return input.video.track(-1).getArgs(refs)
+        } catch (error) {
+          const Recovered = (error as Error).constructor as new (
+            ...args: Array<unknown>
+          ) => Error
+          throw new Recovered(
+            `${(error as Error).message} while reading ${input.source}`
+          )
+        }
+      }
+    }
+    const error = compileError(
+      FFmpeguCommand.make({
+        inputs: [input],
+        global: options.custom(new Rewrapping())
+      })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).not.toContain("secret")
+  })
+
+  it("should validate and render the same track index when it is read repeatedly", () => {
+    const input = FFmpeguInput.fromFile("in.mp4")
+    const reads = [1.5, 1.5, "https://user:secret@example.com/input.mp4"]
+    const track = input.video.track(0)
+    Object.defineProperty(track, "index", { get: () => reads.shift() })
+    const error = compileError(
+      FFmpeguCommand.make({
+        inputs: [input],
+        outputs: [FFmpeguOutput.toFile("out.mp4", options.map(track))]
+      })
+    )
+
+    expect(error.reason._tag).toBe("InvalidArgument")
+    expect(error.message).not.toContain("secret")
+    expect(error.message).toContain("got: 1.5")
+  })
+
+  it("should render the track index it validated when it is read repeatedly", () => {
+    const input = FFmpeguInput.fromFile("in.mp4")
+    const reads = [0, -1]
+    const track = input.video.track(0)
+    Object.defineProperty(track, "index", { get: () => reads.shift() })
+    const args = Result.getOrThrow(
+      FFmpeguCommand.toArgs(
+        FFmpeguCommand.make({
+          inputs: [input],
+          outputs: [FFmpeguOutput.toFile("out.mp4", options.map(track))]
+        })
+      )
+    )
+
+    expect(args).toContain("0:v:0")
+    expect(reads).toEqual([-1])
+  })
+
+  it.each([-1, 1.5, 2147483648, 4294967296, 1e21])(
+    "should reject an invalid track index (%s) as CommandError",
+    (index) => {
+      const input = FFmpeguInput.fromFile("in.mp4")
+      const error = compileError(
+        FFmpeguCommand.make({
+          inputs: [input],
+          outputs: [
+            FFmpeguOutput.toFile(
+              "out.mp4",
+              options.map(input.video.track(index))
+            )
+          ]
+        })
+      )
+
+      expect(error.reason._tag).toBe("InvalidArgument")
+      expect(error.cause).toBeInstanceOf(RangeError)
+      expect(error.message).toContain(`got: ${index}`)
+    }
+  )
 
   it("should expose compiled args through toArgs", () => {
     const command = FFmpeguCommand.make({

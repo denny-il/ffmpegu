@@ -9,7 +9,11 @@ import {
   ReservedPath
 } from "../errors.ts"
 import type { FFmpeguOptions } from "../options/core.ts"
-import { CommandReferences, ForeignReference } from "../core/references.ts"
+import {
+  CommandReferences,
+  ForeignReference,
+  invalidStreamIndexDetail
+} from "../core/references.ts"
 import { isReservedInputPath } from "../core/validation.ts"
 
 const RESERVED_OPTIONS = new Set([
@@ -48,7 +52,11 @@ export const probeArgs = (
       "-show_streams"
     ]
   } catch (cause) {
-    const message = "Failed to render probe options."
+    const detail = invalidStreamIndexDetail(cause)
+    const message =
+      detail === undefined
+        ? "Failed to render probe options."
+        : `Failed to render probe options: ${detail}`
     return fail(
       cause instanceof ForeignReference
         ? new ForeignReferenceReason({ message })

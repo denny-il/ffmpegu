@@ -21,8 +21,23 @@ describe("Stream References", { concurrent: false }, () => {
     expect(input.audio.track(2).getArgs(refs)).toEqual(["1:a:2"])
   })
 
-  it("should reject negative track indices", () => {
+  it("should reject invalid track indices when rendered", () => {
     const input = FFmpeguInput.fromFile("/test/input.mp4")
-    expect(() => input.video.track(-1)).toThrow()
+    const negative = input.video.track(-1)
+    const fractional = input.audio.track(1.5)
+
+    expect(() => negative.getArgs(refs)).toThrow(RangeError)
+    expect(() => fractional.getArgs(refs)).toThrow(RangeError)
+    expect(() => input.video.track(2147483648).getArgs(refs)).toThrow(
+      RangeError
+    )
+  })
+
+  it("should accept the largest index FFmpeg can parse", () => {
+    const input = FFmpeguInput.fromFile("/test/input.mp4")
+
+    expect(input.video.track(2147483647).getArgs(refs)).toEqual([
+      `${refs.get(input)}:v:2147483647`
+    ])
   })
 })

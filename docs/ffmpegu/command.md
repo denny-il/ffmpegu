@@ -34,7 +34,7 @@ const piped = Command.make({ inputs: [video] }).pipe(
 const dataFirst = Command.withInput(piped, audio)
 ```
 
-`command.compile()` returns a synchronous `Result`. Compilation validates references and produces arguments plus input/output descriptor assignments. It does not acquire resources. Descriptor 3 is reserved for progress; stream inputs/outputs use descriptors starting at 4. Use the input's `video`, `audio`, `subtitle`, or `data` references, optionally `.track(index)`, for mappings. A reference to an input outside the command fails validation.
+`command.compile()` returns a synchronous `Result`. Compilation validates references and produces arguments plus input/output descriptor assignments. It does not acquire resources. Descriptor 3 is reserved for progress; stream inputs/outputs use descriptors starting at 4. Use the input's `video`, `audio`, `subtitle`, or `data` references, optionally `.track(index)`, for mappings. A reference to an input outside the command, or a track index that is not an integer from 0 to 2147483647 (FFmpeg's int range), fails compilation with `CommandError`; `.track(index)` itself never throws.
 
 Declare every input through `inputs`; raw `-i` options would invalidate stream-reference indices and are rejected. The compiler also rejects raw pipe descriptors and overrides of the engine's `-progress` and `-stdin` options, including stream-specifier forms such as `-progress:v`. Prefer `Input.fromStream` and `Output.toSink` so descriptor ownership is explicit. Relative output paths beginning with a dash should be written with a `./` prefix.
 
