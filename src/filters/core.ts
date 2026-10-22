@@ -1,6 +1,7 @@
 import { FFmpeguArgument } from "../core/argument.ts"
 import type { FFmpeguReferencesInterface } from "../types/index.ts"
 import type { FFmpeguFilterLabelRef } from "./label.ts"
+import type { FFmpeguSimpleFilter } from "./simple.ts"
 
 export type FilterArgument = string | number | boolean | FFmpeguArgument
 
@@ -15,6 +16,30 @@ const escapeLayer = (value: string, special: RegExp): string =>
   value
     .replace(special, "\\$&")
     .replace(boundaryWhitespace, (run) => run.replace(/./gs, "\\$&"))
+
+export type FilterLabels = {
+  inputs?: ReadonlyArray<FFmpeguFilterLabelRef>
+  outputs?: ReadonlyArray<FFmpeguFilterLabelRef>
+}
+
+/**
+ * A typed filter helper whose `Known` keys are hints, not a closed set: FFmpeg
+ * decides which options exist, so any other key passes through as a raw value.
+ * Extra keys are typed through a mapped type because `Known & FilterOptions`
+ * would reject time objects on known keys. The plain `Known` signature keeps
+ * typed wrappers and `Parameters<typeof helper>` working.
+ */
+export type OpenFilterHelper<Known> = {
+  <
+    T extends Known & {
+      [K in keyof T as Exclude<K, keyof Known>]: FilterArgument
+    }
+  >(
+    options?: T,
+    labels?: FilterLabels
+  ): FFmpeguSimpleFilter
+  (options?: Known, labels?: FilterLabels): FFmpeguSimpleFilter
+}
 
 /**
  * Base class for all FFmpeg filters
@@ -71,12 +96,22 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
     const options: string[] = []
 
     for (const [key, value] of Object.entries(this.options)) {
+      // An optional key set to undefined means "not set", as in the helpers.
+      if (value === undefined) continue
       if (value instanceof FFmpeguArgument) {
         const args = value.getArgs(refs)
         options.push(`${key}=${args.join(":")}`)
       } else if (typeof value === "boolean") {
         // A bare key is parsed as a positional value, so spell booleans out.
         options.push(`${key}=${value ? 1 : 0}`)
+      } else if (typeof value === "object" || typeof value === "function") {
+        // Helpers convert time values only on their known time keys. Options
+        // passed as a variable skip excess-property checks, so a Duration or
+        // time object can reach any other key, where its string form (e.g.
+        // "2000 millis") would be misread by FFmpeg.
+        throw new TypeError(
+          `Filter option "${key}" must be a string, number, boolean or ffmpegu argument`
+        )
       } else {
         options.push(`${key}=${this.escapeFilterValue(String(value))}`)
       }

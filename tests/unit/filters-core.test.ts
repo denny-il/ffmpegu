@@ -1,6 +1,9 @@
+import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
 import { FFmpeguArgument } from "../../src/core/argument.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
+import { atrim } from "../../src/filters/common/audio.ts"
+import { scale } from "../../src/filters/common/video.ts"
 import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
 
 class DummyArgument extends FFmpeguArgument {
@@ -39,5 +42,18 @@ describe("Filters Core", { concurrent: false }, () => {
     })
 
     expect(filter.getArgs(refs)).toEqual(["select=expr=1:2"])
+  })
+
+  it("should skip options set to undefined", () => {
+    expect(scale({ w: undefined, h: 360 }).getArgs(refs)).toEqual([
+      "scale=h=360"
+    ])
+  })
+
+  it("should reject object values outside the helpers' time keys", () => {
+    // A variable skips excess-property checks, so the removed `end_time` key
+    // type-checks; its Duration would otherwise render as "2000 millis".
+    const options = { start: 0, end_time: Duration.seconds(2) }
+    expect(() => atrim(options).getArgs(refs)).toThrow(TypeError)
   })
 })
