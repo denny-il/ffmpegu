@@ -25,6 +25,7 @@
 		"NOTICE.md",
 		"docs/README.md",
 		"docs/ffmpegu/*.md",
+		"skills",
 		"LICENSE"
 	],
 	"os": [

@@ -1,79 +1,42 @@
-# ffmpegu guide
+# ffmpegu documentation
 
-ffmpegu describes FFmpeg commands with pure builders and executes them through Effect v4 services. It supports Node.js 26.3+ and Bun 1.4.3+ on Linux and macOS.
+ffmpegu describes FFmpeg commands with immutable builders and executes them through Effect v4 services on Node.js 26.3+ and Bun 1.4.3+, on Linux and macOS.
 
-## API guide
+## Guide
 
-- [Overview](ffmpegu/overview.md)
-- [Commands and compilation](ffmpegu/command.md)
-- [Inputs, outputs, and resource ownership](ffmpegu/inputs-outputs.md)
-- [Execution, progress, and cancellation](ffmpegu/runners.md)
-- [FFprobe](ffmpegu/ffprobe.md)
-- [Errors and types](ffmpegu/types.md)
-- [Options](ffmpegu/options.md)
-- [Filters](ffmpegu/filters.md)
+Read these in order the first time.
 
-## Application composition
+1. [Getting started](ffmpegu/getting-started.md): install, the describe/compile/execute model, and providing the services.
+2. [Commands](ffmpegu/command.md): building commands, stream references, compiling, and validation rules.
+3. [Inputs and outputs](ffmpegu/inputs-outputs.md): files and URLs, Effect streams and sinks, pipe format requirements.
+4. [Running FFmpeg](ffmpegu/running.md): `run`, streaming output, progress, cancellation, concurrency, and tracing.
+5. [FFprobe](ffmpegu/ffprobe.md): probing, selecting metadata, and decoding with your own schema.
 
-```ts
-import { Effect, Layer } from "effect"
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import {
-  Command,
-  FFmpeg,
-  FFprobe,
-  Input,
-  Options,
-  Output,
-  probe,
-  run
-} from "ffmpegu"
+## Reference
 
-const MediaLive = Layer.mergeAll(FFmpeg.layer(), FFprobe.layer()).pipe(
-  Layer.provide(NodeServices.layer)
-)
+- [Options](ffmpegu/options.md): raw option forms, every helper and the flags it renders, time values, HLS and DASH.
+- [Filters](ffmpegu/filters.md): chains, graphs, labels, the builder, value escaping, and every typed filter helper.
+- [Errors and types](ffmpegu/errors.md): tagged errors and reasons, sensitive diagnostics, and the `E`/`R`/`S` type parameters.
+- [Configuration and testing](ffmpegu/configuration.md): Layer options, `layerConfig`, and testing with mocks.
+- [Recipes](ffmpegu/recipes.md): complete examples for common media tasks.
 
-const program = Effect.gen(function* () {
-  const input = Input.fromFile("input.mp4")
-  yield* run(
-    Command.make({
-      global: Options.create("-y"),
-      inputs: [input],
-      outputs: [
-        Output.toFile("output.mp4", Options.create({ "c:v": "libx264" }))
-      ]
-    })
-  )
-  const metadata = yield* probe("output.mp4")
-  yield* Effect.logInfo("Transcode complete", {
-    streams: metadata.streams.length
-  })
-})
+## Exports at a glance
 
-program.pipe(Effect.provide(MediaLive), NodeRuntime.runMain)
-```
+| Export                                 | Purpose                                                            |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| `Command`, `Input`, `Output`           | Immutable descriptions of an FFmpeg invocation                     |
+| `Options`                              | Raw option bundles: `Options.create`, `concat`, `merge`            |
+| `options`                              | Option helpers such as `options.crf(23)` and `options.hls({...})`   |
+| `filters`                              | Filter helpers, chains, graphs, labels, and the builder           |
+| `FFmpeg`, `FFprobe`                    | Effect services with `layer` and `layerConfig`                     |
+| `run`, `stream`, `probe`, `probeWith`  | Execution Effects and Streams that use the services                |
+| `CommandError`, `ExitError`, …         | Tagged errors and their reasons                                    |
+| `ProbeResult`, `ProjectedProbeResult`, … | Probe result schemas                                             |
 
-For Bun, substitute `BunServices` and `BunRuntime` from `@effect/platform-bun`. FileSystem operations in your application additionally require the platform layer to remain available, for example with `Layer.provideMerge`.
+Every builder class is also exported under its `FFmpegu*` name (for example `FFmpeguCommand`), and the default export `ffmpegu` groups the pure builders as `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, and `ffmpegu.filters`. Prefer the named exports.
 
-## Runtime requirements
+## FFmpeg reference
 
-The minimum runtimes are Node.js 26.3.0 and Bun 1.4.3, which provide the global `Temporal`. Earlier releases supported Node.js 24 and Bun 1.4. Applications on older runtimes must upgrade them; the runtime change itself needs no code changes. The package `engines` field declares both minimums.
+For FFmpeg's own options, codecs, formats, and filters, see the [upstream documentation](https://ffmpeg.org/documentation.html): [ffmpeg](https://ffmpeg.org/ffmpeg.html), [ffprobe](https://ffmpeg.org/ffprobe.html), [filters](https://ffmpeg.org/ffmpeg-filters.html), [formats](https://ffmpeg.org/ffmpeg-formats.html), [codecs](https://ffmpeg.org/ffmpeg-codecs.html), and [protocols](https://ffmpeg.org/ffmpeg-protocols.html).
 
-## Migrating from the Promise API
-
-| Previous API                         | Effect API                                              |
-| ------------------------------------ | ------------------------------------------------------- |
-| `createFFmpegRunner(path)`           | `FFmpeg.layer({ binary: path })`                        |
-| `runner.run(command)`                | `run(command)` or the `FFmpeg` service's `run`          |
-| `createFFprobeRunner(path).run(...)` | `probe(path)` with `FFprobe.layer(...)`                 |
-| `output.toStream(writable)`          | `Output.toSink(effectSink)` or `Output.toStream()`      |
-| Node `Readable` input                | Effect `Stream`, optionally using a platform adapter    |
-| `{ signal }` cancellation            | Fiber interruption or `Effect.timeout`                  |
-| Synchronous `onProgress` callback    | Callback returning `Effect<void, E, R>`                 |
-| Check `result.code`                  | Handle typed `ExitError`                                |
-| `result.result` / `result.json`      | Decoded probe object returned directly                  |
-| Async resourceful compilation        | Synchronous `Result` with arguments and descriptor plan |
-
-The old runner classes and FIFO implementation are removed. The `ffmpegu` namespace remains convenient for pure builders, options, and filters; named exports are preferred for execution.
-
-ffmpegu is independent of the FFmpeg project. See [third-party notices and branding](../NOTICE.md) for trademark attribution and the separate licensing of the upstream tools.
+ffmpegu is independent of the FFmpeg project; see the [FFmpeg legal notice](https://ffmpeg.org/legal.html) for FFmpeg's trademarks and licensing.
