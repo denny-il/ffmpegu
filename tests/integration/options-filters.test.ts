@@ -9,7 +9,8 @@ import {
   filters,
   options,
   probe,
-  run
+  run,
+  time
 } from "../../src/index.ts"
 import { MediaLive } from "../helpers/platform.ts"
 
@@ -143,6 +144,135 @@ it.live(
         const trimmedBytes = yield* fs.readFile(trimmed)
         expect(trimmedBytes.length).toBe(2001 * 2)
         expect(firstSample(trimmedBytes)).toBeCloseTo(0.125, 3)
+      })
+    )
+)
+
+it.live(
+  "trims at time adapter timestamps in -af, -vf, and labelled graphs",
+  () =>
+    live(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* fs.makeTempDirectoryScoped()
+        const source = `${dir}/source.pcm`
+        // At 8 kHz one sample is 125 µs, and the ramp's first sample marks
+        // the trim position, so a timestamp split at its colons, or one that
+        // lost its microseconds, changes the result rather than only failing.
+        const pcm = Options.create({ f: "s16le", ar: 8000, ac: 1 })
+        const read = (path: string) =>
+          Effect.map(fs.readFile(path), (bytes) => ({
+            samples: bytes.length / 2,
+            first:
+              new DataView(bytes.buffer, bytes.byteOffset).getInt16(0, true) /
+              32768
+          }))
+        const trimAt = (offset: number) =>
+          Duration.sum(Duration.seconds(offset), Duration.micros(1_500_125n))
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile("aevalsrc=t/4:s=8000:d=3", options.format("lavfi"))
+            ],
+            outputs: [Output.toFile(source, pcm)]
+          })
+        )
+
+        const chained = `${dir}/chained.pcm`
+        yield* run(
+          Command.make({
+            inputs: [Input.fromFile(source, pcm)],
+            outputs: [
+              Output.toFile(
+                chained,
+                Options.create(
+                  pcm,
+                  options.audioFilter(
+                    filters.chain(
+                      filters.atrim({ start: time.timestamp(trimAt(0)) })
+                    )
+                  )
+                )
+              )
+            ]
+          })
+        )
+        const chainedPcm = yield* read(chained)
+        expect(chainedPcm.samples).toBe(3 * 8000 - 12_001)
+        expect(chainedPcm.first).toBeCloseTo(1.500125 / 4, 4)
+
+        // Shifting the timestamps exercises the hour field and, past 9999
+        // hours, the decimal-seconds form, without generating long media.
+        for (const offset of [0, 3_600, 36_000_000]) {
+          const input = Input.fromFile(source, pcm)
+          const [shifted, trimmed] = [filters.label("s"), filters.label("t")]
+          const target = `${dir}/graph-${offset}.pcm`
+          const graph = filters
+            .builder()
+            .chain(
+              filters.asetpts(
+                { expr: `PTS+${offset}/TB` },
+                { inputs: [filters.label(input.audio)], outputs: [shifted] }
+              ),
+              filters.custom(
+                "atrim",
+                {
+                  start: time.timestamp(trimAt(offset)),
+                  duration: time.seconds(Duration.micros(250_125n))
+                },
+                [shifted],
+                [trimmed]
+              )
+            )
+            .build()
+          yield* run(
+            Command.make({
+              inputs: [input],
+              outputs: [
+                Output.toFile(
+                  target,
+                  Options.create(
+                    pcm,
+                    options.filterComplex(graph),
+                    options.map(trimmed)
+                  )
+                )
+              ]
+            })
+          )
+          const trimmedPcm = yield* read(target)
+          expect(trimmedPcm.samples).toBe(2_001)
+          expect(trimmedPcm.first).toBeCloseTo(1.500125 / 4, 4)
+        }
+
+        // 16x16 gray frames are 256 bytes; 1.5 s into 3 s at 10 fps leaves 15.
+        const frames = `${dir}/frames.raw`
+        yield* run(
+          Command.make({
+            inputs: [
+              Input.fromFile(
+                "testsrc=size=16x16:rate=10:duration=3",
+                options.format("lavfi")
+              )
+            ],
+            outputs: [
+              Output.toFile(
+                frames,
+                Options.create(
+                  options.videoFilter(
+                    filters.chain(
+                      filters.custom("trim", {
+                        start: time.timestamp({ seconds: 1, milliseconds: 500 })
+                      })
+                    )
+                  ),
+                  { f: "rawvideo", pix_fmt: "gray" }
+                )
+              )
+            ]
+          })
+        )
+        expect((yield* fs.readFile(frames)).length).toBe(15 * 256)
       })
     )
 )

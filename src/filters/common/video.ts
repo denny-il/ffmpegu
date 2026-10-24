@@ -1,7 +1,7 @@
 import {
   type FFmpeguDurationValue,
   type FFmpeguTimeObject,
-  resolveFilterTimeOptions
+  resolveSecondsOptions
 } from "../../utils.ts"
 import type {
   FilterArgument,
@@ -37,6 +37,7 @@ export type ScaleOptions = {
   eval?: FilterOptionValue
   force_original_aspect_ratio?: FilterOptionValue
   force_divisible_by?: FilterOptionValue
+  /** Requires FFmpeg 8.0 or later. */
   reset_sar?: FilterOptionValue
 }
 
@@ -92,6 +93,10 @@ export type OverlayOptions = {
   repeatlast?: FilterOptionValue
   format?: FilterOptionValue
   eof_action?: FilterOptionValue
+  /**
+   * Prefer `"straight"` or `"premultiplied"`: FFmpeg 8.1 changed the default,
+   * and the numeric value `0` no longer means the same thing across versions.
+   */
   alpha?: FilterOptionValue
 }
 
@@ -130,7 +135,7 @@ export const scale: OpenFilterHelper<ScaleOptions> = (
 export const fps: OpenFilterHelper<FpsOptions> = (
   options: FpsOptions = {},
   labels?: FilterLabels
-) => create("fps", resolveFilterTimeOptions(options, ["start_time"]), labels)
+) => create("fps", resolveSecondsOptions(options, ["start_time"]), labels)
 export const crop: OpenFilterHelper<CropOptions> = (
   options: CropOptions = {},
   labels?: FilterLabels

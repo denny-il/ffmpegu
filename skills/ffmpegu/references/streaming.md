@@ -19,28 +19,13 @@
 
 For regular, seekable MP4 files, use `Output.toFile` with `options.movFlags("+faststart")`.
 
-## HLS
+## HLS and DASH
 
-`options.hls(settings)` renders `-f hls` followed by the mapped options. Booleans render `1`/`0`, and `flags` may be an array that is joined with `+`.
+`options.hls(settings)` and `options.dash(settings)` render `-f hls` / `-f dash` followed by the settings in key order. Keys are FFmpeg's own muxer option names, so `ffmpeg -h muxer=hls` and FFmpeg's docs apply directly. Typed keys are autocompletion hints; any other key passes through unchanged. On every key, booleans render `1`/`0` (never a bare flag) and arrays are joined with `+`. On the duration keys (`hls_time`, `hls_init_time`, `timeout`, `seg_duration`, `frag_duration`, `target_latency`), time objects, `Duration`, and `Temporal.Duration` render as seconds. Numbers and strings pass through unchanged everywhere. `undefined` values are skipped.
 
-| Setting | Flag | Setting | Flag |
-| --- | --- | --- | --- |
-| `time` | `-hls_time` | `initTime` | `-hls_init_time` |
-| `listSize` | `-hls_list_size` | `deleteThreshold` | `-hls_delete_threshold` |
-| `playlistType` (`vod`, `event`) | `-hls_playlist_type` | `segmentType` (`mpegts`, `fmp4`) | `-hls_segment_type` |
-| `segmentFilename` | `-hls_segment_filename` | `fmp4InitFilename` | `-hls_fmp4_init_filename` |
-| `fmp4InitResend` | `-hls_fmp4_init_resend` | `flags` | `-hls_flags` |
-| `baseUrl` | `-hls_base_url` | `segmentOptions` | `-hls_segment_options` |
-| `startNumber` | `-start_number` | `startNumberSource` | `-hls_start_number_source` |
-| `allowCache` | `-hls_allow_cache` | `strftime` | `-strftime` |
-| `strftimeMkdir` | `-strftime_mkdir` | `varStreamMap` | `-var_stream_map` |
-| `ccStreamMap` | `-cc_stream_map` | `masterPlName` | `-master_pl_name` |
-| `masterPlPublishRate` | `-master_pl_publish_rate` | `method` | `-method` |
-| `httpUserAgent` | `-http_user_agent` | `httpPersistent` | `-http_persistent` |
-| `headers` | `-headers` | `timeout` | `-timeout` |
-| `ignoreIoErrors` | `-ignore_io_errors` | | |
+Typed HLS keys: `hls_time`, `hls_init_time`, `hls_list_size`, `hls_delete_threshold`, `hls_playlist_type` (`vod`, `event`), `hls_segment_type` (`mpegts`, `fmp4`), `hls_segment_filename`, `hls_segment_options`, `hls_fmp4_init_filename`, `hls_fmp4_init_resend`, `hls_flags`, `hls_base_url`, `hls_allow_cache`, `start_number`, `hls_start_number_source` (`generic`, `epoch`, `epoch_us`, `datetime`), `strftime`, `strftime_mkdir`, `var_stream_map`, `cc_stream_map`, `master_pl_name`, `master_pl_publish_rate`, `method`, `http_user_agent`, `http_persistent`, `headers`, `timeout`, `ignore_io_errors`.
 
-The `flags` values include `independent_segments`, `delete_segments`, `append_list`, `omit_endlist`, `split_by_time`, `program_date_time`, `single_file`, `temp_file`, `discont_start`, `round_durations`, `iframes_only`, `periodic_rekey`, and the `second_level_segment_*` flags.
+The `hls_flags` values include `independent_segments`, `delete_segments`, `append_list`, `omit_endlist`, `split_by_time`, `program_date_time`, `single_file`, `temp_file`, `discont_start`, `round_durations`, `iframes_only`, `periodic_rekey`, and the `second_level_segment_*` flags.
 
 ```ts
 const input = Input.fromFile("movie.mp4")
@@ -50,45 +35,22 @@ const output = Output.toFile(
     options.videoCodec("libx264"),
     options.gop(48),
     options.audioCodec("aac"),
-    options.hls({ time: 4, playlistType: "vod", segmentFilename: "hls/segment_%03d.ts", flags: ["independent_segments"] })
+    options.hls({ hls_time: 4, hls_playlist_type: "vod", hls_segment_filename: "hls/segment_%03d.ts", hls_flags: ["independent_segments"] })
   )
 )
-// -c:v libx264 -g 48 -c:a aac -f hls -hls_time 4 -hls_segment_filename hls/segment_%03d.ts
-//   -hls_flags independent_segments -hls_playlist_type vod hls/index.m3u8
+// -c:v libx264 -g 48 -c:a aac -f hls -hls_time 4 -hls_playlist_type vod
+//   -hls_segment_filename hls/segment_%03d.ts -hls_flags independent_segments hls/index.m3u8
 ```
 
-FFmpeg does not create the output directory; create it first, for example with Effect `FileSystem.makeDirectory(dir, { recursive: true })`. For an adaptive ladder, use `split` and `scale` in a `filterComplex`, map each rendition, and set `varStreamMap` (`"v:0,a:0 v:1,a:1"`) and `masterPlName`, with `%v` in the segment and playlist names.
+FFmpeg does not create the output directory; create it first, for example with Effect `FileSystem.makeDirectory(dir, { recursive: true })`. For an adaptive ladder, use `split` and `scale` in a `filterComplex`, map each rendition, and set `var_stream_map` (`"v:0,a:0 v:1,a:1"`) and `master_pl_name`, with `%v` in the segment and playlist names.
 
-## DASH
-
-`options.dash(settings)` renders `-f dash` followed by the mapped options, with booleans as `1`/`0`.
-
-| Setting | Flag | Setting | Flag |
-| --- | --- | --- | --- |
-| `segDuration` | `-seg_duration` | `fragDuration` | `-frag_duration` |
-| `fragType` (`auto`, `every_frame`, `duration`, `pframes`) | `-frag_type` | `segmentType` (`auto`, `mp4`, `webm`) | `-dash_segment_type` |
-| `windowSize` | `-window_size` | `extraWindowSize` | `-extra_window_size` |
-| `adaptationSets` | `-adaptation_sets` | `useTemplate` | `-use_template` |
-| `useTimeline` | `-use_timeline` | `singleFile` | `-single_file` |
-| `singleFileName` | `-single_file_name` | `initSegName` | `-init_seg_name` |
-| `mediaSegName` | `-media_seg_name` | `streaming` | `-streaming` |
-| `ldash` | `-ldash` | `lhls` | `-lhls` |
-| `targetLatency` | `-target_latency` | `minPlaybackRate` | `-min_playback_rate` |
-| `maxPlaybackRate` | `-max_playback_rate` | `updatePeriod` | `-update_period` |
-| `utcTimingUrl` | `-utc_timing_url` | `writePrft` | `-write_prft` |
-| `hlsPlaylist` | `-hls_playlist` | `hlsMasterName` | `-hls_master_name` |
-| `masterM3u8PublishRate` | `-master_m3u8_publish_rate` | `mpdProfile` (`dash`, `dvb_dash`) | `-mpd_profile` |
-| `globalSidx` | `-global_sidx` | `indexCorrection` | `-index_correction` |
-| `removeAtExit` | `-remove_at_exit` | `formatOptions` | `-format_options` |
-| `method` | `-method` | `httpOpts` | `-http_opts` |
-| `httpUserAgent` | `-http_user_agent` | `httpPersistent` | `-http_persistent` |
-| `timeout` | `-timeout` | `ignoreIoErrors` | `-ignore_io_errors` |
+Typed DASH keys: `seg_duration`, `frag_duration`, `frag_type` (`none`, `every_frame`, `duration`, `pframes`), `dash_segment_type` (`auto`, `mp4`, `webm`), `window_size`, `extra_window_size`, `adaptation_sets`, `use_template`, `use_timeline`, `single_file`, `single_file_name`, `init_seg_name`, `media_seg_name`, `streaming`, `ldash`, `lhls`, `target_latency`, `min_playback_rate`, `max_playback_rate`, `update_period`, `utc_timing_url`, `write_prft` (`auto` or a boolean), `hls_playlist`, `hls_master_name`, `master_m3u8_publish_rate`, `mpd_profile` (`dash`, `dvb_dash`), `global_sidx`, `index_correction`, `remove_at_exit`, `format_options`, `method`, `http_opts`, `http_user_agent`, `http_persistent`, `timeout`, `ignore_io_errors`.
 
 ```ts
-options.dash({ segDuration: 4, useTemplate: true, useTimeline: true, adaptationSets: "id=0,streams=v id=1,streams=a" })
-// -f dash -adaptation_sets id=0,streams=v id=1,streams=a -seg_duration 4 -use_template 1 -use_timeline 1
+options.dash({ seg_duration: 4, use_template: true, use_timeline: true, adaptation_sets: "id=0,streams=v id=1,streams=a" })
+// -f dash -seg_duration 4 -use_template 1 -use_timeline 1 -adaptation_sets id=0,streams=v id=1,streams=a
 ```
 
 ## Other muxer options
 
-Any muxer option without a helper goes in a record: `{ segment_time: 10, reset_timestamps: 1 }` with `options.format("segment")`, or `{ "f": "tee" }`. Check what a muxer supports with `ffmpeg -h muxer=<name>`.
+Other muxers take their options in a record: `{ segment_time: 10, reset_timestamps: 1 }` with `options.format("segment")`, or `{ "f": "tee" }`. Check what a muxer supports with `ffmpeg -h muxer=<name>`.

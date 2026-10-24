@@ -1,6 +1,5 @@
-import type { FFmpeguUserArgValue } from "../../types/index.ts"
-import { format } from "../common.ts"
-import { FFmpeguOptions } from "../core.ts"
+import type { FFmpeguTimeValue } from "../common.ts"
+import { muxerOptions, type OpenMuxerHelper } from "./muxer.ts"
 
 export type FFmpeguHlsFlag =
   | "single_file"
@@ -19,7 +18,7 @@ export type FFmpeguHlsFlag =
   | "second_level_segment_duration"
   | "temp_file"
   | ({} & string)
-export type FFmpeguHlsFlagValue = FFmpeguHlsFlag | FFmpeguHlsFlag[]
+export type FFmpeguHlsFlagValue = FFmpeguHlsFlag | ReadonlyArray<FFmpeguHlsFlag>
 
 export type FFmpeguHlsStartNumberSource =
   | "generic"
@@ -32,178 +31,44 @@ export type FFmpeguHlsPlaylistType = "event" | "vod" | ({} & string)
 
 export type FFmpeguHlsSegmentType = "mpegts" | "fmp4" | ({} & string)
 
+/**
+ * Typed hints for FFmpeg's HLS muxer options, verified against FFmpeg 6.1–9.0.
+ * Other keys pass through unchanged.
+ */
 export type FFmpeguHlsOptions = {
-  initTime?: number
-  time?: number
-  listSize?: number
-  deleteThreshold?: number
-  startNumberSource?: FFmpeguHlsStartNumberSource
-  startNumber?: number
-  allowCache?: boolean | number
-  baseUrl?: string
-  segmentFilename?: string
+  hls_init_time?: FFmpeguTimeValue
+  hls_time?: FFmpeguTimeValue
+  hls_list_size?: number
+  hls_delete_threshold?: number
+  hls_start_number_source?: FFmpeguHlsStartNumberSource
+  start_number?: number
+  /** An integer option: -1 (unset), 0, or 1. */
+  hls_allow_cache?: boolean | number
+  hls_base_url?: string
+  hls_segment_filename?: string
   strftime?: boolean | number
-  strftimeMkdir?: boolean | number
-  segmentOptions?: string
-  flags?: FFmpeguHlsFlagValue
-  playlistType?: FFmpeguHlsPlaylistType
-  segmentType?: FFmpeguHlsSegmentType
-  fmp4InitFilename?: string
-  fmp4InitResend?: boolean | number
+  strftime_mkdir?: boolean | number
+  hls_segment_options?: string
+  hls_flags?: FFmpeguHlsFlagValue
+  hls_playlist_type?: FFmpeguHlsPlaylistType
+  hls_segment_type?: FFmpeguHlsSegmentType
+  hls_fmp4_init_filename?: string
+  hls_fmp4_init_resend?: boolean | number
   method?: string
-  httpUserAgent?: string
-  varStreamMap?: string
-  ccStreamMap?: string
-  masterPlName?: string
-  masterPlPublishRate?: number
-  httpPersistent?: boolean | number
-  timeout?: number | string
-  ignoreIoErrors?: boolean | number
+  http_user_agent?: string
+  var_stream_map?: string
+  cc_stream_map?: string
+  master_pl_name?: string
+  master_pl_publish_rate?: number
+  http_persistent?: boolean | number
+  timeout?: FFmpeguTimeValue
+  ignore_io_errors?: boolean | number
   headers?: string
 }
 
-export const hls = (options: FFmpeguHlsOptions) => {
-  const args: Record<string, FFmpeguUserArgValue> = {}
+// AV_OPT_TYPE_DURATION options, where time objects are converted to seconds.
+const durationKeys = ["hls_init_time", "hls_time", "timeout"]
 
-  if (typeof options.initTime !== "undefined") {
-    args.hls_init_time = options.initTime
-  }
-
-  if (typeof options.time !== "undefined") {
-    args.hls_time = options.time
-  }
-
-  if (typeof options.listSize !== "undefined") {
-    args.hls_list_size = options.listSize
-  }
-
-  if (typeof options.deleteThreshold !== "undefined") {
-    args.hls_delete_threshold = options.deleteThreshold
-  }
-
-  if (typeof options.startNumberSource !== "undefined") {
-    args.hls_start_number_source = options.startNumberSource
-  }
-
-  if (typeof options.startNumber !== "undefined") {
-    args.start_number = options.startNumber
-  }
-
-  if (typeof options.allowCache !== "undefined") {
-    args.hls_allow_cache =
-      typeof options.allowCache === "boolean"
-        ? options.allowCache
-          ? 1
-          : 0
-        : options.allowCache
-  }
-
-  if (typeof options.baseUrl !== "undefined") {
-    args.hls_base_url = options.baseUrl
-  }
-
-  if (typeof options.segmentFilename !== "undefined") {
-    args.hls_segment_filename = options.segmentFilename
-  }
-
-  if (typeof options.strftime !== "undefined") {
-    args.strftime =
-      typeof options.strftime === "boolean"
-        ? options.strftime
-          ? 1
-          : 0
-        : options.strftime
-  }
-
-  if (typeof options.strftimeMkdir !== "undefined") {
-    args.strftime_mkdir =
-      typeof options.strftimeMkdir === "boolean"
-        ? options.strftimeMkdir
-          ? 1
-          : 0
-        : options.strftimeMkdir
-  }
-
-  if (typeof options.segmentOptions !== "undefined") {
-    args.hls_segment_options = options.segmentOptions
-  }
-
-  if (typeof options.flags !== "undefined") {
-    args.hls_flags = Array.isArray(options.flags)
-      ? options.flags.join("+")
-      : options.flags
-  }
-
-  if (typeof options.playlistType !== "undefined") {
-    args.hls_playlist_type = options.playlistType
-  }
-
-  if (typeof options.segmentType !== "undefined") {
-    args.hls_segment_type = options.segmentType
-  }
-
-  if (typeof options.fmp4InitFilename !== "undefined") {
-    args.hls_fmp4_init_filename = options.fmp4InitFilename
-  }
-
-  if (typeof options.fmp4InitResend !== "undefined") {
-    args.hls_fmp4_init_resend =
-      typeof options.fmp4InitResend === "boolean"
-        ? options.fmp4InitResend
-          ? 1
-          : 0
-        : options.fmp4InitResend
-  }
-
-  if (typeof options.method !== "undefined") {
-    args.method = options.method
-  }
-
-  if (typeof options.httpUserAgent !== "undefined") {
-    args.http_user_agent = options.httpUserAgent
-  }
-
-  if (typeof options.varStreamMap !== "undefined") {
-    args.var_stream_map = options.varStreamMap
-  }
-
-  if (typeof options.ccStreamMap !== "undefined") {
-    args.cc_stream_map = options.ccStreamMap
-  }
-
-  if (typeof options.masterPlName !== "undefined") {
-    args.master_pl_name = options.masterPlName
-  }
-
-  if (typeof options.masterPlPublishRate !== "undefined") {
-    args.master_pl_publish_rate = options.masterPlPublishRate
-  }
-
-  if (typeof options.httpPersistent !== "undefined") {
-    args.http_persistent =
-      typeof options.httpPersistent === "boolean"
-        ? options.httpPersistent
-          ? 1
-          : 0
-        : options.httpPersistent
-  }
-
-  if (typeof options.timeout !== "undefined") {
-    args.timeout = options.timeout
-  }
-
-  if (typeof options.ignoreIoErrors !== "undefined") {
-    args.ignore_io_errors =
-      typeof options.ignoreIoErrors === "boolean"
-        ? options.ignoreIoErrors
-          ? 1
-          : 0
-        : options.ignoreIoErrors
-  }
-
-  if (typeof options.headers !== "undefined") {
-    args.headers = options.headers
-  }
-
-  return FFmpeguOptions.create(format("hls"), args)
-}
+export const hls: OpenMuxerHelper<FFmpeguHlsOptions> = (
+  options: Readonly<Record<string, unknown>> = {}
+) => muxerOptions("hls", options, durationKeys)

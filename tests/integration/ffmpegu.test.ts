@@ -2,6 +2,7 @@ import { it, expect } from "@effect/vitest"
 import { NodeSink } from "@effect/platform-node"
 import {
   Deferred,
+  Duration,
   Effect,
   Fiber,
   FileSystem,
@@ -19,8 +20,10 @@ import {
   Options,
   Output,
   filters,
+  options,
   probe,
-  run
+  run,
+  time
 } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
@@ -318,15 +321,23 @@ it.live.each(["hls", "dash"] as const)(
             outputs: [
               Output.toFile(
                 target,
-                opts({
-                  f: format,
-                  "c:v": "libx264",
-                  threads: 1,
-                  g: 2,
-                  ...(format === "hls"
-                    ? { hls_time: 0.2, hls_list_size: 0 }
-                    : { seg_duration: 0.2 })
-                })
+                opts(
+                  { "c:v": "libx264", threads: 1, g: 2 },
+                  // A timestamp, a Duration, booleans as 1/0, and joined
+                  // flags, all of which FFmpeg must accept.
+                  format === "hls"
+                    ? options.hls({
+                        hls_time: time.timestamp(Duration.millis(200)),
+                        hls_list_size: 0,
+                        hls_flags: ["independent_segments", "temp_file"],
+                        strftime: false
+                      })
+                    : options.dash({
+                        seg_duration: Duration.millis(200),
+                        use_template: true,
+                        use_timeline: false
+                      })
+                )
               )
             ]
           })
@@ -334,11 +345,15 @@ it.live.each(["hls", "dash"] as const)(
         const manifest = yield* fs.readFileString(target)
         expect(manifest).toContain(format === "hls" ? "#EXT-X-ENDLIST" : "<MPD")
         const files = yield* fs.readDirectory(dir)
+        // 0.5 s with a keyframe every 0.2 s yields several segments only if
+        // FFmpeg read the 0.2 s segment duration; its 2 s+ defaults give one.
         expect(
-          files.some((name) =>
-            format === "hls" ? name.endsWith(".ts") : name.endsWith(".m4s")
-          )
-        ).toBe(true)
+          files.filter((name) =>
+            format === "hls"
+              ? name.endsWith(".ts")
+              : name.startsWith("chunk-") && name.endsWith(".m4s")
+          ).length
+        ).toBeGreaterThan(1)
       })
     )
 )

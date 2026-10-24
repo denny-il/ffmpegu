@@ -53,10 +53,12 @@ program.pipe(Effect.provide(MediaLive), NodeRuntime.runMain)
 
 ## API shape
 
-- **Imports.** Use named exports: `Command`, `Input`, `Output`, `Options` (raw bundles), `options` (helpers), `filters`, `FFmpeg`, `FFprobe`, `run`, `stream`, `probe`, `probeWith`, plus the error classes. Don't use the default `ffmpegu` export or the `FFmpegu*` class aliases.
+- **Imports.** Use named exports: `Command`, `Input`, `Output`, `Options` (raw bundles), `options` (helpers), `filters`, `time` (time value adapters), `FFmpeg`, `FFprobe`, `run`, `stream`, `probe`, `probeWith`, plus the error classes. Don't use the default `ffmpegu` export or the `FFmpegu*` class aliases.
 - **Inputs and outputs.** `Input.fromFile(pathOrUrl, inputOptions?)` and `Input.fromStream(stream, inputOptions?)`; `Output.toFile(path, outputOptions?)`, `Output.toSink(sink, outputOptions?)`, and `Output.toStream(outputOptions?)`. Seek fast with `Input.fromFile(path, options.startTime(t))`.
 - **Stream references.** `input.video`, `input.audio`, `input.subtitle`, `input.data`, and `.track(n)` replace hand-written `0:v` specifiers in `map` and filter labels.
 - **Options.** `Options.create("-y", ["c:v", "libx264"], { crf: 23, map: input.audio }, options.preset("slow"))`. Merging only appends, so later options don't replace earlier ones. Codec, format, and preset parameters accept any string FFmpeg accepts.
+- **HLS and DASH.** `options.hls({...})` / `options.dash({...})` take FFmpeg's own muxer option names (`hls_time`, `hls_playlist_type`, `seg_duration`, `use_template`, …) and pass unknown keys through. Booleans render `1`/`0`, arrays join with `+`, and durations on the known duration keys render as seconds.
+- **Time values.** `startTime`/`duration`/`to` and known time keys accept numbers (seconds), strings, time objects, `Duration`, and `Temporal.Duration`. Elsewhere, use `time.seconds(d)` or `time.timestamp(d)`; ffmpegu never converts a time value on a key it does not know.
 - **Filters.** `filters.chain(...)` goes in `options.videoFilter` or `options.audioFilter`, and `filters.graph(...)` in `options.filterComplex`. Use labels via `filters.label`, and `filters.custom` for any filter without a helper. Values are escaped automatically.
 - **Execution.** `run(command, { onProgress })` returns `Effect<RunResult>`, `stream(command)` returns `Stream<Uint8Array>`, `probe(input)` returns `ProbeResult`, and `probeWith(input, options, schema?)` returns a projected result or the schema's type.
 
@@ -92,6 +94,10 @@ These files sit next to this one and are self-contained. Read the ones the task 
 ## Configuration
 
 The defaults run `ffmpeg` and `ffprobe` from `PATH`. Use `FFmpeg.layer({ binary })` or `FFmpeg.layerConfig({ binary: Config.String("FFMPEG_PATH") })` to change that; see [references/running.md](references/running.md#layers) for the other options.
+
+## Compatibility
+
+Typed option and filter names are verified against FFmpeg 6.1 through 9.0 (exceptions such as `scale`'s `reset_sar`, 8.0+, are noted in their hints). Unknown keys always pass through. Which encoders, muxers, and filters exist depends on the FFmpeg build: check with `ffmpeg -encoders`, `-muxers`, or `-filters`.
 
 ## FFmpeg itself
 

@@ -112,7 +112,7 @@ Video helpers are in [video.md](video.md), audio helpers in [audio.md](audio.md)
 
 ## Time values
 
-`startTime`, `duration`, `to`, and the time keys of the `fps`, `atrim`, and `afade` filters accept:
+`startTime`, `duration`, `to`, the duration keys of `options.hls`/`options.dash` (rendered as seconds, like filters), and the time keys of the `fps`, `atrim`, and `afade` filters accept:
 
 | Value | Renders as option | Renders in filter |
 | --- | --- | --- |
@@ -122,7 +122,22 @@ Video helpers are in [video.md](video.md), audio helpers in [audio.md](audio.md)
 | `Duration.millis(1500)` | `00:00:01.500` | `1.5` |
 | `Temporal.Duration.from({ seconds: 2, microseconds: 5 })` | `00:00:02.000005` | `2.000005` |
 
-Pass Effect `Duration` values, never a bare `Duration.Input` number, because a number means seconds here. Infinite durations and `Temporal.Duration` values with years, months, or weeks fail compilation with `InvalidArgument`.
+Pass Effect `Duration` values, never a bare `Duration.Input` number, because a number means seconds here. Time objects are truncated to milliseconds. Infinite durations, time objects with non-finite fields, values beyond 2^63 − 1 µs, and `Temporal.Duration` values with years, months, or weeks fail compilation with `InvalidArgument`.
+
+No other key converts time values, since FFmpeg options read different units (`adelay` takes milliseconds, `atrim.start_pts` takes ticks). Convert explicitly with the `time` adapters, which take a `Duration`, `Temporal.Duration`, or time object and work as any option or filter value:
+
+| Adapter | Option | Filter |
+| --- | --- | --- |
+| `time.seconds(Duration.millis(61500))` | `61.5` | `61.5` |
+| `time.timestamp(Duration.millis(61500))` | `00:01:01.500` | `00:01:01.500`, colons escaped |
+
+```ts
+filters.custom("trim", { start: time.timestamp(Duration.minutes(90)) })  // trim=start=01\\:30\\:00.000
+Options.create(options.format("segment"), { segment_time: time.seconds(Duration.millis(2500)) })
+// -f segment -segment_time 2.5
+```
+
+Use the form the option reads: `trim`/`atrim` accept both, `fps.start_time` takes seconds only. Wrapping an adapter in `Options.create(...)` inside a filter makes it a raw, unescaped fragment.
 
 ## Filters
 
@@ -138,6 +153,7 @@ filters.scale(options?, { inputs?, outputs? })           // every typed helper h
 - Values are escaped automatically for both FFmpeg parsing layers, including surrounding whitespace. Pass raw text. Escaping does not turn off a filter's own expansion: `drawtext` interprets `%` sequences, so set `expansion: "none"` for literal text.
 - In filters, booleans render `key=1`/`key=0`. This differs from option bundles, where `false` omits the flag.
 - Typed helper keys are hints: extra keys pass through to FFmpeg.
+- An ffmpegu argument as a filter value (such as an `Options` bundle) is spliced in raw, joined with `:`. `time.*` adapters are the exception and are escaped.
 - A `-filter_complex` graph is global to the command. Attach it to one output. Each output label can be consumed once: map it from exactly one output, and use `split`/`asplit` to create one label per consumer.
 
 ```ts

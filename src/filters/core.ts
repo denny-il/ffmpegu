@@ -1,5 +1,6 @@
 import { FFmpeguArgument } from "../core/argument.ts"
 import type { FFmpeguReferencesInterface } from "../types/index.ts"
+import { FFmpeguTimeArgument } from "../utils.ts"
 import type { FFmpeguFilterLabelRef } from "./label.ts"
 import type { FFmpeguSimpleFilter } from "./simple.ts"
 
@@ -98,7 +99,11 @@ export abstract class FFmpeguFilter extends FFmpeguArgument {
     for (const [key, value] of Object.entries(this.options)) {
       // An optional key set to undefined means "not set", as in the helpers.
       if (value === undefined) continue
-      if (value instanceof FFmpeguArgument) {
+      if (value instanceof FFmpeguTimeArgument) {
+        // A timestamp's colons would otherwise split the option.
+        options.push(`${key}=${this.escapeFilterValue(value.getArgs()[0]!)}`)
+      } else if (value instanceof FFmpeguArgument) {
+        // Other arguments are raw fragments, spliced in unescaped.
         const args = value.getArgs(refs)
         options.push(`${key}=${args.join(":")}`)
       } else if (typeof value === "boolean") {

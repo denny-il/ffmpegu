@@ -114,11 +114,11 @@ Always use the returned builder: `builder.chain(...)` on its own has no effect.
 - **Escaping is automatic.** Strings and numbers are escaped for both of FFmpeg's parsing layers (the graph, then the option value). Pass raw text: `drawtext({ text: "It's 10:00, [live]" })` reaches the filter unchanged, including leading and trailing whitespace. Escaping does not disable a filter's own syntax: `drawtext` still expands `%{…}` sequences, so add `expansion: "none"` for literal text that may contain `%`.
 - **Booleans are explicit.** `true` renders `key=1` and `false` renders `key=0`, so `false` turns off options that default to on. (In [option bundles](options.md#writing-raw-options), `false` omits the flag instead.)
 - **Typed keys are hints.** Each helper types the options FFmpeg documents for that filter, but any other key is passed through, so options from newer FFmpeg versions work without a library update. FFmpeg validates names and values when it runs.
-- **Bundles and filters nest.** A value can be another ffmpegu argument; its rendered arguments are joined with `:`.
+- **Bundles and filters nest.** A value can be another ffmpegu argument; its rendered arguments are joined with `:` and are not escaped, so a bundle can carry a raw fragment such as `fps({ fps: Options.create("1", "start_time=2") })`. [Time adapters](#time-options) are the exception: they are single values and are escaped like strings. Wrapping one in a bundle makes it raw again.
 
 ## Time options
 
-The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) also accept time objects, Effect `Duration`, and `Temporal.Duration`. They render as seconds with microsecond precision (`start=1.25`). Strings and numbers pass through unchanged, so a string must use the filter's own syntax: `atrim` accepts timestamps such as `"00:01:30"`, but `fps`'s `start_time` takes seconds only. Invalid durations fail compilation as described in [time values](options.md#time-values).
+The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) also accept time objects, Effect `Duration`, and `Temporal.Duration`. They render as seconds (`start=1.25`), with microsecond precision for durations and millisecond precision for time objects. Strings and numbers pass through unchanged, so a string must use the filter's own syntax: `atrim` accepts timestamps such as `"00:01:30"`, but `fps`'s `start_time` takes seconds only. Invalid time values fail compilation as described in [time values](options.md#time-values).
 
 ```ts
 import { Duration } from "effect"
@@ -128,6 +128,19 @@ const trim = filters.atrim({
   start: Duration.seconds(5),
   duration: Temporal.Duration.from({ milliseconds: 1500 })
 })
+```
+
+Other keys never convert time values, because filters read them in different units (`adelay` takes milliseconds, `atrim`'s `start_pts` takes time-base ticks). Where a key reads seconds or a duration, pass a [time adapter](options.md#time-adapters): `time.seconds(d)` renders seconds, and `time.timestamp(d)` renders `HH:MM:SS.mmm` with its colons escaped for the filtergraph. Check which form the option takes: `trim` and `atrim` accept both, but `fps`'s `start_time` takes seconds only.
+
+```ts
+import { Duration } from "effect"
+import { filters, time } from "ffmpegu"
+
+const trim = filters.custom("trim", {
+  start: time.timestamp(Duration.minutes(90)),
+  duration: time.seconds(Duration.millis(2500))
+})
+// trim=start=01\\:30\\:00.000:duration=2.5
 ```
 
 ## Helper reference
