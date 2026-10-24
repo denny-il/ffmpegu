@@ -11,7 +11,11 @@ import {
 } from "../utils.ts"
 import { FFmpeguOptions } from "./core.ts"
 
-export type FFmpeguBitrateUnit = "k" | "K" | "m" | "M" | "g" | "G" | "t" | "T"
+/**
+ * Appended verbatim. Lowercase `m` is milli and lowercase `g`/`t` are rejected
+ * by FFmpeg, so mega, giga, and tera are only offered uppercase.
+ */
+export type FFmpeguBitrateUnit = "k" | "K" | "M" | "G" | "T"
 export type FFmpeguBitrateValue = string | number
 export type FFmpeguRateValue = string | number
 export type FFmpeguSizeValue = string
