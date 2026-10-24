@@ -1,100 +1,109 @@
 # FFprobe
 
+| Function                          | Returns                                             |
+| --------------------------------- | --------------------------------------------------- |
+| `probe(input)`                    | `Effect<ProbeResult, ProbeError, FFprobe>`          |
+| `probeWith(input, options)`       | `Effect<ProjectedProbeResult, ProbeError, FFprobe>` |
+| `probeWith(input, options, schema)` | `Effect<schema's Type, ProbeError, FFprobe \| schema's services>` |
+
+`input` is any path or URL FFprobe can open. Every call starts a fresh FFprobe process and decodes its JSON output; there is no result wrapper to unpack.
+
+## Probe
+
 ```ts
+import { NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
 import { FFprobe, probe } from "ffmpegu"
-import { NodeServices } from "@effect/platform-node"
 
-const metadata = probe("input.mp4").pipe(
-  Effect.provide(FFprobe.layer()),
-  Effect.provide(NodeServices.layer)
-)
+const program = Effect.gen(function* () {
+  const metadata = yield* probe("input.mp4")
+  const video = metadata.streams.find((stream) => stream.codec_type === "video")
+  yield* Effect.logInfo("Probed", {
+    duration: metadata.format?.duration,
+    size: video && `${video.width}x${video.height}`
+  })
+}).pipe(Effect.provide(FFprobe.layer()), Effect.provide(NodeServices.layer))
 ```
 
-The Effect returns the decoded object directly: `streams` and optional `format`, with codec-specific and future fields preserved. Known fields are validated, numeric strings retain FFprobe's representation, and absent streams become an empty array. Invalid JSON, a non-object root, and invalid known fields fail decoding.
+`probe` runs `ffprobe -show_format -show_streams` and returns a `ProbeResult`: `streams` (empty when FFprobe printed none) and an optional `format`.
 
-## Selecting metadata and input options
+- Known fields are validated: each stream needs an integer `index`, and fields such as `width`, `channels`, or `codec_name` must have FFprobe's usual types.
+- Numeric strings stay strings, as FFprobe prints them: `format.duration`, `stream.bit_rate`, `stream.sample_rate`, `stream.r_frame_rate`.
+- Unknown and codec-specific fields are preserved as `unknown`, so output from newer FFprobe versions survives decoding.
+- Invalid JSON, a non-object root, or an invalid known field fails with `ProbeDecodeError`.
 
-`probeWith(input, options)` and `FFprobeService.probeWith` accept an `Options` builder; `probe(input)` remains unary and safe to pass directly to `Effect.forEach` or `Array.map`. Use FFprobe's native option names and values; `Options.merge`, `Options.concat`, and `options.custom` compose as they do for FFmpeg commands.
+`probe` is unary, so it can be passed directly to `Effect.forEach(paths, probe)`.
+
+## Selecting metadata
+
+`probeWith(input, options)` runs FFprobe with your options instead of the default selection. Use FFprobe's own option names:
 
 ```ts
 import { Effect } from "effect"
-import { FFprobe, Options, probeWith } from "ffmpegu"
-import { NodeServices } from "@effect/platform-node"
+import { Options, probeWith } from "ffmpegu"
 
-const selection = Options.create({
-  show_entries: "stream=codec_name,width,height:format=duration",
-  select_streams: "v:0",
-  protocol_whitelist: "file",
-  v: "error"
-})
-
-const metadata = probeWith("input.mp4", selection).pipe(
-  Effect.timeout("10 seconds"),
-  Effect.provide(FFprobe.layer({ maxOutputBytes: "2 MiB" })),
-  Effect.provide(NodeServices.layer)
-)
+const dimensions = probeWith(
+  "input.mp4",
+  Options.create({
+    show_entries: "stream=codec_name,width,height:format=duration",
+    select_streams: "v:0",
+    protocol_whitelist: "file",
+    v: "error"
+  })
+).pipe(Effect.timeout("10 seconds"))
 ```
 
-Explicit options **replace** `-show_format -show_streams`. Select the desired sections with `show_entries`, `show_streams`, `show_chapters`, or other FFprobe options. To keep full format and streams while configuring input policy or logging, include `{ show_format: true, show_streams: true }`. An empty builder requests no sections and returns `{ streams: [] }` for a successful probe.
+Explicit options **replace** `-show_format -show_streams`. To keep the full output while adding input policy or logging options, include `{ show_format: true, show_streams: true }`. An empty bundle selects nothing and decodes to `{ streams: [] }`.
 
-`probe(input)` still returns `ProbeResult`, whose streams require an integer `index`. `probeWith` returns `ProjectedProbeResult` with `ProjectedProbeStream`: `index` is optional because `show_entries` can omit it. Other known fields keep their validation and optionality, except projected `width`, `height`, `start_pts`, and `duration_ts` also accept `"N/A"`: with `show_optional_fields: "always"`, FFprobe prints it for unavailable timestamps and for subtitle streams without dimensions. Absent streams still decode to `[]`; `format` stays optional. Other sections and unknown fields are preserved as `unknown`. Both projected schemas are exported for use outside the service. Options that change the types of known fields (for example human-readable units) can cause `ProbeDecodeError`.
+The result is a `ProjectedProbeResult`. It differs from `ProbeResult` only where a selection can change the output:
+
+- stream `index` is optional, because `show_entries` can leave it out;
+- `width`, `height`, `start_pts`, and `duration_ts` also accept `"N/A"`, which FFprobe prints with `show_optional_fields: "always"`.
+
+Other sections (chapters, frames, packets) are preserved as `unknown`. Options that change the type of a known field, such as human-readable units, can fail decoding. The `ProbeResult`, `ProjectedProbeResult`, `ProbeStream`, `ProjectedProbeStream`, and `ProbeFormat` schemas are exported for your own use.
 
 ## Decoding with your own schema
 
-Pass a schema as the third argument to decode the selected metadata into your own type instead of `ProjectedProbeResult`:
+Pass a schema as the third argument to decode the output into your own type:
 
 ```ts
 import { Schema } from "effect"
-import { options, probeWith } from "ffmpegu"
+import { Options, probeWith } from "ffmpegu"
 
-const Dims = Schema.Struct({
-  streams: Schema.Array(
-    Schema.Struct({ width: Schema.Number, height: Schema.Number })
-  )
+const Dimensions = Schema.Struct({
+  streams: Schema.Array(Schema.Struct({ width: Schema.Number, height: Schema.Number }))
 })
 
 // Effect<{ readonly streams: ReadonlyArray<{ readonly width: number; readonly height: number }> }, ProbeError, FFprobe>
-const dims = probeWith(
+const dimensions = probeWith(
   "input.mp4",
-  options.custom({ show_entries: "stream=width,height", select_streams: "v:0" }),
-  Dims
+  Options.create({ show_entries: "stream=width,height", select_streams: "v:0" }),
+  Dimensions
 )
 ```
 
-The schema decodes FFprobe's whole JSON document in place of `ProjectedProbeResult`, so none of the projected defaults apply. FFprobe omits sections it did not print, including `streams`, so make a key optional if the selection can leave it out. Unlisted keys are dropped under Effect's default parse options. Transformations such as `Schema.NumberFromString` run as usual, and services the schema needs for decoding are added to the Effect's requirements. A failing decode is reported as `ProbeDecodeError`.
+The schema decodes FFprobe's whole JSON document, so none of the `ProjectedProbeResult` defaults apply: FFprobe omits sections it did not print, including `streams`, so make keys optional when a selection can leave them out. Unlisted keys are dropped. Transformations such as `Schema.NumberFromString` work as usual, and services the schema needs are added to the Effect's requirements. A failing decode is a `ProbeDecodeError`.
 
-`probeWith` decodes with your schema itself. The service only supplies FFprobe's parsed JSON document through `FFprobeService.probeJson(input, options)`, which returns it as `unknown`; `FFprobeService.probeWith` keeps its two-argument signature. Custom implementations and mocks of `FFprobeService` therefore return raw JSON from `probeJson`, and the library decodes it, so a fixture that does not match the schema fails with `ProbeDecodeError`:
+## What the service owns
+
+The service always sets the input, JSON output, and stdout itself. Options that would change them (`-i`, `-of`, `-output_format`, `-print_format`, `-o`, their stream-specifier spellings, or `--`) fail with `CommandError` before anything is spawned. So do stdin and descriptor paths (`-`, `pipe:`, `fd:`, `/dev/stdin`, …), NUL bytes, and FFmpeg stream references, which have no meaning without inputs.
+
+The input is passed as the single argument after `-i`, without a shell, so spaces, leading dashes, and shell metacharacters keep their literal meaning. Other options go to FFprobe unchanged; an invalid flag fails with `ExitError`.
+
+## Limits and concurrency
+
+Output is capped by `maxOutputBytes` (16 MiB by default); exceeding it fails with `ProbeOutputError` and terminates the process. Raise it in [`FFprobe.layer`](configuration.md#layer-options) when probing unusually large metadata, such as frame-level output.
+
+Timeouts and concurrency belong to your Effect composition:
 
 ```ts
-import { Effect, Layer } from "effect"
-import { FFprobe, type FFprobeService } from "ffmpegu"
+import { Effect } from "effect"
+import { probe } from "ffmpegu"
 
-const fixture = { streams: [] }
-const mock: FFprobeService = {
-  probe: () => Effect.succeed(fixture),
-  probeWith: () => Effect.succeed(fixture),
-  probeJson: () => Effect.succeed(fixture)
-}
-const FFprobeMock = Layer.succeed(FFprobe, mock)
+const probeAll = (paths: ReadonlyArray<string>) =>
+  Effect.forEach(paths, (path) => probe(path).pipe(Effect.timeout("10 seconds")), {
+    concurrency: 4
+  })
 ```
 
-The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`. Attempts to set them, their file-loaded or stream-specifier spellings, or `--` fail with `CommandError` before spawning. The input is one argument following `-i`, so spaces, leading dashes, and shell metacharacters retain their literal meaning. Stdin/descriptor paths (`-`, `pipe:`, `fd:`, `/dev/stdin`, etc.) and NUL bytes are rejected in input and options. FFmpeg stream references are invalid in probe options. The builder passes other flags to FFprobe; invalid flags can fail with `ExitError`, and invalid output fails decoding. No shell is used.
-
-## Process policy and cleanup
-
-Spawning, output collection, and cleanup are scoped. Spawn and nonzero exit errors are typed failures; interruption terminates the child. Probe output is size-limited so an unexpected binary cannot cause unbounded JSON accumulation. Configure `maxOutputBytes` in `FFprobe.layer` when probing unusually large metadata.
-
-`FFprobeOptions` configures the process service: `binary` (default `"ffprobe"`), `maxOutputBytes` (16 MiB), `stderrTailBytes` (64 KiB), and `forceKillAfter` (5 seconds). Byte limits take a byte count or a size such as `"2 MiB"`. `FFprobe.layerConfig` reads the same options from `Config`; see [Configuration and testing](runners.md#configuration-and-testing). Stderr is drained even with a zero-byte tail; `v: "quiet"` suppresses FFprobe's diagnostics at the source. Output overflow fails with `ProbeOutputError` and closes the process scope.
-
-Timeouts, queue admission, and concurrency belong to caller Effect composition. For example, `Effect.forEach(inputs, input => probeWith(input, selection), { concurrency: 2 })` limits that batch to two probes. Place a timeout around each probe for a per-operation deadline, or around a larger operation to include queue waiting. Interruption from a timeout, cancelled fiber, or enclosing scope closes the process scope and waits for cleanup. The spawner sends SIGTERM, escalating to SIGKILL after `forceKillAfter` if needed; cleanup can extend past the operation's timeout by that grace period. No additional runtime, queue, or kill-signal configuration is introduced.
-
-A probe can be executed repeatedly. There is no consumed-command state and no `.json` or `.result` wrapper.
-
-## Compatibility in 0.4.0
-
-`FFprobeService` gains a required `probeJson(input, options)` method returning FFprobe's parsed JSON document as `unknown`. This is a breaking addition for custom implementations and mocks of `FFprobeService`, which must add it; `probe`, `probeWith`, and their free functions keep their signatures.
-
-## Compatibility in 0.3.0
-
-Existing `probe(input)` calls, callback composition, strict result types, and process defaults are preserved. Custom implementations or mocks of `FFprobeService` must implement the new `probeWith` method. `ProbeError` now includes `CommandError`; exhaustive error handlers must handle that tag. Stdin/descriptor paths and NUL bytes now fail validation before spawning rather than reaching FFprobe or becoming a spawn failure.
+Interruption terminates FFprobe like FFmpeg: SIGTERM, then SIGKILL after `forceKillAfter`.

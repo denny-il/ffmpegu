@@ -1,194 +1,164 @@
 # Filters
 
-Filters are used to build `-vf`, `-af`, and `-filter_complex` graphs.
+The `filters` namespace builds FFmpeg filter expressions for `-vf`, `-af`, and `-filter_complex`. Filters, chains, and graphs are immutable values, and can be passed anywhere an option value is accepted.
 
-## API
+| Concept | Builder                              | Renders as                      | Use with                       |
+| ------- | ------------------------------------ | ------------------------------- | ------------------------------ |
+| Filter  | `filters.scale({ w: 640, h: -2 })`    | `scale=w=640:h=-2`              | Inside chains                  |
+| Chain   | `filters.chain(a, b)`                | `a,b`                           | `options.videoFilter`, `options.audioFilter` |
+| Graph   | `filters.graph(chain1, chain2)`      | `chain1;chain2`                 | `options.filterComplex`        |
+| Label   | `filters.label("out")`               | `[out]`                         | Filter inputs/outputs, `-map`  |
 
-- `ffmpegu.filters.custom(name, options?, inputs?, outputs?)`
-- `ffmpegu.filters.label(value)`
-- `ffmpegu.filters.chain(...filters)`
-- `ffmpegu.filters.graph(...chains)`
-- `ffmpegu.filters.builder()`
-- Common helpers: `ffmpegu.filters.scale`, `ffmpegu.filters.fps`, `ffmpegu.filters.select`, `ffmpegu.filters.setpts`, `ffmpegu.filters.volume`, etc.
+## Simple chains
 
-The typed option keys of the common helpers are hints, not a closed list. Any other key is passed to FFmpeg as a raw value, so options from other FFmpeg versions work without a library update. FFmpeg validates option names and values. Time keys such as `atrim`'s `start` also accept time objects.
+```ts
+import { Input, Options, Output, filters, options } from "ffmpegu"
+
+const resize = filters.chain(
+  filters.scale({ w: 1280, h: -2 }),
+  filters.fps({ fps: 30 })
+)
+
+const output = Output.toFile(
+  "720p.mp4",
+  Options.create(options.videoFilter(resize), options.videoCodec("libx264"))
+)
+```
+
+## Filter graphs and labels
+
+Every filter helper takes an optional second argument `{ inputs?, outputs? }` with labels. A label is either a name or an input's stream reference:
+
+```ts
+import { Command, Input, Options, Output, filters, options } from "ffmpegu"
+
+const main = Input.fromFile("main.mp4")
+const logo = Input.fromFile("logo.png")
+const out = filters.label("out")
+
+const graph = filters.graph(
+  filters.chain(
+    filters.overlay(
+      { x: "main_w-overlay_w-16", y: 16 },
+      { inputs: [filters.label(main.video), filters.label(logo.video)], outputs: [out] }
+    )
+  )
+)
+
+const command = Command.make({
+  global: options.overwrite(),
+  inputs: [main, logo],
+  outputs: [
+    Output.toFile(
+      "watermarked.mp4",
+      Options.create(
+        options.filterComplex(graph),
+        options.map(out),
+        { map: main.audio.track(0) },
+        options.audioCopy()
+      )
+    )
+  ]
+})
+```
+
+`filters.label(main.video)` renders `[0:v]` with the input's index resolved at compile time, like any other [stream reference](command.md#stream-references).
+
+### One graph, several outputs
+
+A `-filter_complex` graph is global to the command, so attach it to one output. Each output label can be consumed only once, so map each label from exactly one output and use `split` (or `asplit`) to give each consumer its own label:
+
+```ts
+import { Command, Input, Options, Output, filters, options } from "ffmpegu"
+
+const [a, b, large, small] = ["a", "b", "large", "small"].map((name) =>
+  filters.label(name)
+)
+
+const graph = filters.graph(
+  filters.chain(filters.custom("split", { outputs: 2 }, [], [a, b])),
+  filters.chain(filters.scale({ w: 1280, h: -2 }, { inputs: [a], outputs: [large] })),
+  filters.chain(filters.scale({ w: 640, h: -2 }, { inputs: [b], outputs: [small] }))
+)
+
+const command = Command.make({
+  global: options.overwrite(),
+  inputs: [Input.fromFile("input.mp4")],
+  outputs: [
+    Output.toFile(
+      "large.mp4",
+      Options.create(options.filterComplex(graph), options.map(large))
+    ),
+    Output.toFile("small.mp4", options.map(small))
+  ]
+})
+```
+
+## Builder
+
+`filters.builder()` collects chains into a graph. It is immutable: `chain(...)` returns a new builder and leaves the original unchanged, so a base builder can be shared.
+
+```ts
+import { filters } from "ffmpegu"
+
+const base = filters.builder().chain(filters.scale({ w: 640, h: 360 }))
+const withFps = base.chain(filters.fps({ fps: 30 })).build()
+const flipped = base.chain(filters.hflip()).build()
+// base.build() still renders only the scale chain.
+```
+
+Always use the returned builder: `builder.chain(...)` on its own has no effect.
 
 ## Option values
 
-- Booleans render as `key=1` or `key=0`, so `false` explicitly turns off options that default to on.
-- Strings and numbers are escaped for both FFmpeg parsing layers (the filtergraph, then the option value). Special characters and leading or trailing whitespace reach the filter unchanged, so `drawtext({ text: " hello " })` keeps its spaces.
+- **Escaping is automatic.** Strings and numbers are escaped for both of FFmpeg's parsing layers (the graph, then the option value). Pass raw text: `drawtext({ text: "It's 10:00, [live]" })` reaches the filter unchanged, including leading and trailing whitespace. Escaping does not disable a filter's own syntax: `drawtext` still expands `%{…}` sequences, so add `expansion: "none"` for literal text that may contain `%`.
+- **Booleans are explicit.** `true` renders `key=1` and `false` renders `key=0`, so `false` turns off options that default to on. (In [option bundles](options.md#writing-raw-options), `false` omits the flag instead.)
+- **Typed keys are hints.** Each helper types the options FFmpeg documents for that filter, but any other key is passed through, so options from newer FFmpeg versions work without a library update. FFmpeg validates names and values when it runs.
+- **Bundles and filters nest.** A value can be another ffmpegu argument; its rendered arguments are joined with `:`.
 
 ## Time options
 
-The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) accept time objects, Effect `Duration` values, and `Temporal.Duration` values in addition to plain filter values. They render as seconds (`start_time=1.25`), with microsecond precision for durations. Invalid durations fail compilation as for [time options](options.md#time-values).
+The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) also accept time objects, Effect `Duration`, and `Temporal.Duration`. They render as seconds with microsecond precision (`start=1.25`). Strings and numbers pass through unchanged, so a string must use the filter's own syntax: `atrim` accepts timestamps such as `"00:01:30"`, but `fps`'s `start_time` takes seconds only. Invalid durations fail compilation as described in [time values](options.md#time-values).
 
 ```ts
 import { Duration } from "effect"
+import { filters } from "ffmpegu"
 
-ffmpegu.filters.atrim({
+const trim = filters.atrim({
   start: Duration.seconds(5),
   duration: Temporal.Duration.from({ milliseconds: 1500 })
 })
 ```
 
-## Simple chain
+## Helper reference
 
-```ts
-const filterChain = ffmpegu.filters.chain(
-  ffmpegu.filters.scale({ w: 640, h: 360 }),
-  ffmpegu.filters.fps({ fps: 30 })
-)
+Any filter can be built with `filters.custom(name, options?, inputs?, outputs?)`. Typed helpers exist for frequently used filters:
 
-const output = ffmpegu.output.toFile(
-  "./output.mp4",
-  ffmpegu.options.concat(
-    ffmpegu.options.videoFilter(filterChain),
-    ffmpegu.options.videoCodec("libx264")
-  )
-)
-```
+| Video       | Typed options                                                                    |
+| ----------- | -------------------------------------------------------------------------------- |
+| `scale`     | `w`, `h`, `flags`, `interl`, `eval`, `force_original_aspect_ratio`, `force_divisible_by`, `reset_sar` |
+| `fps`       | `fps`, `start_time`, `round`, `eof_action`                                       |
+| `crop`      | `w`, `h`, `x`, `y`, `keep_aspect`, `exact`                                       |
+| `pad`       | `w`, `h`, `x`, `y`, `color`, `eval`, `aspect`                                    |
+| `format`    | `pix_fmts`                                                                       |
+| `setsar`    | `sar`, `max`                                                                     |
+| `setdar`    | `dar`, `max`                                                                     |
+| `transpose` | `dir`, `passthrough`                                                             |
+| `hflip`, `vflip` | none                                                                        |
+| `overlay`   | `x`, `y`, `shortest`, `repeatlast`, `format`, `eof_action`, `alpha`              |
+| `drawtext`  | `text`, `textfile`, `fontfile`, `font`, `fontsize`, `fontcolor`, `box`, `boxcolor`, `boxborderw`, `x`, `y`, `shadowx`, `shadowy`, `borderw`, `line_spacing`, `enable` |
+| `select`    | `expr`, `outputs`                                                                |
+| `setpts`    | `expr`                                                                           |
 
-## Builder
+| Audio       | Typed options                                                                    |
+| ----------- | -------------------------------------------------------------------------------- |
+| `volume`    | `volume`, `precision`, `replaygain`, `eval`                                      |
+| `atempo`    | `tempo`                                                                          |
+| `aresample` | `sample_rate`, `resampler`, `async`, `first_pts`, `min_comp`, `cutoff`           |
+| `atrim`     | `start`, `end`, `duration`, `start_pts`, `end_pts`, `start_sample`, `end_sample` |
+| `asetpts`   | `expr`                                                                           |
+| `afade`     | `type`, `start_time`, `duration`, `start_sample`, `nb_samples`, `curve`          |
+| `highpass`, `lowpass` | `f`, `width_type`, `width`, `poles`, `mix`                             |
+| `aformat`   | `sample_fmts`, `sample_rates`, `channel_layouts`                                 |
 
-`ffmpegu.filters.builder()` returns an immutable builder. Each `chain(...filters)` call returns a new builder with the chain appended and leaves the original unchanged, so a base builder can be reused safely. Filters, chains, graphs, builders and option bundles copy the arrays, option records and option tuples they receive, so changing those values afterwards does not change them.
-
-```ts
-const base = ffmpegu.filters
-  .builder()
-  .chain(ffmpegu.filters.scale({ w: 640, h: 360 }))
-const withFps = base.chain(ffmpegu.filters.fps({ fps: 30 })).build()
-const flipped = base.chain(ffmpegu.filters.hflip()).build()
-// base.build() still renders only the scale chain.
-```
-
-> **Breaking change:** earlier versions mutated the builder in place and returned it. Code that calls `builder.chain(...)` without using the result now loses those chains. Use the returned builder instead, for example `builder = builder.chain(...)`, or chain the calls in one expression.
-
-## Filter graphs with labels
-
-```ts
-const labelA = ffmpegu.filters.label("a")
-const labelB = ffmpegu.filters.label("b")
-const out1 = ffmpegu.filters.label("out1")
-const out2 = ffmpegu.filters.label("out2")
-
-const graph = ffmpegu.filters.graph(
-  ffmpegu.filters.chain(
-    ffmpegu.filters.custom("split", { outputs: 2 }, [], [labelA, labelB])
-  ),
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale(
-      { w: 640, h: 360 },
-      { inputs: [labelA], outputs: [out1] }
-    )
-  ),
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale(
-      { w: 320, h: 180 },
-      { inputs: [labelB], outputs: [out2] }
-    )
-  )
-)
-
-const output = ffmpegu.output.toFile(
-  "./output.mp4",
-  ffmpegu.options.concat(
-    ffmpegu.options.filterComplex(graph),
-    ffmpegu.options.map(out1)
-  )
-)
-```
-
-## Labeled outputs (multiple files)
-
-```ts
-const labelA = ffmpegu.filters.label("a")
-const labelB = ffmpegu.filters.label("b")
-const out1 = ffmpegu.filters.label("out1")
-const out2 = ffmpegu.filters.label("out2")
-
-const graph = ffmpegu.filters.graph(
-  ffmpegu.filters.chain(
-    ffmpegu.filters.custom("split", { outputs: 2 }, [], [labelA, labelB])
-  ),
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale(
-      { w: 640, h: 360 },
-      { inputs: [labelA], outputs: [out1] }
-    )
-  ),
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale(
-      { w: 320, h: 180 },
-      { inputs: [labelB], outputs: [out2] }
-    )
-  )
-)
-
-const output1 = ffmpegu.output.toFile(
-  "./out-1.mp4",
-  ffmpegu.options.concat(
-    ffmpegu.options.filterComplex(graph),
-    ffmpegu.options.map(out1),
-    ffmpegu.options.videoCodec("libx264")
-  )
-)
-
-const output2 = ffmpegu.output.toFile(
-  "./out-2.mp4",
-  ffmpegu.options.concat(
-    ffmpegu.options.map(out2),
-    ffmpegu.options.videoCodec("libx264")
-  )
-)
-
-const command = ffmpegu.command({
-  global: ffmpegu.options.custom("-y"),
-  inputs: [ffmpegu.input.fromFile("./input.mp4")],
-  outputs: [output1, output2]
-})
-```
-
-## Labeled outputs to streams
-
-```ts
-import { FileSystem } from "effect"
-
-// Inside Effect.gen with platform services provided:
-const fs = yield * FileSystem.FileSystem
-
-const outLabel = ffmpegu.filters.label("out")
-const graph = ffmpegu.filters.graph(
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale({ w: 320, h: 180 }, { outputs: [outLabel] })
-  )
-)
-
-const outSink = fs.sink("./out.mp4")
-const output = ffmpegu.output.toSink(
-  outSink,
-  ffmpegu.options.concat(
-    ffmpegu.options.filterComplex(graph),
-    ffmpegu.options.map(outLabel),
-    ffmpegu.options.format("mp4"),
-    ffmpegu.options.movFlags("frag_keyframe+empty_moov"),
-    ffmpegu.options.videoCodec("libx264")
-  )
-)
-```
-
-## Input stream labels
-
-```ts
-const input = ffmpegu.input.fromFile("./input.mp4")
-const inputVideo = ffmpegu.filters.label(input.video)
-const outLabel = ffmpegu.filters.label("scaled")
-
-const graph = ffmpegu.filters.graph(
-  ffmpegu.filters.chain(
-    ffmpegu.filters.scale(
-      { w: 320, h: 180 },
-      { inputs: [inputVideo], outputs: [outLabel] }
-    )
-  )
-)
-```
+For what each filter does, see the [FFmpeg filters documentation](https://ffmpeg.org/ffmpeg-filters.html).
