@@ -36,16 +36,9 @@ outline. Do not use the ink-colored logo on a dark surface.
 paths; the approved custom wordmark is preserved as outlined paths. There
 are no embedded bitmaps, external fonts, or network dependencies in any SVG.
 
-After editing the master, regenerate the other SVGs and every PNG from the
-repository root:
-
-```sh
-vp env exec -- pnpm install --frozen-lockfile
-vp env exec -- pnpm run brand:render
-```
-
-The renderer is a pinned development dependency. Commit the generated files
-together with the master so consumers do not need rendering tools.
+The other SVGs and every PNG are exports of the master. After editing it,
+re-export them and commit them together with the master so consumers do not
+need rendering tools.
 
 ## Attribution and license
 

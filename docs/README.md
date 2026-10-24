@@ -76,6 +76,4 @@ The minimum runtimes are Node.js 26.3.0 and Bun 1.4.3, which provide the global 
 
 The old runner classes and FIFO implementation are removed. The `ffmpegu` namespace remains convenient for pure builders, options, and filters; named exports are preferred for execution.
 
-Bundled FFmpeg, FFprobe, and FFplay reference documents describe the binaries themselves, independently of this library's API.
-
-ffmpegu is independent of the FFmpeg project. See [third-party notices and branding](../NOTICE.md) for trademark attribution and the separate licensing of upstream tools and reference documentation.
+ffmpegu is independent of the FFmpeg project. See [third-party notices and branding](../NOTICE.md) for trademark attribution and the separate licensing of the upstream tools.

@@ -1,9 +1,6 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@ai-sdk/gateway@4.0.113'
-  - '@ai-sdk/google@4.0.95'
-  - ai@7.0.140
   - '@effect/platform-bun@4.0.5'
   - '@effect/platform-node-shared@4.0.5'
   - '@effect/platform-node@4.0.5'

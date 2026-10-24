@@ -93,4 +93,4 @@ run(command).pipe(
 )
 ```
 
-See `docs/ffmpegu/` for lifecycle and API contracts. Keep pure options/filter helpers for FFmpeg-specific composition. For binary flags/formats/codecs, consult the bundled references in `docs/ffmpeg/` and `docs/ffprobe/`.
+See `docs/ffmpegu/` for lifecycle and API contracts. Keep pure options/filter helpers for FFmpeg-specific composition. For binary flags/formats/codecs, consult the [upstream FFmpeg documentation](https://ffmpeg.org/documentation.html).
