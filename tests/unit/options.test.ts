@@ -473,6 +473,51 @@ describe("Options", { concurrent: false }, () => {
     }
   })
 
+  it("should render time object seconds without float rounding", () => {
+    // Dividing the millisecond total as a float printed 9007199254740.99.
+    const total = { milliseconds: 9_007_199_254_740_991 }
+    expect(ffmpegu.filters.atrim({ start: total }).getArgs(refs)).toEqual([
+      "atrim=start=9007199254740.991"
+    ])
+    expect(
+      ffmpegu.options
+        .hls({ hls_time: { milliseconds: -9_007_199_254_740_991 } })
+        .getArgs(refs)
+    ).toEqual(["-f", "hls", "-hls_time", "-9007199254740.991"])
+  })
+
+  it("should keep a time object's value from when the option was built", () => {
+    const start = { seconds: 1 }
+    const option = ffmpegu.options.startTime(start)
+    start.seconds = 2
+    expect(option.getArgs(refs)).toEqual(["-ss", "00:00:01.000"])
+  })
+
+  it("should fail compilation for invalid time objects", () => {
+    for (const value of [
+      { seconds: Number.NaN },
+      { hours: Number.NEGATIVE_INFINITY },
+      // One millisecond beyond FFmpeg's int64 microsecond range.
+      { milliseconds: 9_223_372_036_854_776 }
+    ]) {
+      for (const output of [
+        ffmpegu.options.startTime(value),
+        ffmpegu.options.hls({ hls_time: value }),
+        ffmpegu.options.audioFilter(
+          ffmpegu.filters.chain(ffmpegu.filters.atrim({ start: value }))
+        )
+      ]) {
+        const result = FFmpeguCommand.make({
+          outputs: [FFmpeguOutput.toFile("/test/out.m3u8", output)]
+        }).compile()
+        expect(Result.isFailure(result)).toBe(true)
+        if (Result.isFailure(result)) {
+          expect(result.failure.reason._tag).toBe("InvalidArgument")
+        }
+      }
+    }
+  })
+
   it("should pass other muxer keys through with the same conversions", () => {
     expect(
       ffmpegu.options

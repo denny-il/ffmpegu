@@ -122,7 +122,7 @@ Video helpers are in [video.md](video.md), audio helpers in [audio.md](audio.md)
 | `Duration.millis(1500)` | `00:00:01.500` | `1.5` |
 | `Temporal.Duration.from({ seconds: 2, microseconds: 5 })` | `00:00:02.000005` | `2.000005` |
 
-Pass Effect `Duration` values, never a bare `Duration.Input` number, because a number means seconds here. Infinite durations and `Temporal.Duration` values with years, months, or weeks fail compilation with `InvalidArgument`.
+Pass Effect `Duration` values, never a bare `Duration.Input` number, because a number means seconds here. Time objects are truncated to milliseconds. Infinite durations, time objects with non-finite fields, values beyond 2^63 − 1 µs, and `Temporal.Duration` values with years, months, or weeks fail compilation with `InvalidArgument`.
 
 No other key converts time values, since FFmpeg options read different units (`adelay` takes milliseconds, `atrim.start_pts` takes ticks). Convert explicitly with the `time` adapters, which take a `Duration`, `Temporal.Duration`, or time object and work as any option or filter value:
 

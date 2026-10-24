@@ -96,22 +96,6 @@ const timeObjectToMilliseconds = (t: FFmpeguTimeObject): number =>
       (t.milliseconds ?? 0)
   )
 
-export const formatTime = (t: FFmpeguTimeObject): string => {
-  const totalMilliseconds = timeObjectToMilliseconds(t)
-  const sign = totalMilliseconds < 0 ? "-" : ""
-  const absoluteMilliseconds = Math.abs(totalMilliseconds)
-  const h = Math.floor(absoluteMilliseconds / MS_IN_HOUR)
-  const m = Math.floor((absoluteMilliseconds % MS_IN_HOUR) / MS_IN_MINUTE)
-  const s = Math.floor((absoluteMilliseconds % MS_IN_MINUTE) / MS_IN_SECOND)
-  const ms = absoluteMilliseconds % MS_IN_SECOND
-  const pad2 = (n: number) => String(n).padStart(2, "0")
-  const pad3 = (n: number) => String(n).padStart(3, "0")
-  if (h > MAX_TIMESTAMP_HOURS) {
-    return `${sign}${Math.floor(absoluteMilliseconds / MS_IN_SECOND)}.${pad3(ms)}`
-  }
-  return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}.${pad3(ms)}`
-}
-
 // FFmpeg parses a time's magnitude into an int64 before applying the sign,
 // so -2^63 µs is out of range as well.
 const MAX_MICROSECONDS = 9_223_372_036_854_775_807n
@@ -246,14 +230,10 @@ export const resolveSecondsOptions = <
   for (const key of keys) {
     const value = resolved[key]
 
-    if (isDurationValue(value)) {
+    // Filter options such as fps.start_time require seconds, not HH:MM:SS,
+    // and muxer durations such as hls_time take seconds as well.
+    if (isDurationValue(value) || isTimeObject(value)) {
       resolved[key] = secondsArgument(value) as ResolvedTimeOptions<T, K>[K]
-    } else if (isTimeObject(value)) {
-      // Filter options such as fps.start_time require seconds, not HH:MM:SS,
-      // and muxer durations such as hls_time take seconds as well.
-      resolved[key] = String(
-        timeObjectToMilliseconds(value) / MS_IN_SECOND
-      ) as ResolvedTimeOptions<T, K>[K]
     }
   }
 

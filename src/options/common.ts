@@ -6,8 +6,6 @@ import type {
 import {
   type FFmpeguDurationValue,
   type FFmpeguTimeObject,
-  formatTime,
-  isDurationValue,
   timestampArgument
 } from "../utils.ts"
 import { FFmpeguOptions } from "./core.ts"
@@ -30,14 +28,12 @@ export type FFmpeguTimeValue =
   | FFmpeguArgument
 
 const resolveTime = (value: FFmpeguTimeValue): FFmpeguUserArgValue =>
-  // Checked first: an argument is an object, so formatTime would take it.
+  // Checked first: an argument is an object, but not a time value.
   value instanceof FFmpeguArgument
     ? value
-    : isDurationValue(value)
+    : typeof value === "object"
       ? timestampArgument(value)
-      : typeof value === "object"
-        ? formatTime(value)
-        : value
+      : value
 
 export type FFmpeguFormat =
   | "mp4"

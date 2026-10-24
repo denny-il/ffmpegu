@@ -180,11 +180,11 @@ The listed values are suggestions; any string is accepted. Run `ffmpeg -h muxer=
 | `Temporal.Duration`                        | `Temporal.Duration.from({ seconds: 2, microseconds: 5 })` | `00:00:02.000005` |
 | [Time adapter](#time-adapters)             | `time.seconds(Duration.millis(1500))`       | `1.5`             |
 
-Durations keep microsecond precision (FFmpeg's time base); anything finer is truncated. Values beyond 9999 hours, which FFmpeg cannot read as `HH:MM:SS`, render as decimal seconds instead.
+Durations keep microsecond precision (FFmpeg's time base); anything finer is truncated. A time object's fields are added up, and the total is truncated to milliseconds. Values beyond 9999 hours, which FFmpeg cannot read as `HH:MM:SS`, render as decimal seconds instead.
 
 Pass `Duration` values, not `Duration.Input`: a bare number always means seconds here, whereas Effect reads a number as milliseconds.
 
-Durations are converted when the command compiles. Infinite durations, magnitudes beyond 2^63 − 1 microseconds, and `Temporal.Duration` values with years, months, or weeks (which need a reference date) fail `compile()`, `run`, and `probeWith` with a `CommandError` whose reason is `InvalidArgument`. Days count as 24 hours.
+Time values are read when the option is built and converted when the command compiles. Infinite durations, time objects with fields that are not finite numbers, magnitudes beyond 2^63 − 1 microseconds, and `Temporal.Duration` values with years, months, or weeks (which need a reference date) fail `compile()`, `run`, and `probeWith` with a `CommandError` whose reason is `InvalidArgument`. Days count as 24 hours.
 
 ```ts
 import { Duration } from "effect"

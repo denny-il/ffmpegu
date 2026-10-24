@@ -118,7 +118,7 @@ Always use the returned builder: `builder.chain(...)` on its own has no effect.
 
 ## Time options
 
-The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) also accept time objects, Effect `Duration`, and `Temporal.Duration`. They render as seconds with microsecond precision (`start=1.25`). Strings and numbers pass through unchanged, so a string must use the filter's own syntax: `atrim` accepts timestamps such as `"00:01:30"`, but `fps`'s `start_time` takes seconds only. Invalid durations fail compilation as described in [time values](options.md#time-values).
+The time fields of `fps` (`start_time`), `atrim` (`start`, `end`, `duration`), and `afade` (`start_time`, `duration`) also accept time objects, Effect `Duration`, and `Temporal.Duration`. They render as seconds (`start=1.25`), with microsecond precision for durations and millisecond precision for time objects. Strings and numbers pass through unchanged, so a string must use the filter's own syntax: `atrim` accepts timestamps such as `"00:01:30"`, but `fps`'s `start_time` takes seconds only. Invalid time values fail compilation as described in [time values](options.md#time-values).
 
 ```ts
 import { Duration } from "effect"
