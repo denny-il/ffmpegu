@@ -4,5 +4,12 @@
 		"rootDir": ".",
 		"noEmit": true
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+	"include": [
+		"src/**/*.ts",
+		"tests/**/*.ts",
+		"vitest.config.ts",
+		"vitest.package.config.ts"
+	],
+	// Fixtures import the installed package and are type-checked by the package test.
+	"exclude": ["tests/package/fixtures"]
 }

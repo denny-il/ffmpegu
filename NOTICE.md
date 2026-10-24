@@ -35,14 +35,5 @@ that specific build independently of ffmpegu's MIT license. See the
 [upstream license details](https://ffmpeg.org/doxygen/trunk/md_LICENSE.html)
 and [legal guidance](https://ffmpeg.org/legal.html).
 
-## Upstream reference documentation
-
-The reference material under `docs/ffmpeg/`, `docs/ffprobe/`, and
-`docs/ffplay/` is adapted from FFmpeg documentation. Each document records
-its upstream source URL. Copyright and applicable upstream license terms
-remain with the respective rights holders; the root MIT license does not
-relicense that material. These converted references are separate from
-ffmpegu's own API guide under `docs/ffmpegu/`.
-
 Other third-party names and marks remain the property of their respective
 owners.
