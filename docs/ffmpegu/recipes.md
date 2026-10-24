@@ -174,10 +174,10 @@ const command = Command.make({
         options.gop(48),
         options.audioCodec("aac"),
         options.hls({
-          time: 4,
-          playlistType: "vod",
-          segmentFilename: "hls/segment_%03d.ts",
-          flags: ["independent_segments"]
+          hls_time: 4,
+          hls_playlist_type: "vod",
+          hls_segment_filename: "hls/segment_%03d.ts",
+          hls_flags: ["independent_segments"]
         })
       )
     )

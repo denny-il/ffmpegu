@@ -3,6 +3,7 @@ import { FFmpeguInput } from "./core/input.ts"
 import { FFmpeguOutput } from "./core/output.ts"
 import * as _filters from "./filters/index.ts"
 import * as _options from "./options/index.ts"
+import * as _time from "./time.ts"
 
 export {
   FFmpeguCommand,
@@ -78,6 +79,7 @@ export type { Progress, RunResult } from "./types/index.ts"
 
 export const filters = _filters
 export const options = _options
+export const time = _time
 
 /** Pure builder aliases. */
 export const ffmpegu = {
@@ -85,7 +87,8 @@ export const ffmpegu = {
   output: FFmpeguOutput,
   command: FFmpeguCommand.make,
   filters: _filters,
-  options: _options
+  options: _options,
+  time: _time
 } as const
 
 export default ffmpegu

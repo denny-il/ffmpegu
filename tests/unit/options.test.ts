@@ -1,6 +1,8 @@
 import vm from "node:vm"
-import { Duration } from "effect"
+import { Duration, Result } from "effect"
 import { describe, expect, it } from "vitest"
+import { FFmpeguCommand } from "../../src/core/command.ts"
+import { FFmpeguOutput } from "../../src/core/output.ts"
 import { FFmpeguReferences } from "../../src/core/references.ts"
 import { ffmpegu } from "../../src/index.ts"
 
@@ -331,13 +333,18 @@ describe("Options", { concurrent: false }, () => {
     ])
   })
 
-  it("should format HLS options", () => {
+  it("should render HLS options under FFmpeg's names in key order", () => {
     expect(
       ffmpegu.options
         .hls({
-          time: 4,
-          listSize: 0,
-          flags: ["split_by_time", "delete_segments"]
+          hls_time: 4,
+          hls_playlist_type: "vod",
+          hls_segment_filename: "out/seg_%03d.ts",
+          hls_flags: ["independent_segments", "program_date_time"],
+          hls_list_size: 0,
+          start_number: undefined,
+          strftime: true,
+          hls_allow_cache: false
         })
         .getArgs(refs)
     ).toEqual([
@@ -345,70 +352,155 @@ describe("Options", { concurrent: false }, () => {
       "hls",
       "-hls_time",
       "4",
+      "-hls_playlist_type",
+      "vod",
+      "-hls_segment_filename",
+      "out/seg_%03d.ts",
+      "-hls_flags",
+      "independent_segments+program_date_time",
       "-hls_list_size",
       "0",
-      "-hls_flags",
-      "split_by_time+delete_segments"
+      "-strftime",
+      "1",
+      "-hls_allow_cache",
+      "0"
     ])
 
-    expect(
-      ffmpegu.options.hls({ flags: "program_date_time" }).getArgs(refs)
-    ).toEqual(["-f", "hls", "-hls_flags", "program_date_time"])
-
-    expect(ffmpegu.options.hls({ listSize: 6 }).getArgs(refs)).toEqual([
-      "-f",
-      "hls",
-      "-hls_list_size",
-      "6"
-    ])
+    expect(ffmpegu.options.hls().getArgs(refs)).toEqual(["-f", "hls"])
   })
 
-  it("should format DASH options", () => {
+  it("should render DASH options under FFmpeg's names in key order", () => {
     expect(
       ffmpegu.options
         .dash({
-          adaptationSets: "id=0,streams=v id=1,streams=a",
-          windowSize: 5,
-          streaming: true
+          use_template: true,
+          use_timeline: false,
+          seg_duration: 4,
+          adaptation_sets: "id=0,streams=v id=1,streams=a",
+          frag_type: "every_frame",
+          write_prft: "auto"
         })
         .getArgs(refs)
     ).toEqual([
       "-f",
       "dash",
+      "-use_template",
+      "1",
+      "-use_timeline",
+      "0",
+      "-seg_duration",
+      "4",
       "-adaptation_sets",
       "id=0,streams=v id=1,streams=a",
-      "-streaming",
-      "1",
-      "-window_size",
-      "5"
-    ])
-
-    expect(ffmpegu.options.dash({ streaming: 0 }).getArgs(refs)).toEqual([
-      "-f",
-      "dash",
-      "-streaming",
-      "0"
-    ])
-
-    expect(ffmpegu.options.dash({ streaming: false }).getArgs(refs)).toEqual([
-      "-f",
-      "dash",
-      "-streaming",
-      "0"
-    ])
-
-    expect(ffmpegu.options.dash({ windowSize: 8 }).getArgs(refs)).toEqual([
-      "-f",
-      "dash",
-      "-window_size",
-      "8"
-    ])
-
-    expect(ffmpegu.options.dash({ writePrft: true }).getArgs(refs)).toEqual([
-      "-f",
-      "dash",
+      "-frag_type",
+      "every_frame",
       "-write_prft",
-      "1"
+      "auto"
+    ])
+  })
+
+  it("should convert time values to seconds on muxer duration keys", () => {
+    expect(
+      ffmpegu.options
+        .hls({
+          hls_init_time: { seconds: 1, milliseconds: 500 },
+          hls_time: Duration.millis(2_500),
+          timeout: Temporal.Duration.from({ minutes: 1, microseconds: 1 })
+        })
+        .getArgs(refs)
+    ).toEqual([
+      "-f",
+      "hls",
+      "-hls_init_time",
+      "1.5",
+      "-hls_time",
+      "2.5",
+      "-timeout",
+      "60.000001"
+    ])
+
+    expect(
+      ffmpegu.options
+        .dash({
+          seg_duration: Duration.seconds(4),
+          frag_duration: { milliseconds: 500 },
+          target_latency: Temporal.Duration.from({ seconds: 3 }),
+          timeout: Duration.seconds(10)
+        })
+        .getArgs(refs)
+    ).toEqual([
+      "-f",
+      "dash",
+      "-seg_duration",
+      "4",
+      "-frag_duration",
+      "0.5",
+      "-target_latency",
+      "3",
+      "-timeout",
+      "10"
+    ])
+
+    // Numbers and strings are FFmpeg's own syntax and pass through unchanged.
+    expect(
+      ffmpegu.options.hls({ hls_time: 0.5, timeout: "00:00:05" }).getArgs(refs)
+    ).toEqual(["-f", "hls", "-hls_time", "0.5", "-timeout", "00:00:05"])
+  })
+
+  it("should join arrays on muxer duration keys instead of reading them as time objects", () => {
+    const raw: Record<string, ReadonlyArray<string>> = { hls_time: ["4"] }
+    expect(ffmpegu.options.hls(raw).getArgs(refs)).toEqual([
+      "-f",
+      "hls",
+      "-hls_time",
+      "4"
+    ])
+  })
+
+  it("should fail compilation for invalid durations on muxer keys", () => {
+    const result = FFmpeguCommand.make({
+      outputs: [
+        FFmpeguOutput.toFile(
+          "/test/out.m3u8",
+          ffmpegu.options.hls({ hls_time: Duration.infinity })
+        )
+      ]
+    }).compile()
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure.reason._tag).toBe("InvalidArgument")
+    }
+  })
+
+  it("should pass other muxer keys through with the same conversions", () => {
+    expect(
+      ffmpegu.options
+        .hls({
+          hls_time: 2,
+          hls_enc: true,
+          hls_enc_key: "0123",
+          max_seg_size: 1_000_000,
+          http_persistent: false,
+          movflags: ["frag_keyframe", "empty_moov"],
+          hls_key_info_file: undefined
+        })
+        .getArgs(refs)
+    ).toEqual([
+      "-f",
+      "hls",
+      "-hls_time",
+      "2",
+      "-hls_enc",
+      "1",
+      "-hls_enc_key",
+      "0123",
+      "-max_seg_size",
+      "1000000",
+      "-http_persistent",
+      "0",
+      "-movflags",
+      "frag_keyframe+empty_moov"
     ])
   })
 

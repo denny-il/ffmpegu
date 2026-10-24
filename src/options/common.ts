@@ -1,3 +1,4 @@
+import { FFmpeguArgument } from "../core/argument.ts"
 import type {
   FFmpeguPrimitiveUserArgValue,
   FFmpeguUserArgValue
@@ -20,19 +21,23 @@ export type FFmpeguBitrateValue = string | number
 export type FFmpeguRateValue = string | number
 export type FFmpeguSizeValue = string
 export type { FFmpeguDurationValue, FFmpeguTimeObject }
-/** Numbers are seconds. */
+/** Numbers are seconds. Arguments, such as `time.seconds(d)`, pass through. */
 export type FFmpeguTimeValue =
   | string
   | number
   | FFmpeguDurationValue
   | FFmpeguTimeObject
+  | FFmpeguArgument
 
 const resolveTime = (value: FFmpeguTimeValue): FFmpeguUserArgValue =>
-  isDurationValue(value)
-    ? timestampArgument(value)
-    : typeof value === "object"
-      ? formatTime(value)
-      : value
+  // Checked first: an argument is an object, so formatTime would take it.
+  value instanceof FFmpeguArgument
+    ? value
+    : isDurationValue(value)
+      ? timestampArgument(value)
+      : typeof value === "object"
+        ? formatTime(value)
+        : value
 
 export type FFmpeguFormat =
   | "mp4"

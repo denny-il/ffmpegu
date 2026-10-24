@@ -38,7 +38,10 @@ const NS_IN_DAY = 24n * NS_IN_HOUR
 const MAX_TIMESTAMP_HOURS = 9_999
 
 export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
-  typeof value === "object" && value !== null && !("getArgs" in value)
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  !("getArgs" in value)
 
 // Native getters throw for anything without Temporal.Duration's internal
 // slots, so they recognise Durations from other realms (where `instanceof`
@@ -113,15 +116,28 @@ export const formatTime = (t: FFmpeguTimeObject): string => {
 // so -2^63 µs is out of range as well.
 const MAX_MICROSECONDS = 9_223_372_036_854_775_807n
 
-/** ffmpeg's time base is microseconds; finer precision is truncated. */
-const toMicroseconds = (value: FFmpeguDurationValue): bigint => {
-  const microseconds = durationToMicroseconds(value)
+/**
+ * ffmpeg's time base is microseconds; finer precision is truncated. A number
+ * is a time object's total, already truncated to milliseconds.
+ */
+const toMicroseconds = (value: FFmpeguDurationValue | number): bigint => {
+  const microseconds =
+    typeof value === "number"
+      ? millisecondsToMicroseconds(value)
+      : durationToMicroseconds(value)
   if (microseconds > MAX_MICROSECONDS || microseconds < -MAX_MICROSECONDS) {
     throw new RangeError(
       `A time value must be within ±${MAX_MICROSECONDS} microseconds.`
     )
   }
   return microseconds
+}
+
+const millisecondsToMicroseconds = (milliseconds: number): bigint => {
+  if (!Number.isFinite(milliseconds)) {
+    throw new RangeError("A time object's fields must be finite numbers.")
+  }
+  return BigInt(milliseconds) * US_IN_MS
 }
 
 const durationToMicroseconds = (value: FFmpeguDurationValue): bigint => {
@@ -186,12 +202,23 @@ const formatSeconds = (microseconds: bigint): string => {
   return `${sign}${absolute / US_IN_SECOND}${fraction && `.${fraction}`}`
 }
 
-class FFmpeguTimeArgument extends FFmpeguArgument {
+/**
+ * A single time value. Filters escape it like a string, unlike other
+ * arguments, whose rendered values are spliced into the filter unescaped.
+ */
+export class FFmpeguTimeArgument extends FFmpeguArgument {
+  // Time objects are mutable, so their total is captured here, matching how
+  // option bundles copy their inputs. Validation still waits for compile.
+  private readonly value: FFmpeguDurationValue | number
+
   constructor(
-    readonly value: FFmpeguDurationValue,
-    readonly format: (microseconds: bigint) => string
+    value: FFmpeguDurationValue | FFmpeguTimeObject,
+    private readonly format: (microseconds: bigint) => string
   ) {
     super()
+    this.value = isDurationValue(value)
+      ? value
+      : timeObjectToMilliseconds(value)
   }
 
   getArgs(): string[] {
@@ -199,13 +226,15 @@ class FFmpeguTimeArgument extends FFmpeguArgument {
   }
 }
 
-export const timestampArgument = (value: FFmpeguDurationValue) =>
-  new FFmpeguTimeArgument(value, formatTimestamp)
+export const timestampArgument = (
+  value: FFmpeguDurationValue | FFmpeguTimeObject
+) => new FFmpeguTimeArgument(value, formatTimestamp)
 
-const secondsArgument = (value: FFmpeguDurationValue) =>
-  new FFmpeguTimeArgument(value, formatSeconds)
+export const secondsArgument = (
+  value: FFmpeguDurationValue | FFmpeguTimeObject
+) => new FFmpeguTimeArgument(value, formatSeconds)
 
-export const resolveFilterTimeOptions = <
+export const resolveSecondsOptions = <
   T extends Record<string, unknown>,
   K extends keyof T
 >(
@@ -220,7 +249,8 @@ export const resolveFilterTimeOptions = <
     if (isDurationValue(value)) {
       resolved[key] = secondsArgument(value) as ResolvedTimeOptions<T, K>[K]
     } else if (isTimeObject(value)) {
-      // Filter options such as fps.start_time require seconds, not HH:MM:SS.
+      // Filter options such as fps.start_time require seconds, not HH:MM:SS,
+      // and muxer durations such as hls_time take seconds as well.
       resolved[key] = String(
         timeObjectToMilliseconds(value) / MS_IN_SECOND
       ) as ResolvedTimeOptions<T, K>[K]

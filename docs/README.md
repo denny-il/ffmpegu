@@ -28,12 +28,17 @@ Read these in order the first time.
 | `Options`                              | Raw option bundles: `Options.create`, `concat`, `merge`            |
 | `options`                              | Option helpers such as `options.crf(23)` and `options.hls({...})`   |
 | `filters`                              | Filter helpers, chains, graphs, labels, and the builder           |
+| `time`                                 | `time.seconds(d)` and `time.timestamp(d)` time value adapters     |
 | `FFmpeg`, `FFprobe`                    | Effect services with `layer` and `layerConfig`                     |
 | `run`, `stream`, `probe`, `probeWith`  | Execution Effects and Streams that use the services                |
 | `CommandError`, `ExitError`, …         | Tagged errors and their reasons                                    |
 | `ProbeResult`, `ProjectedProbeResult`, … | Probe result schemas                                             |
 
-Every builder class is also exported under its `FFmpegu*` name (for example `FFmpeguCommand`), and the default export `ffmpegu` groups the pure builders as `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, and `ffmpegu.filters`. Prefer the named exports.
+Every builder class is also exported under its `FFmpegu*` name (for example `FFmpeguCommand`), and the default export `ffmpegu` groups the pure builders as `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, `ffmpegu.filters`, and `ffmpegu.time`. Prefer the named exports.
+
+## Compatibility
+
+Typed option and filter names are verified against FFmpeg 6.1 through 9.0; the few exceptions, such as `scale`'s `reset_sar` (8.0+), say so in their hints. Keys without a typed hint always pass through unchanged, so options from newer FFmpeg releases work without a library update. Which encoders, muxers, and filters are available depends on your FFmpeg build: check with `ffmpeg -encoders`, `ffmpeg -muxers`, or `ffmpeg -filters`.
 
 ## FFmpeg reference
 

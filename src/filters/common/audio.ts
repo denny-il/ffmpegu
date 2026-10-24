@@ -1,7 +1,7 @@
 import {
   type FFmpeguDurationValue,
   type FFmpeguTimeObject,
-  resolveFilterTimeOptions
+  resolveSecondsOptions
 } from "../../utils.ts"
 import type {
   FilterArgument,
@@ -112,7 +112,7 @@ export const atrim: OpenFilterHelper<AtrimOptions> = (
 ) =>
   create(
     "atrim",
-    resolveFilterTimeOptions(options, ["start", "end", "duration"]),
+    resolveSecondsOptions(options, ["start", "end", "duration"]),
     labels
   )
 export const asetpts: OpenFilterHelper<AsetPtsOptions> = (
@@ -125,7 +125,7 @@ export const afade: OpenFilterHelper<AfadeOptions> = (
 ) =>
   create(
     "afade",
-    resolveFilterTimeOptions(options, ["start_time", "duration"]),
+    resolveSecondsOptions(options, ["start_time", "duration"]),
     labels
   )
 export const highpass: OpenFilterHelper<HighpassOptions> = (
