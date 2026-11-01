@@ -66,19 +66,19 @@
 		"check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
 	},
 	"devDependencies": {
-		"@effect/platform-bun": "4.0.5",
-		"@effect/platform-node": "4.0.5",
-		"@effect/vitest": "4.0.5",
+		"@effect/platform-bun": "4.1.1",
+		"@effect/platform-node": "4.1.1",
+		"@effect/vitest": "4.1.1",
 		"@types/node": "^26.6.5",
 		"@vitest/coverage-v8": "5.0.4",
-		"effect": "~4.0.5",
+		"effect": "4.1.1",
 		"oxfmt": "0.73.0",
 		"oxlint": "1.88.0",
 		"typescript": "7.0.2",
 		"vitest": "5.0.4"
 	},
 	"peerDependencies": {
-		"effect": "~4.0.5"
+		"effect": "^4.0.0"
 	},
 	"engines": {
 		"bun": ">=1.4.3",

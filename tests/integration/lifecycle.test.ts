@@ -265,7 +265,9 @@ it.live(
 
         const exit = yield* Effect.exit(run(command))
 
-        expect(failures(exit)).toEqual([failure])
+        // Effect turns the typed error into a defect next to the sibling's.
+        expect(failures(exit)).toEqual([])
+        expect(hasDefect(exit, failure)).toBe(true)
         expect(hasDefect(exit, defect)).toBe(true)
         expect(cleanups.count).toBe(1)
         expect(pids().filter(alive)).toEqual([])
@@ -308,7 +310,9 @@ it.live(
           })
         )
 
-        expect(failures(exit)).toEqual([failure])
+        // Effect turns the typed error into a defect next to the sibling's.
+        expect(failures(exit)).toEqual([])
+        expect(hasDefect(exit, failure)).toBe(true)
         expect(hasDefect(exit, defect)).toBe(true)
         expect(cleanups.count).toBe(1)
         expect(pids().filter(alive)).toEqual([])

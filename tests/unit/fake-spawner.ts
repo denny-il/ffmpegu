@@ -18,7 +18,7 @@ import { type ChildProcess, ChildProcessSpawner } from "effect/process"
  */
 export interface FakeProcess {
   readonly command: ChildProcess.StandardCommand
-  readonly args: ReadonlyArray<string>
+  readonly args: ChildProcess.StandardCommand["args"]
   /** Bytes written to an input descriptor, by fd. */
   readonly written: (fd: number) => Effect.Effect<ReadonlyArray<number>>
   /** The chunks written to an input descriptor, as the batches its sink received. */

@@ -5,7 +5,7 @@ description: Build and run FFmpeg and FFprobe operations in TypeScript with the 
 
 # ffmpegu
 
-ffmpegu describes FFmpeg commands as immutable values and executes them through the `FFmpeg` and `FFprobe` Effect services. Requirements: Effect 4.0.x, Node.js 26.3+ or Bun 1.4.3+, Linux or macOS, and `ffmpeg`/`ffprobe` installed separately.
+ffmpegu describes FFmpeg commands as immutable values and executes them through the `FFmpeg` and `FFprobe` Effect services. Requirements: Effect 4.x, Node.js 26.3+ or Bun 1.4.3+, Linux or macOS, and `ffmpeg`/`ffprobe` installed separately.
 
 ## Workflow
 
