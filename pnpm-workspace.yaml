@@ -1,8 +1,2 @@
 allowBuilds:
   esbuild: true
-minimumReleaseAgeExclude:
-  - '@effect/platform-bun@4.0.5'
-  - '@effect/platform-node-shared@4.0.5'
-  - '@effect/platform-node@4.0.5'
-  - '@effect/vitest@4.0.5'
-  - effect@4.0.5

@@ -371,6 +371,9 @@ const execute = (
 
       const stderr = new ByteTail(settings.stderrTailBytes)
       const closeInputs = yield* Deferred.make<void>()
+      // Failed by a feeder whose source interrupted itself, before it releases
+      // the descriptor (see `feedInput`).
+      const sourceInterrupted = yield* Deferred.make<never>()
       const draining = yield* Deferred.make<void>()
 
       // Sink outputs are read like the stream output: by a forwarder into a
@@ -391,7 +394,7 @@ const execute = (
       const inputsFiber = yield* Effect.forkScoped(
         Effect.forEach(
           compiled.inputStreams,
-          (input) => feedInput(handle, input, closeInputs),
+          (input) => feedInput(handle, input, closeInputs, sourceInterrupted),
           { concurrency: "unbounded", discard: true }
         )
       )
@@ -504,7 +507,13 @@ const execute = (
         )
 
       const raced = yield* Effect.exit(
-        Effect.raceFirst(awaitExit(handle), firstFailure(fibers))
+        Effect.raceFirst(
+          awaitExit(handle),
+          Effect.raceFirst(
+            firstFailure(fibers),
+            Deferred.await(sourceInterrupted)
+          )
+        )
       )
       if (Exit.isFailure(raced)) {
         if (Cause.hasInterruptsOnly(raced.cause)) {
@@ -607,7 +616,8 @@ const execute = (
 const feedInput = (
   handle: ChildProcessHandle,
   { fd, source }: CompiledInputStream<unknown, unknown>,
-  close: Deferred.Deferred<void>
+  close: Deferred.Deferred<void>,
+  sourceInterrupted: Deferred.Deferred<never>
 ) =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
@@ -705,23 +715,34 @@ const feedInput = (
         case "failed": {
           // All reasons: a source interrupting itself interrupts the run.
           const producerExit = yield* Fiber.await(producer)
-          const consumerExit = yield* settle(consumer)
-          // The interrupted consumer leaves the descriptor open, and ffmpeg
-          // blocked reading it does not act on SIGTERM, so stopping would
-          // wait out `forceKillAfter`. Ending it gives ffmpeg EOF. The end
-          // waits for buffered writes to flush, which ffmpeg may never read,
-          // so it runs in the background for the rest of the run instead of
-          // delaying the failure. Started immediately, so the end is requested
-          // even if the run is torn down right after.
-          //
-          // Not for a source that interrupted itself: EOF could let ffmpeg
-          // exit successfully before the interruption is observed, and
-          // interruptions are dropped once ffmpeg exited (see
-          // `failureReasons`), turning the run into a success.
-          if (
+          const selfInterrupted =
             Exit.isFailure(producerExit) &&
-            !Cause.hasInterruptsOnly(producerExit.cause)
-          ) {
+            Cause.hasInterruptsOnly(producerExit.cause)
+          // Releasing the descriptor can give ffmpeg EOF (from Effect 4.0.6
+          // the platform destroys it when the consumer is interrupted), and
+          // interruptions are dropped once ffmpeg exited (see
+          // `failureReasons`). This feeder's own failure only reaches the
+          // supervisor once its siblings stopped, so a successful exit could
+          // win and turn the run into a success. The supervisor is told first.
+          if (selfInterrupted) {
+            // Interruptions only, so no typed error.
+            yield* Deferred.failCause(
+              sourceInterrupted,
+              producerExit.cause as Cause.Cause<never>
+            )
+          }
+          const consumerExit = yield* settle(consumer)
+          // Before Effect 4.0.6 the interrupted consumer leaves the descriptor
+          // open, and ffmpeg blocked reading it does not act on SIGTERM, so
+          // stopping would wait out `forceKillAfter`. Ending it gives ffmpeg
+          // EOF. The end waits for buffered writes to flush, which ffmpeg may
+          // never read, so it runs in the background for the rest of the run
+          // instead of delaying the failure. Started immediately, so the end
+          // is requested even if the run is torn down right after.
+          //
+          // Not for a source that interrupted itself: the run is interrupted
+          // and stops ffmpeg itself.
+          if (Exit.isFailure(producerExit) && !selfInterrupted) {
             yield* Effect.forkScoped(
               Effect.interruptible(
                 Effect.ignore(Stream.run(Stream.empty, handle.getInputFd(fd)))
@@ -738,9 +759,10 @@ const feedInput = (
         case "closed": {
           const producerExit = yield* settle(producer)
           yield* Queue.end(queue)
-          // Once ffmpeg has exited nothing reads the descriptor, and the
-          // platform sink does not settle on a descriptor that closed without
-          // an error (it waits for a `drain` or `finish` that never comes).
+          // Once ffmpeg has exited nothing reads the descriptor, and before
+          // Effect 4.0.6 the platform sink does not settle on a descriptor that
+          // closed without an error (it waits for a `drain` or `finish` that
+          // never comes).
           // A write still pending then is abandoned; the exit code decides
           // the outcome, as for a reader closing its end. An error the
           // descriptor reported is not: the sink resumes from the stream's

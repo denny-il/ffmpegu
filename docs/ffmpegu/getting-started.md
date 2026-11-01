@@ -9,14 +9,14 @@ pnpm add ffmpegu effect @effect/platform-node
 
 | Requirement | Version                                                     |
 | ----------- | ----------------------------------------------------------- |
-| Effect      | 4.0.x (`effect` is a peer dependency)                       |
+| Effect      | 4.x (`effect` is a peer dependency)                         |
 | Runtime     | Node.js 26.3+ or Bun 1.4.3+ (both provide global `Temporal`) |
 | OS          | Linux or macOS                                              |
 | Binaries    | `ffmpeg` and `ffprobe`, installed separately                |
 
 The package does not bundle FFmpeg. By default the services run `ffmpeg` and `ffprobe` from `PATH`; [configure](configuration.md) a different binary per Layer.
 
-The live Layers depend on Effect's `ChildProcessSpawner`, which is still an unstable Effect API. That is why the peer range is pinned to the tested 4.0 patch series.
+The live Layers depend on Effect's `ChildProcessSpawner`, which is still an unstable Effect API. ffmpegu is tested against the latest Effect 4 release; when a typed error and a defect occur together, Effect 4.0.6 and later report the typed error as a defect.
 
 ## The model
 

@@ -27,7 +27,7 @@ pnpm add ffmpegu effect @effect/platform-node
 # On Bun, install @effect/platform-bun instead of @effect/platform-node.
 ```
 
-Requires Effect 4.0.x, Node.js 26.3+ or Bun 1.4.3+, Linux or macOS, and `ffmpeg`/`ffprobe` installed separately (on `PATH`, or configured per Layer).
+Requires Effect 4.x, Node.js 26.3+ or Bun 1.4.3+, Linux or macOS, and `ffmpeg`/`ffprobe` installed separately (on `PATH`, or configured per Layer).
 
 ## Quick start
 
