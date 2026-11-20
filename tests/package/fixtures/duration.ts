@@ -1,5 +1,5 @@
 import { Duration } from "effect"
-import { filters, options } from "ffmpegu"
+import { Filter, Options } from "ffmpegu"
 
-options.startTime(Duration.seconds(1))
-filters.atrim({ duration: Duration.millis(500) })
+Options.startTime(Duration.seconds(1))
+Filter.atrim({ duration: Duration.millis(500) })

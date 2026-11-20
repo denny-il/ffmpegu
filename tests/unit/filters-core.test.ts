@@ -1,22 +1,21 @@
 import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
-import { FFmpeguArgument } from "../../src/core/argument.ts"
-import { FFmpeguReferences } from "../../src/core/references.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
 import { atrim } from "../../src/filters/common/audio.ts"
 import { scale } from "../../src/filters/common/video.ts"
-import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
+import { Argument, Filter } from "../../src/index.ts"
 
-class DummyArgument extends FFmpeguArgument {
-  getArgs(_refs: FFmpeguReferences): string[] {
+class DummyArgument extends Argument {
+  getArgs(_refs: StandaloneReferences): string[] {
     return ["1", "2"]
   }
 }
 
 describe("Filters Core", { concurrent: false }, () => {
-  const refs = new FFmpeguReferences()
+  const refs = new StandaloneReferences()
 
   it("should escape special characters in values", () => {
-    const filter = FFmpeguSimpleFilter.create("drawtext", {
+    const filter = Filter.make("drawtext", {
       text: "a\\b;c'd"
     })
 
@@ -26,7 +25,7 @@ describe("Filters Core", { concurrent: false }, () => {
   })
 
   it("should render boolean options as 1 or 0", () => {
-    const filter = FFmpeguSimpleFilter.create("scale", {
+    const filter = Filter.make("scale", {
       w: 640,
       h: 360,
       interl: true,
@@ -37,7 +36,7 @@ describe("Filters Core", { concurrent: false }, () => {
   })
 
   it("should support argument values in options", () => {
-    const filter = FFmpeguSimpleFilter.create("select", {
+    const filter = Filter.make("select", {
       expr: new DummyArgument()
     })
 

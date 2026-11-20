@@ -9,41 +9,39 @@ ffmpeg [global options] ([input options] -i <input>)... ([output options] <outpu
 ## Building commands
 
 ```ts
-import { Command, Input, Options, Output, options } from "ffmpegu"
+import { Command, Input, Options, Output } from "ffmpegu"
 
 const video = Input.fromFile("video.mp4")
 const audio = Input.fromFile("audio.mp3")
 
 const command = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [video, audio],
   outputs: [
     Output.toFile(
       "merged.mp4",
-      Options.create(
-        { map: video.video },
-        { map: audio.audio.track(0) },
-        options.videoCopy(),
-        options.audioCodec("aac"),
-        options.shortest()
-      )
+      { map: video.video },
+      { map: audio.audio.track(0) },
+      Options.videoCopy(),
+      Options.audioCodec("aac"),
+      Options.shortest()
     )
   ]
 })
 ```
 
-`Command.make` (alias `Command.create`) infers the command's error and requirement types from every input stream and output sink, so heterogeneous inputs and outputs keep their exact types.
+`Command.make` infers the command's error and requirement types from every input stream and output sink, so heterogeneous inputs and outputs keep their exact types.
 
 Commands are immutable. `withGlobal`, `withInput`, and `withOutput` return a new command; `withGlobal` appends to existing global options. Each is also available as a data-first or data-last function, and commands are pipeable:
 
 ```ts
-import { Command, Input, Output, options } from "ffmpegu"
+import { Command, Input, Options, Output } from "ffmpegu"
 
 const video = Input.fromFile("video.mp4")
-const overwrite = Command.withGlobal(options.overwrite())
+const overwrite = Command.withGlobal(Options.overwrite())
 
 const command = Command.make({ inputs: [video] }).pipe(
-  Command.withOutput(Output.toFile("out.mp4", options.copy())),
+  Command.withOutput(Output.toFile("out.mp4", Options.copy())),
   overwrite
 )
 const withAudio = Command.withInput(command, Input.fromFile("audio.mp3"))
@@ -57,25 +55,25 @@ Every input exposes `video`, `audio`, `subtitle`, and `data` references. Use the
 | ------------------------ | --------------------------------- |
 | `input.video`            | `1:v`                             |
 | `input.audio.track(1)`   | `1:a:1`                           |
-| `filters.label(input.video)` | `[1:v]`                       |
+| `Filter.label(input.video)`  | `[1:v]`                       |
 
 Indices are resolved when the command compiles, so reordering `inputs` cannot leave a stale index behind. Compilation fails with a `CommandError` when a reference points at an input that is not part of the command (`ForeignReference`), or when a track index is not an integer from 0 to 2147483647 (`InvalidArgument`). Creating the reference never throws.
 
 ## Compiling and inspecting
 
-`compile()` validates the command and returns a synchronous `Result`, without acquiring resources. `Command.toArgs` returns just the argv, which is convenient for logging, snapshots, and unit tests:
+`compile()` validates the command and returns a synchronous `Result`, without acquiring resources. `toArgs()` returns just the argv, which is convenient for logging, snapshots, and unit tests:
 
 ```ts
 import { Result } from "effect"
-import { Command, Input, Output, options } from "ffmpegu"
+import { Command, Input, Options, Output } from "ffmpegu"
 
 const input = Input.fromFile("in.mp4")
 const command = Command.make({
   inputs: [input],
-  outputs: [Output.toFile("out.mp4", options.map(input.video))]
+  outputs: [Output.toFile("out.mp4", Options.map(input.video))]
 })
 
-const args = Result.getOrThrow(Command.toArgs(command))
+const args = Result.getOrThrow(command.toArgs())
 // ["-i", "in.mp4", "-map", "0:v", "out.mp4"]
 ```
 
@@ -86,7 +84,7 @@ The compiled argv does not include the flags the runner prepends itself (`-nostd
 Compilation rejects descriptions that would conflict with how ffmpegu drives the process. Each failure is a `CommandError` with a tagged [reason](errors.md#command-error-reasons).
 
 - **Declare inputs through `inputs`.** A raw `-i` option would shift stream indices, so it is rejected (`ReservedOption`).
-- **Leave process plumbing to the runner.** `-progress` and `-stdin`, including stream-specifier spellings such as `-progress:v`, are rejected (`ReservedOption`). Pass `onProgress` to `run` instead.
+- **Leave process plumbing to the runner.** `-progress` and `-stdin`, including stream-specifier spellings such as `-progress:v`, are rejected (`ReservedOption`). Pass `onProgress` to `FFmpeg.run` instead.
 - **Use stream constructors for pipes.** Input and output paths and option values that address a descriptor, such as `pipe:1`, `fd:0`, `/dev/stdin`, or `/proc/self/fd/…`, are rejected (`ReservedPath`), as is an input or output path of `-`. Use `Input.fromStream`, `Output.toSink`, or `Output.toStream` instead.
 - **Output paths cannot start with a dash.** FFmpeg would parse them as options, so they fail with `InvalidArgument`; write `./-name.mp4`.
 - **One object, one position.** Passing the same input or output object twice is rejected (`DuplicateInput`, `DuplicateOutput`). Create a second `Input.fromFile` for the same file.
@@ -95,7 +93,7 @@ Option validation is deliberately conservative: a standalone token spelled exact
 
 ## Stream-output count
 
-`Command<E, R, S>` carries, in `S`, how many `Output.toStream` outputs it has: `0`, `1`, or `2` (two or more). `run` accepts only `0` and `stream` only `1`, so using the wrong runner is a compile error. See [type parameters](errors.md#type-parameters) for the details and when the check falls back to runtime.
+`Command<E, R, S>` carries, in `S`, how many `Output.toStream` outputs it has: `0`, `1`, or `2` (two or more). `FFmpeg.run` accepts only `0` and `FFmpeg.stream` only `1`, so using the wrong runner is a compile error. See [type parameters](errors.md#type-parameters) for the details and when the check falls back to runtime.
 
 ## Re-running
 

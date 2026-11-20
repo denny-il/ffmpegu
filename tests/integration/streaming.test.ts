@@ -24,21 +24,13 @@ import {
   Sink,
   Stream
 } from "effect"
-import {
-  Command,
-  FFmpeg,
-  Input,
-  Options,
-  Output,
-  run,
-  stream
-} from "../../src/index.ts"
+import { Command, FFmpeg, Input, Options, Output } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
 const live = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof MediaLive> | Scope.Scope>
 ) => Effect.scoped(effect).pipe(Effect.provide(MediaLive))
-const opts = Options.create
+const opts = Options.make
 
 // Effect's output sockets can reset under slow reads on macOS/Bun.
 // Re-enable the affected cases after https://github.com/denny-il/ffmpegu/issues/3.
@@ -278,7 +270,7 @@ describe("producer/consumer rate matrix", () => {
             const probe = makeProbe()
             const collector = makeCollector()
             const progress: Array<string> = []
-            yield* run(
+            yield* FFmpeg.run(
               pcmCopy(
                 payloadSource(probe, {
                   total: TOTAL,
@@ -321,7 +313,7 @@ it.live(
         const held = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
         const fiber = yield* Effect.forkChild(
-          run(
+          FFmpeg.run(
             pcmCopy(
               payloadSource(probe, { total: TOTAL }),
               collect(collector, { hold: { afterBytes: 1, held, release } })
@@ -434,7 +426,7 @@ describe("cancellation", () => {
             Stream.never
           ).pipe(recordExit(parked))
           const fiber = yield* Effect.forkChild(
-            run(
+            FFmpeg.run(
               pcmCopy(
                 source,
                 collect(collector, {
@@ -473,7 +465,7 @@ describe("cancellation", () => {
           const held = yield* Deferred.make<void>()
           const release = yield* Deferred.make<void>()
           const fiber = yield* Effect.forkChild(
-            run(
+            FFmpeg.run(
               pcmCopy(
                 payloadSource(probe),
                 collect(collector, { hold: { afterBytes: 1, held, release } })
@@ -508,7 +500,7 @@ describe("cancellation", () => {
           const collector = makeCollector()
           const flowing = yield* Deferred.make<void>()
           const fiber = yield* Effect.forkChild(
-            run(
+            FFmpeg.run(
               pcmCopy(
                 payloadSource(probe, { delay: pace(1) }),
                 collect(collector, {
@@ -547,7 +539,7 @@ describe("cancellation", () => {
             const probe = makeProbe()
             const collector = makeCollector()
             const fiber = yield* Effect.forkChild(
-              run(
+              FFmpeg.run(
                 pcmCopy(
                   payloadSource(probe, { delay: pace(1) }),
                   collect(collector, { delay: pace(1) })
@@ -594,7 +586,7 @@ it.live(
           )
         )
         const started = Date.now()
-        const error = yield* run(
+        const error = yield* FFmpeg.run(
           Command.make({
             inputs: [Input.fromStream(source, opts(PCM))],
             outputs: [Output.toFile(`${dir}/out.raw`, opts(PCM_COPY))]
@@ -637,7 +629,7 @@ it.live(
           ).pipe(Stream.ensuring(Effect.sleep("500 millis"))),
           pcm
         )
-        const exit = yield* run(
+        const exit = yield* FFmpeg.run(
           Command.make({
             inputs: [mapped, sibling],
             outputs: [
@@ -666,7 +658,7 @@ describe("FFmpeg exits before an infinite producer ends", () => {
             const collector = makeCollector()
             // Re-encoding (lossless for s16le) lets ffmpeg trim at sample
             // precision: 0.5 s at 48 kHz stereo = 24 000 frames x 4 bytes.
-            yield* run(
+            yield* FFmpeg.run(
               Command.make({
                 inputs: [Input.fromStream(payloadSource(probe), opts(PCM))],
                 outputs: [
@@ -698,7 +690,7 @@ describe("FFmpeg exits before an infinite producer ends", () => {
           for (let attempt = 0; attempt < 20; attempt++) {
             const probe = makeProbe()
             const collector = makeCollector()
-            yield* run(
+            yield* FFmpeg.run(
               Command.make({
                 inputs: [
                   Input.fromStream(
@@ -744,7 +736,7 @@ describe("FFmpeg exits before an infinite producer ends", () => {
             delay: () =>
               probe.pulled >= 192_000 ? Duration.millis(100) : undefined
           })
-          yield* run(
+          yield* FFmpeg.run(
             Command.make({
               inputs: [Input.fromStream(source, opts(PCM))],
               outputs: [
@@ -791,7 +783,7 @@ describe("multiple descriptors with asymmetric rates", () => {
             }),
             opts({ f: "s16le", ar: 8_000, ac: 1 })
           )
-          yield* run(
+          yield* FFmpeg.run(
             Command.make({
               inputs: [large, small],
               outputs: [
@@ -831,7 +823,7 @@ describe("multiple descriptors with asymmetric rates", () => {
             opts(PCM)
           )
           const fiber = yield* Effect.forkChild(
-            run(
+            FFmpeg.run(
               Command.make({
                 inputs: [input],
                 outputs: [
@@ -865,7 +857,7 @@ describe("multiple descriptors with asymmetric rates", () => {
 
 describe("stream outputs", () => {
   const pcmStream = <E>(source: Stream.Stream<Uint8Array, E>) =>
-    stream(
+    FFmpeg.stream(
       Command.make({
         inputs: [Input.fromStream(source, opts(PCM))],
         outputs: [Output.toStream(opts(PCM_COPY))]

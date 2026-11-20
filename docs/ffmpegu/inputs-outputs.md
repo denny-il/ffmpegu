@@ -2,51 +2,45 @@
 
 | Constructor                        | Media travels through            | Types                     |
 | ---------------------------------- | -------------------------------- | ------------------------- |
-| `Input.fromFile(path, options?)`   | FFmpeg opens the path itself     | `Input<never, never>`     |
-| `Input.fromStream(stream, options?)` | A pipe fed from an Effect `Stream` | `Input<E, R>`           |
-| `Output.toFile(path, options?)`    | FFmpeg writes the path itself    | `Output<never, never, 0>` |
-| `Output.toSink(sink, options?)`    | A pipe drained into an Effect `Sink` | `Output<E, R, 0>`     |
-| `Output.toStream(options?)`        | A pipe read by [`stream`](running.md#streaming-output) | `Output<never, never, 1>` |
+| `Input.fromFile(path, ...options)`   | FFmpeg opens the path itself     | `Input<never, never>`     |
+| `Input.fromStream(stream, ...options)` | A pipe fed from an Effect `Stream` | `Input<E, R>`           |
+| `Output.toFile(path, ...options)`    | FFmpeg writes the path itself    | `Output<never, never, 0>` |
+| `Output.toSink(sink, ...options)`    | A pipe drained into an Effect `Sink` | `Output<E, R, 0>`     |
+| `Output.toStream(...options)`        | A pipe read by [`FFmpeg.stream`](running.md#streaming-output) | `Output<never, never, 1>` |
 
-`options` are the input or output options placed before that input's `-i` or before that output's path.
+`options` are the input or output options placed before that input's `-i` or before that output's path. Pass any number of [option forms](options.md#writing-raw-options): bundles such as `Options.crf(23)`, records, tuples, and strings, rendered in order. `undefined` is skipped, so an optional bundle can be passed as it is.
 
 ## Files, URLs, and devices
 
 `fromFile` and `toFile` pass the string to FFmpeg unchanged, so everything FFmpeg can open works: local paths, URLs for any compiled-in [protocol](https://ffmpeg.org/ffmpeg-protocols.html), image sequences such as `frame_%04d.png`, and pseudo inputs such as `lavfi` sources. Prefer files whenever the data is on disk: FFmpeg can seek them, which some formats (such as regular MP4) need.
 
 ```ts
-import { Input, Options, options } from "ffmpegu"
+import { Input, Options } from "ffmpegu"
 
 const remote = Input.fromFile("https://example.com/video.mp4")
-const frames = Input.fromFile("frames/%04d.png", Options.create({ framerate: 30 }))
-const tone = Input.fromFile("sine=frequency=440:duration=5", options.format("lavfi"))
+const frames = Input.fromFile("frames/%04d.png", { framerate: 30 })
+const tone = Input.fromFile("sine=frequency=440:duration=5", Options.format("lavfi"))
 ```
 
 FFmpeg performs this I/O itself, so a fake Effect `FileSystem` cannot intercept it; see [testing](configuration.md#testing).
 
 ## Stream inputs
 
-`Input.fromStream` accepts any `Stream<Uint8Array, E, R>`. Its error type `E` and requirements `R` flow into the command and then into `run`.
+`Input.fromStream` accepts any `Stream<Uint8Array, E, R>`. Its error type `E` and requirements `R` flow into the command and then into `FFmpeg.run`.
 
 ```ts
 import { Effect, FileSystem } from "effect"
-import { Command, Input, Options, Output, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
-  yield* run(
+  yield* FFmpeg.run(
     Command.make({
       inputs: [
-        Input.fromStream(
-          fs.stream("audio.pcm"),
-          Options.create({ f: "s16le", ar: 48000, ac: 2 })
-        )
+        Input.fromStream(fs.stream("audio.pcm"), { f: "s16le", ar: 48000, ac: 2 })
       ],
       outputs: [
-        Output.toSink(
-          fs.sink("audio.ogg"),
-          Options.create({ f: "ogg", "c:a": "libopus" })
-        )
+        Output.toSink(fs.sink("audio.ogg"), { f: "ogg", "c:a": "libopus" })
       ]
     })
   )
@@ -71,7 +65,7 @@ Pipe outputs need a muxer that can write sequentially: name it with `f`, and for
 
 ## Stream outputs
 
-`Output.toStream(options?)` marks the output that `stream(command)` returns as a `Stream<Uint8Array>`; see [streaming output](running.md#streaming-output). The command type counts these outputs, so `run` rejects a command that has one and `stream` requires exactly one at compile time.
+`Output.toStream(options?)` marks the output that `FFmpeg.stream(command)` returns as a `Stream<Uint8Array>`; see [streaming output](running.md#streaming-output). The command type counts these outputs, so `FFmpeg.run` rejects a command that has one and `FFmpeg.stream` requires exactly one at compile time.
 
 ## Node streams
 

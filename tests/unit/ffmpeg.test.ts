@@ -19,17 +19,14 @@ import {
   CommandError,
   ExitError,
   FFmpeg,
-  type FFmpegOptions,
+  type FFmpegConfig,
   Input,
   Output,
-  type FFmpeguCommand,
   OutputError,
   PipeError,
   type Progress,
-  run,
   type RunOptions,
-  SpawnError,
-  stream
+  SpawnError
 } from "../../src/index.ts"
 import {
   type FakeProcess,
@@ -41,7 +38,7 @@ import { Writable } from "node:stream"
 import { makeRecordingTracer } from "./tracer.ts"
 
 const setup = Effect.fnUntraced(function* (
-  options?: FFmpegOptions,
+  options?: FFmpegConfig,
   fake?: FakeSpawnerOptions
 ) {
   const spawner = yield* makeFakeSpawner(fake)
@@ -917,7 +914,7 @@ describe("FFmpeg", () => {
     const defect = new Error("cleanup defect")
     /** Waits for `started`, interrupts the run and checks its cause. */
     const cancel = (
-      command: FFmpeguCommand<unknown, never>,
+      command: Command<unknown, never>,
       started: Deferred.Deferred<void>,
       options?: RunOptions<unknown, never>,
       beforeStart?: (process: FakeProcess) => Effect.Effect<void>
@@ -1139,7 +1136,7 @@ describe("FFmpeg", () => {
           )
         )
         const fiber = yield* Effect.forkChild(
-          run(toFile).pipe(Effect.provide(layer))
+          FFmpeg.run(toFile).pipe(Effect.provide(layer))
         )
         const process = yield* spawner.next
         assert.strictEqual(process.command.command, "/opt/ffmpeg")
@@ -1164,7 +1161,7 @@ describe("FFmpeg", () => {
         )
       )
       const fiber = yield* Effect.forkChild(
-        run(toFile).pipe(Effect.provide(layer))
+        FFmpeg.run(toFile).pipe(Effect.provide(layer))
       )
       const process = yield* spawner.next
       assert.strictEqual(process.command.command, "/opt/ffmpeg")
@@ -1283,7 +1280,7 @@ describe("FFmpeg", () => {
     })
   )
 
-  it.effect.each<[FFmpegOptions]>([
+  it.effect.each<[FFmpegConfig]>([
     [{ stderrTailBytes: Number.NaN }],
     [{ stderrTailBytes: Number.POSITIVE_INFINITY }],
     [{ stderrTailBytes: -1 }],
@@ -1957,7 +1954,7 @@ describe("FFmpeg.stream", () => {
         [Output.toFile("out.mp4")],
         [Output.toStream(), Output.toStream()]
       ]) {
-        const command: FFmpeguCommand = Command.make({
+        const command: Command = Command.make({
           inputs: [input],
           outputs
         })
@@ -1980,7 +1977,7 @@ describe("FFmpeg.stream", () => {
         {},
         { spawnError: platformError("spawn") }
       )
-      const command: FFmpeguCommand = Command.make({
+      const command: Command = Command.make({
         inputs: [Input.fromFile("in.mp4")],
         outputs: [Output.toStream()]
       })
@@ -1998,7 +1995,7 @@ describe("FFmpeg.stream", () => {
         outputs: [Output.toStream()]
       })
       const { fiber, received } = yield* consume(
-        stream(command).pipe(Stream.provide(layer))
+        FFmpeg.stream(command).pipe(Stream.provide(layer))
       )
       const process = yield* next
       yield* process.emit(4, bytes(5))

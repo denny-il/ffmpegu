@@ -1,17 +1,19 @@
 import vm from "node:vm"
 import { Duration, Effect, Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
-import { FFmpeguArgument } from "../../src/core/argument.ts"
-import { FFmpeguCommand } from "../../src/core/command.ts"
-import { FFmpeguInput } from "../../src/core/input.ts"
-import { FFmpeguOutput } from "../../src/core/output.ts"
-import { FFmpeguReferences } from "../../src/core/references.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
 import type { CommandError } from "../../src/errors.ts"
-import { filters, options } from "../../src/index.ts"
-import { FFmpeguOptions } from "../../src/options/core.ts"
-import type { FFmpeguReferencesInterface } from "../../src/types/index.ts"
+import {
+  Argument,
+  Command,
+  Filter,
+  Input,
+  Options,
+  Output
+} from "../../src/index.ts"
+import type { References } from "../../src/types/index.ts"
 
-const compileError = (command: FFmpeguCommand<any, any>): CommandError => {
+const compileError = (command: Command<any, any>): CommandError => {
   const result = command.compile()
   if (Result.isSuccess(result)) {
     throw new Error(`Expected compile to fail, got ${result.success.args}`)
@@ -21,10 +23,10 @@ const compileError = (command: FFmpeguCommand<any, any>): CommandError => {
 
 describe("Command", () => {
   it("should compile args in order", () => {
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
-    const command = FFmpeguCommand.create({
-      global: FFmpeguOptions.create("-y"),
+    const input = Input.fromFile("/test/input.mp4")
+    const output = Output.toFile("/test/output.mp4")
+    const command = Command.make({
+      global: Options.make("-y"),
       inputs: [input],
       outputs: [output]
     })
@@ -35,13 +37,13 @@ describe("Command", () => {
   })
 
   it("should keep immutability for withGlobal/withInput/withOutput", () => {
-    const base = FFmpeguCommand.create({ inputs: [], outputs: [] })
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const base = Command.make({ inputs: [], outputs: [] })
+    const input = Input.fromFile("/test/input.mp4")
+    const output = Output.toFile("/test/output.mp4")
 
     const withInput = base.withInput(input)
     const withOutput = withInput.withOutput(output)
-    const withGlobal = withOutput.withGlobal(FFmpeguOptions.create("-vn"))
+    const withGlobal = withOutput.withGlobal(Options.make("-vn"))
 
     expect(base).not.toBe(withInput)
     expect(base.inputs).toEqual([])
@@ -61,19 +63,19 @@ describe("Command", () => {
   })
 
   it("should pipe data-last combinators and accept data-first calls", () => {
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const input = Input.fromFile("/test/input.mp4")
+    const output = Output.toFile("/test/output.mp4")
     const expected = ["-y", "-vn", "-i", "/test/input.mp4", "/test/output.mp4"]
-    const base = FFmpeguCommand.make({ global: FFmpeguOptions.create("-y") })
+    const base = Command.make({ global: Options.make("-y") })
 
     const piped = base.pipe(
-      FFmpeguCommand.withInput(input),
-      FFmpeguCommand.withOutput(output),
-      FFmpeguCommand.withGlobal(FFmpeguOptions.create("-vn"))
+      Command.withInput(input),
+      Command.withOutput(output),
+      Command.withGlobal(Options.make("-vn"))
     )
-    const dataFirst = FFmpeguCommand.withGlobal(
-      FFmpeguCommand.withOutput(FFmpeguCommand.withInput(base, input), output),
-      FFmpeguOptions.create("-vn")
+    const dataFirst = Command.withGlobal(
+      Command.withOutput(Command.withInput(base, input), output),
+      Options.make("-vn")
     )
 
     expect(base.inputs).toEqual([])
@@ -82,13 +84,13 @@ describe("Command", () => {
   })
 
   it("should merge global options when adding", () => {
-    const command = FFmpeguCommand.create({
-      global: FFmpeguOptions.create("-y"),
+    const command = Command.make({
+      global: Options.make("-y"),
       inputs: [],
       outputs: []
     })
 
-    const next = command.withGlobal(FFmpeguOptions.create("-vn"))
+    const next = command.withGlobal(Options.make("-vn"))
 
     expect(Result.getOrThrow(command.compile()).args).toEqual(["-y"])
     expect(Result.getOrThrow(next.compile()).args).toEqual(["-y", "-vn"])
@@ -100,17 +102,17 @@ describe("Command", () => {
     const sinkA = Sink.drain
     const sinkB = Sink.forEach((chunk: Uint8Array) => Effect.log(chunk.length))
 
-    const command = FFmpeguCommand.make({
+    const command = Command.make({
       inputs: [
-        FFmpeguInput.fromStream(sourceA, options.format("mp4")),
-        FFmpeguInput.fromFile("/test/b.mp4"),
-        FFmpeguInput.fromStream(sourceB)
+        Input.fromStream(sourceA, Options.format("mp4")),
+        Input.fromFile("/test/b.mp4"),
+        Input.fromStream(sourceB)
       ],
       outputs: [
-        FFmpeguOutput.toSink(sinkA, options.format("nut")),
-        FFmpeguOutput.toStream(options.format("s16le")),
-        FFmpeguOutput.toFile("/test/out.mkv"),
-        FFmpeguOutput.toSink(sinkB)
+        Output.toSink(sinkA, Options.format("nut")),
+        Output.toStream(Options.format("s16le")),
+        Output.toFile("/test/out.mkv"),
+        Output.toSink(sinkB)
       ]
     })
 
@@ -146,31 +148,30 @@ describe("Command", () => {
   })
 
   it("should keep arbitrary argument ordering and resolve stream references", () => {
-    const video = FFmpeguInput.fromFile("/test/video.mp4")
-    const audio = FFmpeguInput.fromFile("/test/audio.wav", options.startTime(2))
-    const graph = filters
-      .builder()
-      .chain(
-        filters.scale(
+    const video = Input.fromFile("/test/video.mp4")
+    const audio = Input.fromFile("/test/audio.wav", Options.startTime(2))
+    const graph = Filter.graph(
+      Filter.chain(
+        Filter.scale(
           { w: 320, h: 180 },
           {
-            inputs: [filters.label(video.video)],
-            outputs: [filters.label("v")]
+            inputs: [Filter.label(video.video)],
+            outputs: [Filter.label("v")]
           }
         )
       )
-      .build()
+    )
 
-    const command = FFmpeguCommand.make({
-      global: options.merge(options.overwrite(), options.filterComplex(graph)),
+    const command = Command.make({
+      global: Options.make(Options.overwrite(), Options.filterComplex(graph)),
       inputs: [video, audio],
       outputs: [
-        FFmpeguOutput.toFile(
+        Output.toFile(
           "/test/out.mp4",
-          options.merge(
-            options.map("[v]"),
-            options.map(audio.audio.track(0)),
-            options.custom(["-c:a", "aac"], "-shortest")
+          Options.make(
+            Options.map("[v]"),
+            Options.map(audio.audio.track(0)),
+            Options.make(["-c:a", "aac"], "-shortest")
           )
         )
       ]
@@ -198,16 +199,13 @@ describe("Command", () => {
   })
 
   it("should pass file paths, URLs and pseudo inputs through verbatim", () => {
-    const command = FFmpeguCommand.make({
+    const command = Command.make({
       inputs: [
-        FFmpeguInput.fromFile(
-          "testsrc=size=32x32:rate=1",
-          options.format("lavfi")
-        ),
-        FFmpeguInput.fromFile("https://example.com/a.m3u8"),
-        FFmpeguInput.fromFile("-starts-with-dash.mp4")
+        Input.fromFile("testsrc=size=32x32:rate=1", Options.format("lavfi")),
+        Input.fromFile("https://example.com/a.m3u8"),
+        Input.fromFile("-starts-with-dash.mp4")
       ],
-      outputs: [FFmpeguOutput.toFile("rtmp://example.com/live/key")]
+      outputs: [Output.toFile("rtmp://example.com/live/key")]
     })
 
     expect(Result.getOrThrow(command.compile()).args).toEqual([
@@ -231,9 +229,9 @@ describe("Command", () => {
         return new Uint8Array([1])
       })
     )
-    const command = FFmpeguCommand.make({
-      inputs: [FFmpeguInput.fromStream(source)],
-      outputs: [FFmpeguOutput.toSink(Sink.drain)]
+    const command = Command.make({
+      inputs: [Input.fromStream(source)],
+      outputs: [Output.toSink(Sink.drain)]
     })
 
     const first = Result.getOrThrow(command.compile())
@@ -244,13 +242,11 @@ describe("Command", () => {
   })
 
   it("should reject references to inputs outside the command", () => {
-    const own = FFmpeguInput.fromFile("/test/own.mp4")
-    const foreign = FFmpeguInput.fromFile("/test/foreign.mp4")
-    const command = FFmpeguCommand.make({
+    const own = Input.fromFile("/test/own.mp4")
+    const foreign = Input.fromFile("/test/foreign.mp4")
+    const command = Command.make({
       inputs: [own],
-      outputs: [
-        FFmpeguOutput.toFile("/test/out.mp4", options.map(foreign.video))
-      ]
+      outputs: [Output.toFile("/test/out.mp4", Options.map(foreign.video))]
     })
 
     expect(compileError(command).reason._tag).toBe("ForeignReference")
@@ -259,93 +255,75 @@ describe("Command", () => {
   })
 
   it("should reject foreign references nested in filter graphs", () => {
-    const foreign = FFmpeguInput.fromFile("/test/foreign.mp4")
-    const command = FFmpeguCommand.make({
-      global: options.filterComplex(
-        filters.graph(
-          filters.chain(
-            filters.hflip({}, { inputs: [filters.label(foreign.video)] })
+    const foreign = Input.fromFile("/test/foreign.mp4")
+    const command = Command.make({
+      global: Options.filterComplex(
+        Filter.graph(
+          Filter.chain(
+            Filter.hflip({}, { inputs: [Filter.label(foreign.video)] })
           )
         )
       ),
-      inputs: [FFmpeguInput.fromFile("/test/own.mp4")]
+      inputs: [Input.fromFile("/test/own.mp4")]
     })
 
     expect(compileError(command).reason._tag).toBe("ForeignReference")
   })
 
   it("should reject duplicate inputs and outputs", () => {
-    const input = FFmpeguInput.fromStream(Stream.empty)
-    const output = FFmpeguOutput.toSink(Sink.drain)
+    const input = Input.fromStream(Stream.empty)
+    const output = Output.toSink(Sink.drain)
 
     expect(
-      compileError(FFmpeguCommand.make({ inputs: [input, input] })).reason
+      compileError(Command.make({ inputs: [input, input] })).reason
     ).toMatchObject({ _tag: "DuplicateInput", index: 1, firstIndex: 0 })
     expect(
       compileError(
-        FFmpeguCommand.make({
-          inputs: [FFmpeguInput.fromFile("a.mp4"), input]
+        Command.make({
+          inputs: [Input.fromFile("a.mp4"), input]
         }).withInput(input)
       ).reason
     ).toMatchObject({ _tag: "DuplicateInput", index: 2, firstIndex: 1 })
     expect(
-      compileError(FFmpeguCommand.make({ outputs: [output, output] })).reason
+      compileError(Command.make({ outputs: [output, output] })).reason
     ).toMatchObject({ _tag: "DuplicateOutput", index: 1, firstIndex: 0 })
   })
 
   it.each([
-    [
-      "input path",
-      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("pipe:4")] })
-    ],
-    [
-      "stdin input",
-      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("-")] })
-    ],
-    [
-      "fd protocol",
-      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("fd:3")] })
-    ],
+    ["input path", Command.make({ inputs: [Input.fromFile("pipe:4")] })],
+    ["stdin input", Command.make({ inputs: [Input.fromFile("-")] })],
+    ["fd protocol", Command.make({ inputs: [Input.fromFile("fd:3")] })],
     [
       "nested protocol",
-      FFmpeguCommand.make({ inputs: [FFmpeguInput.fromFile("async:pipe:5")] })
+      Command.make({ inputs: [Input.fromFile("async:pipe:5")] })
     ],
-    [
-      "stdout output",
-      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-")] })
-    ],
-    [
-      "dev fd output",
-      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("/dev/fd/3")] })
-    ],
+    ["stdout output", Command.make({ outputs: [Output.toFile("-")] })],
+    ["dev fd output", Command.make({ outputs: [Output.toFile("/dev/fd/3")] })],
     [
       "proc fd output",
-      FFmpeguCommand.make({
-        outputs: [FFmpeguOutput.toFile("/proc/self/fd/4")]
+      Command.make({
+        outputs: [Output.toFile("/proc/self/fd/4")]
       })
     ],
     [
       "option value",
-      FFmpeguCommand.make({
-        global: options.custom(["-attach", "pipe:3"])
+      Command.make({
+        global: Options.make(["-attach", "pipe:3"])
       })
     ],
-    [
-      "raw input option",
-      FFmpeguCommand.make({ global: options.custom("-f", "pipe:0") })
-    ]
+    ["raw input option", Command.make({ global: Options.make("-f", "pipe:0") })]
   ])("should reject runner-owned descriptors (%s)", (_, command) => {
     expect(compileError(command).reason._tag).toBe("ReservedPath")
   })
 
   it("should report where a runner-owned descriptor is used", () => {
-    const input = FFmpeguInput.fromFile("in.mp4")
-    const output = FFmpeguOutput.toFile("out.mp4")
+    const input = Input.fromFile("in.mp4")
+    const output = Output.toFile("out.mp4")
 
     expect(
       compileError(
-        FFmpeguCommand.make({
-          inputs: [input, FFmpeguInput.fromFile("fd:3")]
+        Command.make({
+          inputs: [input, Input.fromFile("fd:3")]
         })
       ).reason
     ).toMatchObject({
@@ -355,11 +333,11 @@ describe("Command", () => {
     })
     expect(
       compileError(
-        FFmpeguCommand.make({
+        Command.make({
           inputs: [input],
           outputs: [
             output,
-            FFmpeguOutput.toFile("b.mp4", options.custom(["-attach", "pipe:3"]))
+            Output.toFile("b.mp4", Options.make(["-attach", "pipe:3"]))
           ]
         })
       ).reason
@@ -369,9 +347,8 @@ describe("Command", () => {
       location: { _tag: "Output", index: 1 }
     })
     expect(
-      compileError(
-        FFmpeguCommand.make({ global: options.custom("-f", "pipe:0") })
-      ).reason
+      compileError(Command.make({ global: Options.make("-f", "pipe:0") }))
+        .reason
     ).toMatchObject({
       _tag: "ReservedPath",
       path: "pipe:0",
@@ -382,52 +359,49 @@ describe("Command", () => {
   it.each([
     [
       "-progress to a file",
-      options.custom(["-progress", "/tmp/p.txt"]),
+      Options.make(["-progress", "/tmp/p.txt"]),
       "onProgress"
     ],
     [
       "-progress with a specifier",
-      options.custom(["-progress:v", "/tmp/p.txt"]),
+      Options.make(["-progress:v", "/tmp/p.txt"]),
       "onProgress"
     ],
-    ["-stdin", options.custom("-stdin"), "stdin"],
+    ["-stdin", Options.make("-stdin"), "stdin"],
     [
       "raw -i",
-      options.custom(["-f", "lavfi"], ["-i", "testsrc=size=32x32"]),
+      Options.make(["-f", "lavfi"], ["-i", "testsrc=size=32x32"]),
       "Input.fromFile"
     ],
     [
       "raw -i with a specifier",
-      options.custom(["-i:v", "in.mp4"]),
+      Options.make(["-i:v", "in.mp4"]),
       "Input.fromFile"
     ]
   ])("should reject runner-owned options (%s)", (_, global, hint) => {
-    const error = compileError(FFmpeguCommand.make({ global }))
+    const error = compileError(Command.make({ global }))
     expect(error.reason._tag).toBe("ReservedOption")
     expect(error.message).toContain(hint)
   })
 
   it("should reject a raw -i that would shift declared input indices", () => {
-    const declared = FFmpeguInput.fromFile("declared.mp4")
-    const command = FFmpeguCommand.make({
+    const declared = Input.fromFile("declared.mp4")
+    const command = Command.make({
       inputs: [declared],
-      outputs: [FFmpeguOutput.toFile("out.mp4", options.map(declared.video))]
+      outputs: [Output.toFile("out.mp4", Options.map(declared.video))]
     })
 
     for (const at of ["global", "input", "output"] as const) {
-      const injected = options.custom(["-f", "lavfi"], ["-i", "testsrc"])
+      const injected = Options.make(["-f", "lavfi"], ["-i", "testsrc"])
       const variant =
         at === "global"
           ? command.withGlobal(injected)
           : at === "input"
-            ? FFmpeguCommand.make({
-                inputs: [
-                  FFmpeguInput.fromFile("declared.mp4", injected),
-                  declared
-                ],
+            ? Command.make({
+                inputs: [Input.fromFile("declared.mp4", injected), declared],
                 outputs: command.outputs
               })
-            : command.withOutput(FFmpeguOutput.toFile("other.mp4", injected))
+            : command.withOutput(Output.toFile("other.mp4", injected))
       expect(compileError(variant).reason).toMatchObject({
         _tag: "ReservedOption",
         option: "-i",
@@ -442,15 +416,15 @@ describe("Command", () => {
   })
 
   it("should allow option values and benign flags that look similar", () => {
-    const command = FFmpeguCommand.make({
-      global: options.custom("-nostdin", "-nostats", "-hide_banner"),
-      inputs: [FFmpeguInput.fromFile("in.mp4")],
+    const command = Command.make({
+      global: Options.make("-nostdin", "-nostats", "-hide_banner"),
+      inputs: [Input.fromFile("in.mp4")],
       outputs: [
-        FFmpeguOutput.toFile(
+        Output.toFile(
           "out.mp4",
-          options.merge(
-            options.metadata("title", "-i"),
-            options.custom(["-map", "0:v:0"])
+          Options.make(
+            Options.metadata("title", "-i"),
+            Options.make(["-map", "0:v:0"])
           )
         )
       ]
@@ -472,7 +446,7 @@ describe("Command", () => {
 
   it("should reject output paths that would parse as options", () => {
     const error = compileError(
-      FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-out.mp4")] })
+      Command.make({ outputs: [Output.toFile("-out.mp4")] })
     )
 
     expect(error.reason._tag).toBe("InvalidArgument")
@@ -481,13 +455,13 @@ describe("Command", () => {
 
   it("should report failures of custom arguments as CommandError", () => {
     const boom = new Error("boom")
-    class Broken extends FFmpeguArgument {
+    class Broken extends Argument {
       getArgs(): string[] {
         throw boom
       }
     }
     const error = compileError(
-      FFmpeguCommand.make({ global: options.custom(new Broken()) })
+      Command.make({ global: Options.make({ map: new Broken() }) })
     )
 
     expect(error.reason._tag).toBe("InvalidArgument")
@@ -496,52 +470,52 @@ describe("Command", () => {
   })
 
   it("should fail compilation, not construction, for invalid time values", () => {
-    const input = FFmpeguInput.fromFile("/test/in.wav")
+    const input = Input.fromFile("/test/in.wav")
     const cases = [
-      FFmpeguCommand.make({
-        global: options.startTime(Duration.infinity),
-        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+      Command.make({
+        global: Options.startTime(Duration.infinity),
+        outputs: [Output.toFile("/test/out.wav")]
       }),
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
         outputs: [
-          FFmpeguOutput.toFile(
+          Output.toFile(
             "/test/out.wav",
-            options.duration(Temporal.Duration.from({ weeks: 1 }))
+            Options.duration(Temporal.Duration.from({ weeks: 1 }))
           )
         ]
       }),
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
         outputs: [
-          FFmpeguOutput.toFile(
+          Output.toFile(
             "/test/out.wav",
-            options.audioFilter(
-              filters.chain(
-                filters.atrim({ end: Temporal.Duration.from({ months: 1 }) })
+            Options.audioFilter(
+              Filter.chain(
+                Filter.atrim({ end: Temporal.Duration.from({ months: 1 }) })
               )
             )
           )
         ]
       }),
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
         outputs: [
-          FFmpeguOutput.toFile(
+          Output.toFile(
             "/test/out.wav",
-            options.audioFilter(
-              filters.chain(
-                filters.afade({ duration: Duration.negativeInfinity })
+            Options.audioFilter(
+              Filter.chain(
+                Filter.afade({ duration: Duration.negativeInfinity })
               )
             )
           )
         ]
       }),
-      FFmpeguCommand.make({
-        global: options.startTime(
+      Command.make({
+        global: Options.startTime(
           vm.runInNewContext("Temporal.Duration.from({ years: 1 })")
         ),
-        outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+        outputs: [Output.toFile("/test/out.wav")]
       })
     ]
 
@@ -556,14 +530,14 @@ describe("Command", () => {
     // FFmpeg parses the magnitude into an int64 before negating, so -2^63 µs
     // is rejected along with 2^63 µs.
     const max = 9_223_372_036_854_775_807n
-    const refs = new FFmpeguReferences()
+    const refs = new StandaloneReferences()
 
     for (const [value, seconds] of [
       [Duration.micros(max), "9223372036854.775807"],
       [Duration.micros(-max), "-9223372036854.775807"]
     ] as const) {
-      expect(options.startTime(value).getArgs(refs)).toEqual(["-ss", seconds])
-      expect(filters.atrim({ start: value }).getArgs(refs)).toEqual([
+      expect(Options.startTime(value).getArgs(refs)).toEqual(["-ss", seconds])
+      expect(Filter.atrim({ start: value }).getArgs(refs)).toEqual([
         `atrim=start=${seconds}`
       ])
     }
@@ -575,18 +549,16 @@ describe("Command", () => {
       Temporal.Duration.from({ seconds: -9_223_372_036_855 })
     ]) {
       for (const command of [
-        FFmpeguCommand.make({
-          global: options.startTime(value),
-          outputs: [FFmpeguOutput.toFile("/test/out.wav")]
+        Command.make({
+          global: Options.startTime(value),
+          outputs: [Output.toFile("/test/out.wav")]
         }),
-        FFmpeguCommand.make({
-          inputs: [FFmpeguInput.fromFile("/test/in.wav")],
+        Command.make({
+          inputs: [Input.fromFile("/test/in.wav")],
           outputs: [
-            FFmpeguOutput.toFile(
+            Output.toFile(
               "/test/out.wav",
-              options.audioFilter(
-                filters.chain(filters.atrim({ start: value }))
-              )
+              Options.audioFilter(Filter.chain(Filter.atrim({ start: value })))
             )
           ]
         })
@@ -605,13 +577,13 @@ describe("Command", () => {
         throw new Error("unreadable")
       }
     })
-    class Broken extends FFmpeguArgument {
+    class Broken extends Argument {
       getArgs(): string[] {
         throw boom
       }
     }
     const error = compileError(
-      FFmpeguCommand.make({ global: options.custom(new Broken()) })
+      Command.make({ global: Options.make({ map: new Broken() }) })
     )
 
     expect(error.reason._tag).toBe("InvalidArgument")
@@ -619,10 +591,10 @@ describe("Command", () => {
   })
 
   it("should report a tampered track index error as CommandError", () => {
-    const input = FFmpeguInput.fromFile("in.mp4")
+    const input = Input.fromFile("in.mp4")
     let tampered: unknown
-    class Wrapper extends FFmpeguArgument {
-      getArgs(refs: FFmpeguReferencesInterface): string[] {
+    class Wrapper extends Argument {
+      getArgs(refs: References): string[] {
         try {
           return input.video.track(-1).getArgs(refs)
         } catch (error) {
@@ -637,10 +609,10 @@ describe("Command", () => {
       }
     }
     const error = compileError(
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
         outputs: [
-          FFmpeguOutput.toFile("out.mp4", options.custom(new Wrapper()))
+          Output.toFile("out.mp4", Options.make({ map: new Wrapper() }))
         ]
       })
     )
@@ -653,12 +625,10 @@ describe("Command", () => {
   })
 
   it("should not copy an annotated track index error message into CommandError", () => {
-    const input = FFmpeguInput.fromFile(
-      "https://user:secret@example.com/input.mp4"
-    )
+    const input = Input.fromFile("https://user:secret@example.com/input.mp4")
     let annotated: unknown
-    class Contextual extends FFmpeguArgument {
-      getArgs(refs: FFmpeguReferencesInterface): string[] {
+    class Contextual extends Argument {
+      getArgs(refs: References): string[] {
         try {
           return input.video.track(-1).getArgs(refs)
         } catch (error) {
@@ -669,9 +639,9 @@ describe("Command", () => {
       }
     }
     const error = compileError(
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
-        global: options.custom(new Contextual())
+        global: Options.make({ map: new Contextual() })
       })
     )
 
@@ -682,14 +652,14 @@ describe("Command", () => {
   })
 
   it("should not render a non-numeric track index into CommandError", () => {
-    const input = FFmpeguInput.fromFile("in.mp4")
+    const input = Input.fromFile("in.mp4")
     const error = compileError(
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
         outputs: [
-          FFmpeguOutput.toFile(
+          Output.toFile(
             "out.mp4",
-            options.map(input.video.track("secret" as unknown as number))
+            Options.map(input.video.track("secret" as unknown as number))
           )
         ]
       })
@@ -701,11 +671,9 @@ describe("Command", () => {
   })
 
   it("should not copy caller text passed to a recovered track index error constructor", () => {
-    const input = FFmpeguInput.fromFile(
-      "https://user:secret@example.com/input.mp4"
-    )
-    class Rewrapping extends FFmpeguArgument {
-      getArgs(refs: FFmpeguReferencesInterface): string[] {
+    const input = Input.fromFile("https://user:secret@example.com/input.mp4")
+    class Rewrapping extends Argument {
+      getArgs(refs: References): string[] {
         try {
           return input.video.track(-1).getArgs(refs)
         } catch (error) {
@@ -719,9 +687,9 @@ describe("Command", () => {
       }
     }
     const error = compileError(
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
-        global: options.custom(new Rewrapping())
+        global: Options.make({ map: new Rewrapping() })
       })
     )
 
@@ -730,14 +698,14 @@ describe("Command", () => {
   })
 
   it("should validate and render the same track index when it is read repeatedly", () => {
-    const input = FFmpeguInput.fromFile("in.mp4")
+    const input = Input.fromFile("in.mp4")
     const reads = [1.5, 1.5, "https://user:secret@example.com/input.mp4"]
     const track = input.video.track(0)
     Object.defineProperty(track, "index", { get: () => reads.shift() })
     const error = compileError(
-      FFmpeguCommand.make({
+      Command.make({
         inputs: [input],
-        outputs: [FFmpeguOutput.toFile("out.mp4", options.map(track))]
+        outputs: [Output.toFile("out.mp4", Options.map(track))]
       })
     )
 
@@ -747,17 +715,15 @@ describe("Command", () => {
   })
 
   it("should render the track index it validated when it is read repeatedly", () => {
-    const input = FFmpeguInput.fromFile("in.mp4")
+    const input = Input.fromFile("in.mp4")
     const reads = [0, -1]
     const track = input.video.track(0)
     Object.defineProperty(track, "index", { get: () => reads.shift() })
     const args = Result.getOrThrow(
-      FFmpeguCommand.toArgs(
-        FFmpeguCommand.make({
-          inputs: [input],
-          outputs: [FFmpeguOutput.toFile("out.mp4", options.map(track))]
-        })
-      )
+      Command.make({
+        inputs: [input],
+        outputs: [Output.toFile("out.mp4", Options.map(track))]
+      }).toArgs()
     )
 
     expect(args).toContain("0:v:0")
@@ -767,15 +733,12 @@ describe("Command", () => {
   it.each([-1, 1.5, 2147483648, 4294967296, 1e21])(
     "should reject an invalid track index (%s) as CommandError",
     (index) => {
-      const input = FFmpeguInput.fromFile("in.mp4")
+      const input = Input.fromFile("in.mp4")
       const error = compileError(
-        FFmpeguCommand.make({
+        Command.make({
           inputs: [input],
           outputs: [
-            FFmpeguOutput.toFile(
-              "out.mp4",
-              options.map(input.video.track(index))
-            )
+            Output.toFile("out.mp4", Options.map(input.video.track(index)))
           ]
         })
       )
@@ -787,22 +750,97 @@ describe("Command", () => {
   )
 
   it("should expose compiled args through toArgs", () => {
-    const command = FFmpeguCommand.make({
-      inputs: [FFmpeguInput.fromFile("/test/in.mp4")],
-      outputs: [FFmpeguOutput.toSink(Sink.drain)]
+    const command = Command.make({
+      inputs: [Input.fromFile("/test/in.mp4")],
+      outputs: [Output.toSink(Sink.drain)]
     })
 
-    expect(Result.getOrThrow(FFmpeguCommand.toArgs(command))).toEqual([
+    expect(Result.getOrThrow(command.toArgs())).toEqual([
       "-i",
       "/test/in.mp4",
       "pipe:4"
     ])
     expect(
-      Result.isFailure(
-        FFmpeguCommand.toArgs(
-          FFmpeguCommand.make({ outputs: [FFmpeguOutput.toFile("-")] })
-        )
-      )
+      Result.isFailure(Command.make({ outputs: [Output.toFile("-")] }).toArgs())
     ).toBe(true)
+  })
+
+  it("should accept option forms directly for global, input and output options", () => {
+    const input = Input.fromFile("/test/in.mp4", { ss: 5 }, ["t", 10])
+    const command = Command.make({
+      global: { y: true },
+      inputs: [input],
+      outputs: [
+        Output.toFile(
+          "/test/out.mp4",
+          { map: input.video },
+          Options.crf(23),
+          "-an"
+        )
+      ]
+    }).withGlobal(["loglevel", "error"])
+
+    expect(Result.getOrThrow(command.toArgs())).toEqual([
+      "-y",
+      "-loglevel",
+      "error",
+      "-ss",
+      "5",
+      "-t",
+      "10",
+      "-i",
+      "/test/in.mp4",
+      "-map",
+      "0:v",
+      "-crf",
+      "23",
+      "-an",
+      "/test/out.mp4"
+    ])
+  })
+
+  it("should accept option forms directly for piped inputs and outputs", () => {
+    const command = Command.make({
+      inputs: [Input.fromStream(Stream.empty, { f: "s16le" })],
+      outputs: [
+        Output.toSink(Sink.drain, { f: "wav" }),
+        Output.toStream(["f", "ogg"])
+      ]
+    })
+
+    expect(Result.getOrThrow(command.toArgs())).toEqual([
+      "-f",
+      "s16le",
+      "-i",
+      "pipe:4",
+      "-f",
+      "wav",
+      "pipe:5",
+      "-f",
+      "ogg",
+      "pipe:6"
+    ])
+  })
+
+  it("should skip an absent bundle among input and output options", () => {
+    const seek: Options.Options | undefined = undefined
+    const input = Input.fromFile("/test/in.mp4", seek)
+    const command = Command.make({
+      inputs: [input],
+      outputs: [Output.toFile("/test/out.mp4", seek, Options.crf(23))]
+    })
+
+    expect(input.options).toBeUndefined()
+    expect(Result.getOrThrow(command.toArgs())).toEqual([
+      "-i",
+      "/test/in.mp4",
+      "-crf",
+      "23",
+      "/test/out.mp4"
+    ])
+  })
+
+  it("should compile a command made without arguments to no arguments", () => {
+    expect(Result.getOrThrow(Command.make().toArgs())).toEqual([])
   })
 })

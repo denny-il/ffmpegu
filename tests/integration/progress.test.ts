@@ -2,11 +2,11 @@ import { expect, it } from "@effect/vitest"
 import { Deferred, Duration, Effect, Fiber, Sink } from "effect"
 import {
   Command,
+  FFmpeg,
   Input,
   Options,
   Output,
-  type Progress,
-  run
+  type Progress
 } from "../../src/index.ts"
 import { MediaLive } from "../helpers/platform.ts"
 
@@ -31,17 +31,17 @@ it.live(
       const command = Command.make({
         // Enough progress traffic to fill a pipe if callback execution also
         // blocked the progress reader. Media is counted, never accumulated.
-        global: Options.create({ stats_period: 0.000001 }),
+        global: Options.make({ stats_period: 0.000001 }),
         inputs: [
           Input.fromFile(
             "sine=sample_rate=48000:duration=600",
-            Options.create({ f: "lavfi" })
+            Options.make({ f: "lavfi" })
           )
         ],
-        outputs: [Output.toSink(sink, Options.create({ f: "s16le" }))]
+        outputs: [Output.toSink(sink, Options.make({ f: "s16le" }))]
       })
       const fiber = yield* Effect.forkChild(
-        run(command, {
+        FFmpeg.run(command, {
           onProgress: (progress) =>
             Effect.gen(function* () {
               activeCallbacks++
@@ -88,12 +88,12 @@ it.live("decodes real progress fields into numbers and a Duration", () =>
   Effect.gen(function* () {
     let bytes = 0
     let final: Progress | undefined
-    yield* run(
+    yield* FFmpeg.run(
       Command.make({
         inputs: [
           Input.fromFile(
             "sine=sample_rate=8000:duration=2",
-            Options.create({ f: "lavfi" })
+            Options.make({ f: "lavfi" })
           )
         ],
         outputs: [
@@ -103,7 +103,7 @@ it.live("decodes real progress fields into numbers and a Duration", () =>
                 bytes += chunk.length
               })
             ),
-            Options.create({ f: "s16le" })
+            Options.make({ f: "s16le" })
           )
         ]
       }),

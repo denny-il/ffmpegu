@@ -1,31 +1,31 @@
-import type { FFmpeguTimeValue } from "../common.ts"
+import type { TimeValue } from "../common.ts"
 import { muxerOptions, type OpenMuxerHelper } from "./muxer.ts"
 
-export type FFmpeguDashSegmentType = "auto" | "mp4" | "webm" | ({} & string)
+export type DashSegmentType = "auto" | "mp4" | "webm" | ({} & string)
 
-export type FFmpeguDashFragType =
+export type DashFragType =
   | "none"
   | "every_frame"
   | "duration"
   | "pframes"
   | ({} & string)
 
-export type FFmpeguDashMpdProfile = "dash" | "dvb_dash" | ({} & string)
+export type DashMpdProfile = "dash" | "dvb_dash" | ({} & string)
 
 // write_prft is a boolean option; "auto" (the default) follows `ldash`.
-export type FFmpeguDashWritePrft = "auto" | ({} & string)
+export type DashWritePrft = "auto" | ({} & string)
 
 /**
  * Typed hints for FFmpeg's DASH muxer options, verified against FFmpeg 6.1–9.0.
  * Other keys pass through unchanged.
  */
-export type FFmpeguDashOptions = {
+export type DashOptions = {
   adaptation_sets?: string
-  dash_segment_type?: FFmpeguDashSegmentType
+  dash_segment_type?: DashSegmentType
   extra_window_size?: number
   format_options?: string
-  frag_duration?: FFmpeguTimeValue
-  frag_type?: FFmpeguDashFragType
+  frag_duration?: TimeValue
+  frag_type?: DashFragType
   global_sidx?: boolean | number
   hls_master_name?: string
   hls_playlist?: boolean | number
@@ -42,20 +42,20 @@ export type FFmpeguDashOptions = {
   media_seg_name?: string
   method?: string
   min_playback_rate?: number | string
-  mpd_profile?: FFmpeguDashMpdProfile
+  mpd_profile?: DashMpdProfile
   remove_at_exit?: boolean | number
-  seg_duration?: FFmpeguTimeValue
+  seg_duration?: TimeValue
   single_file?: boolean | number
   single_file_name?: string
   streaming?: boolean | number
-  target_latency?: FFmpeguTimeValue
-  timeout?: FFmpeguTimeValue
+  target_latency?: TimeValue
+  timeout?: TimeValue
   update_period?: number
   use_template?: boolean | number
   use_timeline?: boolean | number
   utc_timing_url?: string
   window_size?: number
-  write_prft?: FFmpeguDashWritePrft | boolean | number
+  write_prft?: DashWritePrft | boolean | number
 }
 
 // AV_OPT_TYPE_DURATION options, where time objects are converted to seconds.
@@ -66,6 +66,6 @@ const durationKeys = [
   "timeout"
 ]
 
-export const dash: OpenMuxerHelper<FFmpeguDashOptions> = (
+export const dash: OpenMuxerHelper<DashOptions> = (
   options: Readonly<Record<string, unknown>> = {}
 ) => muxerOptions("dash", options, durationKeys)

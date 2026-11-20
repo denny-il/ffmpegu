@@ -9,7 +9,7 @@
 | `crf(n)` | `-crf n` |
 | `preset(p)` | `-preset p` |
 | `tune(t)` | `-tune t` |
-| `profileVideo(p)` | `-profile:v p` |
+| `videoProfile(p)` | `-profile:v p` |
 | `level(l)` | `-level l` |
 | `videoBitrate(v, unit?)` | `-b:v v<unit>` |
 | `minRate(v, unit?)` / `maxRate(v, unit?)` | `-minrate` / `-maxrate` |
@@ -22,7 +22,7 @@
 | `pixelFormat(f)` | `-pix_fmt f` |
 | `size("WxH")` | `-s WxH` |
 | `aspect("16:9")` | `-aspect 16:9` |
-| `videoFilter(chain)` | `-vf chain` |
+| `videoFilter(first, ...moreFilters)` | `-vf chain` |
 | `noVideo()` | `-vn` |
 
 Use the unit suffixes `k`, `M`, `G`, or `T`; FFmpeg reads a lowercase `m` as milli and rejects `g` and `t`. `videoBitrate(2500, "k")` renders `-b:v 2500k`, and a string such as `"2.5M"` passes through. For options without a helper, use a record, such as `{ "frames:v": 1 }`, `{ "x264-params": "keyint=60" }`, or `{ "c:v": "h264_nvenc" }`.
@@ -35,7 +35,7 @@ Common choices:
 
 ## Filters
 
-Each typed helper has the shape `filters.<name>(options?, { inputs?, outputs? })`, and extra keys pass through.
+Each typed helper has the shape `Filter.<name>(options?, { inputs?, outputs? })`, and extra keys pass through.
 
 | Helper | Typed keys | Example |
 | --- | --- | --- |
@@ -52,30 +52,34 @@ Each typed helper has the shape `filters.<name>(options?, { inputs?, outputs? })
 | `select` | `expr`, `outputs` | `select({ expr: "eq(pict_type,I)" })` |
 | `setpts` | `expr` | `setpts({ expr: "0.5*PTS" })` for double speed |
 
-Use `filters.custom(name, options, inputs?, outputs?)` for other filters, such as `split`, `concat`, `thumbnail`, `tile`, `zoompan`, or `hstack`.
+Use `Filter.make(name, options?, { inputs?, outputs? })` for other filters, such as `split`, `concat`, `thumbnail`, `tile`, `zoompan`, or `hstack`.
 
 ## Idioms
 
 ```ts
 // Thumbnail: fast input seek, one frame.
 Command.make({
-  global: options.overwrite(),
-  inputs: [Input.fromFile("in.mp4", options.startTime(1))],
+  global: Options.overwrite(),
+  inputs: [Input.fromFile("in.mp4", Options.startTime(1))],
   outputs: [
     Output.toFile(
       "thumb.jpg",
-      Options.create(options.videoFilter(filters.chain(filters.scale({ w: 320, h: -2 }))), { "frames:v": 1 })
+      Options.videoFilter(Filter.scale({ w: 320, h: -2 })),
+      { "frames:v": 1 }
     )
   ]
 })
 // -y -ss 1 -i in.mp4 -vf scale=w=320:h=-2 -frames:v 1 thumb.jpg
 
 // Animated GIF with a generated palette.
-const [a, b, p] = ["a", "b", "p"].map((name) => filters.label(name))
-const gif = filters.graph(
-  filters.chain(filters.fps({ fps: 10 }), filters.scale({ w: 480, h: -1 }), filters.custom("split", {}, [], [a, b])),
-  filters.chain(filters.custom("palettegen", {}, [a], [p])),
-  filters.chain(filters.custom("paletteuse", {}, [b, p]))
+const gif = Filter.graph(
+  Filter.chain(
+    Filter.fps({ fps: 10 }),
+    Filter.scale({ w: 480, h: -1 }),
+    Filter.make("split", {}, { outputs: ["a", "b"] })
+  ),
+  Filter.make("palettegen", {}, { inputs: ["a"], outputs: ["p"] }),
+  Filter.make("paletteuse", {}, { inputs: ["b", "p"] })
 )
-// options.filterComplex(gif) → fps=fps=10,scale=w=480:h=-1,split[a][b];[a]palettegen[p];[b][p]paletteuse
+// Options.filterComplex(gif) → fps=fps=10,scale=w=480:h=-1,split[a][b];[a]palettegen[p];[b][p]paletteuse
 ```

@@ -1,5 +1,10 @@
-import type { FFmpeguReferencesInterface } from "../types/index.ts"
+import type { References } from "../types/index.ts"
 
-export abstract class FFmpeguArgument {
-  abstract getArgs(refs: FFmpeguReferencesInterface): string[]
+/**
+ * A value that renders itself into arguments when a command compiles. Options
+ * bundles, filters, stream references and time adapters are arguments; extend
+ * this class to build your own.
+ */
+export abstract class Argument {
+  abstract getArgs(refs: References): string[]
 }

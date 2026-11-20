@@ -14,13 +14,9 @@ import {
   ReservedOption,
   ReservedPath
 } from "../errors.ts"
-import { FFmpeguOptions } from "../options/core.ts"
-import type { FFmpeguInput } from "./input.ts"
-import {
-  type FFmpeguOutput,
-  STREAM_DESTINATION,
-  StreamOutputs
-} from "./output.ts"
+import { type Arg, fromArgs, Options } from "../options/core.ts"
+import type { Input } from "./input.ts"
+import { type Output, STREAM_DESTINATION, StreamOutputs } from "./output.ts"
 import {
   CommandReferences,
   ForeignReference,
@@ -57,15 +53,15 @@ export interface CompiledCommand<E, R> {
   readonly streamOutputFds: ReadonlyArray<number>
 }
 
-type ValidInput = FFmpeguInput<unknown, unknown>
-type ValidOutput = FFmpeguOutput<unknown, unknown, any>
+type ValidInput = Input<unknown, unknown>
+type ValidOutput = Output<unknown, unknown, any>
 
-// Constraints of `make` that do not mention `E`/`R`: `new FFmpeguInput(path)`
+// Constraints of `make` that do not mention `E`/`R`: `new Input(path)`
 // has no argument to infer them from and would otherwise adopt them from its
-// contextual type, i.e. `any` from `FFmpeguInput<any, any>`. `ValidElements`
+// contextual type, i.e. `any` from `Input<any, any>`. `ValidElements`
 // checks sources and destinations once the arrays are inferred.
-type AnyInput = Omit<ValidInput, "source"> & { readonly source: unknown }
-type AnyOutput = Omit<ValidOutput, "destination"> & {
+type InputLike = Omit<ValidInput, "source"> & { readonly source: unknown }
+type OutputLike = Omit<ValidOutput, "destination"> & {
   readonly destination: unknown
 }
 type ValidElements<I, O> = ([I] extends [ReadonlyArray<ValidInput>]
@@ -75,12 +71,12 @@ type ValidElements<I, O> = ([I] extends [ReadonlyArray<ValidInput>]
     ? unknown
     : { readonly outputs?: ReadonlyArray<ValidOutput> | undefined })
 
-type InputError<I> = I extends FFmpeguInput<infer E, infer _R> ? E : never
-type InputContext<I> = I extends FFmpeguInput<infer _E, infer R> ? R : never
-type OutputError<O> = O extends FFmpeguOutput<infer E, infer _R> ? E : never
-type OutputContext<O> = O extends FFmpeguOutput<infer _E, infer R> ? R : never
+type InputError<I> = I extends Input<infer E, infer _R> ? E : never
+type InputContext<I> = I extends Input<infer _E, infer R> ? R : never
+type OutputError<O> = O extends Output<infer E, infer _R> ? E : never
+type OutputContext<O> = O extends Output<infer _E, infer R> ? R : never
 type OutputStreams<O> =
-  O extends FFmpeguOutput<infer _E, infer _R, infer S> ? S : never
+  O extends Output<infer _E, infer _R, infer S> ? S : never
 
 /**
  * Number of `Output.toStream` outputs of a command: `0`, `1`, or `2` for two
@@ -108,11 +104,11 @@ type AddStreamOutputs<S, O> = 0 extends 1 & (S | O)
  * depth limit.
  */
 type CountStreamOutputs<
-  O extends ReadonlyArray<AnyOutput>,
+  O extends ReadonlyArray<OutputLike>,
   S extends StreamOutputCount = 0
 > = O extends readonly [
   infer Head,
-  ...infer Tail extends ReadonlyArray<AnyOutput>
+  ...infer Tail extends ReadonlyArray<OutputLike>
 ]
   ? CountStreamOutputs<Tail, AddStreamOutputs<S, OutputStreams<Head>>>
   : O extends readonly []
@@ -123,10 +119,11 @@ type CountStreamOutputs<
         ? S
         : any
 
-export interface FFmpeguCommandOptions<E, R> {
-  readonly global?: FFmpeguOptions | undefined
-  readonly inputs?: ReadonlyArray<FFmpeguInput<E, R>> | undefined
-  readonly outputs?: ReadonlyArray<FFmpeguOutput<E, R>> | undefined
+export interface CommandOptions<E, R> {
+  /** Global options: a bundle or any single option form. */
+  readonly global?: Arg | undefined
+  readonly inputs?: ReadonlyArray<Input<E, R>> | undefined
+  readonly outputs?: ReadonlyArray<Output<E, R>> | undefined
 }
 
 /**
@@ -136,27 +133,23 @@ export interface FFmpeguCommandOptions<E, R> {
  * `E` and `R` are the unions of the error and requirement types of all stream
  * inputs and sink outputs. `S` counts `Output.toStream` outputs so that `run`
  * accepts only `0` and `stream` only `1`. It defaults to `any` (unknown), which
- * leaves the check to runtime, e.g. for commands typed as `FFmpeguCommand<E, R>`.
+ * leaves the check to runtime, e.g. for commands typed as `Command<E, R>`.
  *
  * Pipeable: `withGlobal`, `withInput` and `withOutput` are also available as
  * data-first or data-last statics, e.g.
  * `command.pipe(Command.withOutput(output))`.
  */
-export class FFmpeguCommand<
-  E = never,
-  R = never,
-  S extends StreamOutputCount = any
->
+export class Command<E = never, R = never, S extends StreamOutputCount = any>
   extends Pipeable.Class
 {
   declare readonly [StreamOutputs]: S
-  readonly global: FFmpeguOptions | undefined
-  readonly inputs: ReadonlyArray<FFmpeguInput<E, R>>
-  readonly outputs: ReadonlyArray<FFmpeguOutput<E, R>>
+  readonly global: Options | undefined
+  readonly inputs: ReadonlyArray<Input<E, R>>
+  readonly outputs: ReadonlyArray<Output<E, R>>
 
-  constructor(options: FFmpeguCommandOptions<E, R> = {}) {
+  constructor(options: CommandOptions<E, R> = {}) {
     super()
-    this.global = options.global
+    this.global = fromArgs([options.global])
     this.inputs = [...(options.inputs ?? [])]
     this.outputs = [...(options.outputs ?? [])]
   }
@@ -165,102 +158,93 @@ export class FFmpeguCommand<
    * Create a command, inferring `E`/`R` as the union over all inputs and
    * outputs, including heterogeneous arrays.
    */
+  // A separate overload rather than an optional parameter: a configuration
+  // that may be `undefined` would otherwise keep its stream-output count.
+  static make(): Command<never, never, 0>
   static make<
-    const I extends ReadonlyArray<AnyInput> = readonly [],
-    const O extends ReadonlyArray<AnyOutput> = readonly []
+    const I extends ReadonlyArray<InputLike> = readonly [],
+    const O extends ReadonlyArray<OutputLike> = readonly []
   >(
     options: {
-      readonly global?: FFmpeguOptions | undefined
+      readonly global?: Arg | undefined
       readonly inputs?: I | undefined
       readonly outputs?: O | undefined
     } & ValidElements<I, O>
-  ): FFmpeguCommand<
+  ): Command<
     InputError<I[number]> | OutputError<O[number]>,
     InputContext<I[number]> | OutputContext<O[number]>,
     CountStreamOutputs<O>
-  > {
-    return new FFmpeguCommand(options as FFmpeguCommandOptions<any, any>)
+  >
+  static make(options?: CommandOptions<any, any>): Command<any, any> {
+    return new Command(options)
   }
 
-  /** Alias of {@link FFmpeguCommand.make}. */
-  static create = FFmpeguCommand.make
-
-  /** Compiled argv of a command without runtime-owned flags. */
-  static toArgs(
-    command: FFmpeguCommand<any, any>
-  ): Result.Result<ReadonlyArray<string>, CommandError> {
-    return Result.map(command.compile(), (compiled) => compiled.args)
-  }
-
-  /** Data-first or data-last {@link FFmpeguCommand.prototype.withGlobal}. */
+  /** Data-first or data-last {@link Command.prototype.withGlobal}. */
   static withGlobal: {
     (
-      options: FFmpeguOptions
+      options: Arg
     ): <E, R, S extends StreamOutputCount = any>(
-      self: FFmpeguCommand<E, R, S>
-    ) => FFmpeguCommand<E, R, S>
+      self: Command<E, R, S>
+    ) => Command<E, R, S>
     <E, R, S extends StreamOutputCount = any>(
-      self: FFmpeguCommand<E, R, S>,
-      options: FFmpeguOptions
-    ): FFmpeguCommand<E, R, S>
+      self: Command<E, R, S>,
+      options: Arg
+    ): Command<E, R, S>
   } = dual(
     2,
-    <E, R, S extends StreamOutputCount>(
-      self: FFmpeguCommand<E, R, S>,
-      options: FFmpeguOptions
-    ) => self.withGlobal(options)
+    <E, R, S extends StreamOutputCount>(self: Command<E, R, S>, options: Arg) =>
+      self.withGlobal(options)
   )
 
-  /** Data-first or data-last {@link FFmpeguCommand.prototype.withInput}. */
+  /** Data-first or data-last {@link Command.prototype.withInput}. */
   static withInput: {
     <E2, R2>(
-      input: FFmpeguInput<E2, R2>
+      input: Input<E2, R2>
     ): <E, R, S extends StreamOutputCount = any>(
-      self: FFmpeguCommand<E, R, S>
-    ) => FFmpeguCommand<E | E2, R | R2, S>
+      self: Command<E, R, S>
+    ) => Command<E | E2, R | R2, S>
     <E, R, E2, R2, S extends StreamOutputCount = any>(
-      self: FFmpeguCommand<E, R, S>,
-      input: FFmpeguInput<E2, R2>
-    ): FFmpeguCommand<E | E2, R | R2, S>
+      self: Command<E, R, S>,
+      input: Input<E2, R2>
+    ): Command<E | E2, R | R2, S>
   } = dual(
     2,
     <E, R, E2, R2, S extends StreamOutputCount>(
-      self: FFmpeguCommand<E, R, S>,
-      input: FFmpeguInput<E2, R2>
+      self: Command<E, R, S>,
+      input: Input<E2, R2>
     ) => self.withInput(input)
   )
 
-  /** Data-first or data-last {@link FFmpeguCommand.prototype.withOutput}. */
+  /** Data-first or data-last {@link Command.prototype.withOutput}. */
   static withOutput: {
     <E2, R2, S2 extends 0 | 1 = any>(
-      output: FFmpeguOutput<E2, R2, S2>
+      output: Output<E2, R2, S2>
     ): <E, R, S extends StreamOutputCount = any>(
-      self: FFmpeguCommand<E, R, S>
-    ) => FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>
+      self: Command<E, R, S>
+    ) => Command<E | E2, R | R2, AddStreamOutputs<S, S2>>
     <E, R, E2, R2, S extends StreamOutputCount = any, S2 extends 0 | 1 = any>(
-      self: FFmpeguCommand<E, R, S>,
-      output: FFmpeguOutput<E2, R2, S2>
-    ): FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>
+      self: Command<E, R, S>,
+      output: Output<E2, R2, S2>
+    ): Command<E | E2, R | R2, AddStreamOutputs<S, S2>>
   } = dual(
     2,
     <E, R, E2, R2, S extends StreamOutputCount, S2 extends 0 | 1>(
-      self: FFmpeguCommand<E, R, S>,
-      output: FFmpeguOutput<E2, R2, S2>
+      self: Command<E, R, S>,
+      output: Output<E2, R2, S2>
     ) => self.withOutput(output)
   )
 
-  withGlobal(options: FFmpeguOptions): FFmpeguCommand<E, R, S> {
-    return new FFmpeguCommand<E, R, S>({
+  /** Append global options to those the command already has. */
+  withGlobal(options: Arg): Command<E, R, S> {
+    return new Command<E, R, S>({
       inputs: this.inputs,
       outputs: this.outputs,
-      global: this.global ? FFmpeguOptions.merge(this.global, options) : options
+      global: this.global ? new Options([this.global, options]) : options
     })
   }
 
-  withInput<E2, R2>(
-    input: FFmpeguInput<E2, R2>
-  ): FFmpeguCommand<E | E2, R | R2, S> {
-    return new FFmpeguCommand<E | E2, R | R2, S>({
+  withInput<E2, R2>(input: Input<E2, R2>): Command<E | E2, R | R2, S> {
+    return new Command<E | E2, R | R2, S>({
       global: this.global,
       inputs: [...this.inputs, input],
       outputs: this.outputs
@@ -268,9 +252,9 @@ export class FFmpeguCommand<
   }
 
   withOutput<E2, R2, S2 extends 0 | 1 = any>(
-    output: FFmpeguOutput<E2, R2, S2>
-  ): FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>> {
-    return new FFmpeguCommand<E | E2, R | R2, AddStreamOutputs<S, S2>>({
+    output: Output<E2, R2, S2>
+  ): Command<E | E2, R | R2, AddStreamOutputs<S, S2>> {
+    return new Command<E | E2, R | R2, AddStreamOutputs<S, S2>>({
       global: this.global,
       inputs: this.inputs,
       outputs: [...this.outputs, output]
@@ -388,6 +372,11 @@ export class FFmpeguCommand<
       streamOutputFds
     })
   }
+
+  /** Compiled argv of the command without runner-owned flags. */
+  toArgs(): Result.Result<ReadonlyArray<string>, CommandError> {
+    return Result.map(this.compile(), (compiled) => compiled.args)
+  }
 }
 
 const fail = (reason: CommandErrorReason, cause?: unknown) =>
@@ -423,7 +412,7 @@ const reservedPath = (location: CommandLocation, what: string, path: string) =>
  */
 const ENGINE_OPTIONS: ReadonlyMap<string, string> = new Map([
   ["-i", "Declare inputs with Input.fromFile or Input.fromStream."],
-  ["-progress", "Pass onProgress to run instead."],
+  ["-progress", "Pass onProgress to FFmpeg.run instead."],
   ["-stdin", "The runner never provides stdin."]
 ])
 
@@ -438,7 +427,7 @@ const optionName = (token: string) => {
 
 function pushOptions(
   args: string[],
-  options: FFmpeguOptions,
+  options: Options,
   refs: CommandReferences,
   location: CommandLocation
 ): CommandError | undefined {

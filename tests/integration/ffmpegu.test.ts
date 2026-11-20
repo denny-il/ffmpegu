@@ -16,21 +16,19 @@ import { Writable } from "node:stream"
 import {
   Command,
   FFmpeg,
+  FFprobe,
+  Filter,
   Input,
   Options,
   Output,
-  filters,
-  options,
-  probe,
-  run,
-  time
+  Time
 } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
 const live = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof MediaLive> | Scope.Scope>
 ) => Effect.scoped(effect).pipe(Effect.provide(MediaLive))
-const opts = Options.create
+const opts = Options.make
 const video = () =>
   Input.fromFile(
     "testsrc2=size=64x48:rate=10:duration=0.5",
@@ -45,7 +43,7 @@ it.live(
         const fs = yield* FileSystem.FileSystem
         const dir = yield* fs.makeTempDirectoryScoped()
         const source = `${dir}/source.mp4`
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [video()],
             outputs: [
@@ -63,7 +61,7 @@ it.live(
               target,
               opts({
                 map: input.video,
-                vf: filters.scale({ w: 32, h: 24 }),
+                vf: Filter.scale({ w: 32, h: 24 }),
                 "c:v": "libx264",
                 threads: 1
               })
@@ -71,14 +69,14 @@ it.live(
           ]
         })
         const progress: string[] = []
-        yield* run(command, {
+        yield* FFmpeg.run(command, {
           onProgress: (p) =>
             Effect.sync(() => {
               progress.push(p.progress)
             })
         })
-        yield* run(command)
-        const result = yield* probe(target)
+        yield* FFmpeg.run(command)
+        const result = yield* FFprobe.probe(target)
         expect(result.streams[0]).toMatchObject({
           codec_name: "h264",
           width: 32,
@@ -113,7 +111,7 @@ it.live(
           Sink.forEach((bytes: Uint8Array) =>
             Ref.update(ref, (n) => n + bytes.length)
           )
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [videoInput, audioInput],
             outputs: [
@@ -147,7 +145,7 @@ it.live(
         const source = `${dir}/audio.pcm`
         const target = `${dir}/audio.wav`
         yield* fs.writeFile(source, new Uint8Array(16_000))
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromStream(
@@ -163,7 +161,7 @@ it.live(
             ]
           })
         )
-        const result = yield* probe(target)
+        const result = yield* FFprobe.probe(target)
         expect(result.streams[0]).toMatchObject({
           codec_name: "pcm_s16le",
           sample_rate: "8000",
@@ -183,7 +181,7 @@ it.live(
         const source = Stream.forever(Stream.make(new Uint8Array(16_000))).pipe(
           Stream.ensuring(Ref.set(released, true))
         )
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromStream(source, opts({ f: "s16le", ar: 8000, ac: 1 }))
@@ -215,7 +213,7 @@ it.live("waits for a Node writable's delayed finalization", () =>
           }),
         onError: (cause) => cause
       })
-      yield* run(
+      yield* FFmpeg.run(
         Command.make({
           inputs: [video()],
           outputs: [
@@ -235,7 +233,7 @@ it.live("rejects a sink that stops consuming output", () =>
   live(
     Effect.gen(function* () {
       const error = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [video()],
             outputs: [
@@ -263,7 +261,7 @@ it.live("preserves a caller's sink error", () =>
         detail: "destination unavailable"
       } as const
       const error = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [video()],
             outputs: [
@@ -286,7 +284,7 @@ it.live(
     live(
       Effect.gen(function* () {
         const missing = yield* Effect.flip(
-          run(
+          FFmpeg.run(
             Command.make({
               inputs: [Input.fromFile("/ffmpegu/missing-input.mp4")],
               outputs: [Output.toFile("/dev/null", opts({ f: "null" }))]
@@ -295,7 +293,7 @@ it.live(
         )
         expect(missing).toMatchObject({ _tag: "ExitError" })
         const noFormat = yield* Effect.flip(
-          run(
+          FFmpeg.run(
             Command.make({
               inputs: [video()],
               outputs: [Output.toSink(Sink.drain)]
@@ -315,7 +313,7 @@ it.live.each(["hls", "dash"] as const)(
         const fs = yield* FileSystem.FileSystem
         const dir = yield* fs.makeTempDirectoryScoped()
         const target = `${dir}/stream.${format === "hls" ? "m3u8" : "mpd"}`
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [video()],
             outputs: [
@@ -326,13 +324,13 @@ it.live.each(["hls", "dash"] as const)(
                   // A timestamp, a Duration, booleans as 1/0, and joined
                   // flags, all of which FFmpeg must accept.
                   format === "hls"
-                    ? options.hls({
-                        hls_time: time.timestamp(Duration.millis(200)),
+                    ? Options.hls({
+                        hls_time: Time.timestamp(Duration.millis(200)),
                         hls_list_size: 0,
                         hls_flags: ["independent_segments", "temp_file"],
                         strftime: false
                       })
-                    : options.dash({
+                    : Options.dash({
                         seg_duration: Duration.millis(200),
                         use_template: true,
                         use_timeline: false
@@ -371,7 +369,7 @@ it.live("interrupts and force-kills a child that ignores SIGTERM", () =>
       )
       yield* fs.chmod(binary, 0o755)
       const ready = yield* Deferred.make<void>()
-      const program = run(
+      const program = FFmpeg.run(
         Command.make({ outputs: [Output.toFile("ignored")] }),
         {
           onProgress: () => Effect.asVoid(Deferred.succeed(ready, undefined))
@@ -396,26 +394,25 @@ it.live(
         const fs = yield* FileSystem.FileSystem
         const dir = yield* fs.makeTempDirectoryScoped()
         const input = video()
-        const left = filters.label("left")
-        const right = filters.label("right")
-        const scaled = filters.label("scaled")
-        const graph = filters.graph(
-          filters.chain(
-            filters.custom(
+        const left = Filter.label("left")
+        const right = Filter.label("right")
+        const scaled = Filter.label("scaled")
+        const graph = Filter.graph(
+          Filter.chain(
+            Filter.make(
               "split",
               { outputs: 2 },
-              [filters.label(input.video)],
-              [left, right]
+              { inputs: [input.video], outputs: [left, right] }
             )
           ),
-          filters.chain(
-            filters.scale(
+          Filter.chain(
+            Filter.scale(
               { w: 32, h: 24 },
               { inputs: [right], outputs: [scaled] }
             )
           )
         )
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             global: opts({ filter_complex: graph }),
             inputs: [input],
@@ -431,11 +428,15 @@ it.live(
             ]
           })
         )
-        expect((yield* probe(`${dir}/left.mp4`)).streams[0]).toMatchObject({
+        expect(
+          (yield* FFprobe.probe(`${dir}/left.mp4`)).streams[0]
+        ).toMatchObject({
           width: 64,
           height: 48
         })
-        expect((yield* probe(`${dir}/right.mp4`)).streams[0]).toMatchObject({
+        expect(
+          (yield* FFprobe.probe(`${dir}/right.mp4`)).streams[0]
+        ).toMatchObject({
           width: 32,
           height: 24
         })
@@ -452,7 +453,7 @@ it.live("preserves an input source error and a progress callback error", () =>
         Stream.fail(failure)
       )
       const error = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromStream(source, opts({ f: "s16le", ar: 8000, ac: 1 }))
@@ -464,7 +465,7 @@ it.live("preserves an input source error and a progress callback error", () =>
       expect(error).toBe(failure)
       const callbackFailure = { _tag: "ProgressUnavailable" } as const
       const callbackError = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [video()],
             outputs: [Output.toFile("/dev/null", opts({ f: "null" }))]
@@ -489,7 +490,7 @@ it.live("drains noisy stderr while retaining only its configured tail", () =>
       )
       yield* fs.chmod(binary, 0o755)
       const error = yield* Effect.flip(
-        run(Command.make({ outputs: [Output.toFile("ignored")] })).pipe(
+        FFmpeg.run(Command.make({ outputs: [Output.toFile("ignored")] })).pipe(
           Effect.provide(FFmpeg.layer({ binary, stderrTailBytes: 128 }))
         )
       )

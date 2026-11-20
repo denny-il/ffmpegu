@@ -5,22 +5,20 @@ Each recipe is an Effect that needs `FFmpeg` and/or `FFprobe`; provide them as i
 ## Extract the audio track
 
 ```ts
-import { Command, Input, Output, Options, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 const input = Input.fromFile("talk.mp4")
 
-export const extractAudio = run(
+export const extractAudio = FFmpeg.run(
   Command.make({
-    global: options.overwrite(),
+    global: Options.overwrite(),
     inputs: [input],
     outputs: [
       Output.toFile(
         "talk.mp3",
-        Options.create(
-          options.map(input.audio.track(0)),
-          options.audioCodec("libmp3lame"),
-          options.audioQuality(2)
-        )
+        Options.map(input.audio.track(0)),
+        Options.audioCodec("libmp3lame"),
+        Options.audioQuality(2)
       )
     ]
   })
@@ -32,20 +30,18 @@ export const extractAudio = run(
 Seeking as an input option (`startTime` on the input) is fast because FFmpeg skips to the nearest keyframe before decoding.
 
 ```ts
-import { Command, Input, Output, Options, filters, options, run } from "ffmpegu"
+import { Command, FFmpeg, Filter, Input, Options, Output } from "ffmpegu"
 
 export const thumbnail = (video: string, at: number, target: string) =>
-  run(
+  FFmpeg.run(
     Command.make({
-      global: options.overwrite(),
-      inputs: [Input.fromFile(video, options.startTime(at))],
+      global: Options.overwrite(),
+      inputs: [Input.fromFile(video, Options.startTime(at))],
       outputs: [
         Output.toFile(
           target,
-          Options.create(
-            options.videoFilter(filters.chain(filters.scale({ w: 320, h: -2 }))),
-            { "frames:v": 1 }
-          )
+          Options.videoFilter(Filter.scale({ w: 320, h: -2 })),
+          { "frames:v": 1 }
         )
       ]
     })
@@ -58,17 +54,14 @@ Stream copy is instant but can only cut on keyframes; re-encode instead when the
 
 ```ts
 import { Duration } from "effect"
-import { Command, Input, Output, Options, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
-export const clip = run(
+export const clip = FFmpeg.run(
   Command.make({
-    global: options.overwrite(),
-    inputs: [Input.fromFile("match.mp4", options.startTime(Duration.minutes(12)))],
+    global: Options.overwrite(),
+    inputs: [Input.fromFile("match.mp4", Options.startTime(Duration.minutes(12)))],
     outputs: [
-      Output.toFile(
-        "highlight.mp4",
-        Options.create(options.duration(Duration.seconds(45)), options.copy())
-      )
+      Output.toFile("highlight.mp4", Options.duration(Duration.seconds(45)), Options.copy())
     ]
   })
 )
@@ -77,26 +70,24 @@ export const clip = run(
 ## Encode for the web
 
 ```ts
-import { Command, Input, Output, Options, filters, options, run } from "ffmpegu"
+import { Command, FFmpeg, Filter, Input, Options, Output } from "ffmpegu"
 
 export const webEncode = (source: string, target: string) =>
-  run(
+  FFmpeg.run(
     Command.make({
-      global: options.overwrite(),
+      global: Options.overwrite(),
       inputs: [Input.fromFile(source)],
       outputs: [
         Output.toFile(
           target,
-          Options.create(
-            options.videoFilter(filters.chain(filters.scale({ w: -2, h: 720 }))),
-            options.videoCodec("libx264"),
-            options.preset("medium"),
-            options.crf(23),
-            options.pixelFormat("yuv420p"),
-            options.audioCodec("aac"),
-            options.audioBitrate(128, "k"),
-            options.movFlags("+faststart")
-          )
+          Options.videoFilter(Filter.scale({ w: -2, h: 720 })),
+          Options.videoCodec("libx264"),
+          Options.preset("medium"),
+          Options.crf(23),
+          Options.pixelFormat("yuv420p"),
+          Options.audioCodec("aac"),
+          Options.audioBitrate(128, "k"),
+          Options.movFlags("+faststart")
         )
       ]
     })
@@ -109,18 +100,18 @@ Probe the duration first, then compare it with `outTime`:
 
 ```ts
 import { Duration, Effect } from "effect"
-import { Command, Input, Output, options, probe, run } from "ffmpegu"
+import { Command, FFmpeg, FFprobe, Input, Options, Output } from "ffmpegu"
 
 export const transcodeWithProgress = (source: string, target: string) =>
   Effect.gen(function* () {
-    const metadata = yield* probe(source)
+    const metadata = yield* FFprobe.probe(source)
     const total = Number(metadata.format?.duration ?? Number.NaN)
 
-    yield* run(
+    yield* FFmpeg.run(
       Command.make({
-        global: options.overwrite(),
+        global: Options.overwrite(),
         inputs: [Input.fromFile(source)],
-        outputs: [Output.toFile(target, options.videoCodec("libx264"))]
+        outputs: [Output.toFile(target, Options.videoCodec("libx264"))]
       }),
       {
         onProgress: (progress) => {
@@ -139,14 +130,14 @@ Feed an Effect `Stream` in and read the result as a `Stream`, for example to con
 
 ```ts
 import { Stream } from "effect"
-import { Command, Input, Options, Output, stream } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 export const toOpus = <E, R>(upload: Stream.Stream<Uint8Array, E, R>) =>
-  stream(
+  FFmpeg.stream(
     Command.make({
       inputs: [Input.fromStream(upload)],
       outputs: [
-        Output.toStream(Options.create({ vn: true, "c:a": "libopus", "b:a": "64k", f: "ogg" }))
+        Output.toStream({ vn: true, "c:a": "libopus", "b:a": "64k", f: "ogg" })
       ]
     })
   )
@@ -161,25 +152,23 @@ FFmpeg does not create output directories, so create `hls/` first. This program 
 
 ```ts
 import { Effect, FileSystem } from "effect"
-import { Command, Input, Output, Options, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 const command = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [Input.fromFile("movie.mp4")],
   outputs: [
     Output.toFile(
       "hls/index.m3u8",
-      Options.create(
-        options.videoCodec("libx264"),
-        options.gop(48),
-        options.audioCodec("aac"),
-        options.hls({
-          hls_time: 4,
-          hls_playlist_type: "vod",
-          hls_segment_filename: "hls/segment_%03d.ts",
-          hls_flags: ["independent_segments"]
-        })
-      )
+      Options.videoCodec("libx264"),
+      Options.gop(48),
+      Options.audioCodec("aac"),
+      Options.hls({
+        hls_time: 4,
+        hls_playlist_type: "vod",
+        hls_segment_filename: "hls/segment_%03d.ts",
+        hls_flags: ["independent_segments"]
+      })
     )
   ]
 })
@@ -187,7 +176,7 @@ const command = Command.make({
 export const hlsVod = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   yield* fs.makeDirectory("hls", { recursive: true })
-  yield* run(command)
+  yield* FFmpeg.run(command)
 })
 ```
 
@@ -196,33 +185,32 @@ export const hlsVod = Effect.gen(function* () {
 The `concat` filter joins clips, re-encoding as it goes. Every clip needs the mapped video and audio tracks, the same dimensions and sample aspect ratio, and compatible audio; normalize mismatched clips first with `scale`, `pad`, `setsar`, and `aresample`.
 
 ```ts
-import { Command, Input, Output, Options, filters, options, run } from "ffmpegu"
+import { Command, FFmpeg, Filter, Input, Options, Output } from "ffmpegu"
 
 export const concatenate = (paths: ReadonlyArray<string>, target: string) => {
   const inputs = paths.map((path) => Input.fromFile(path))
-  const [video, audio] = [filters.label("v"), filters.label("a")]
-  const graph = filters.graph(
-    filters.chain(
-      filters.custom(
-        "concat",
-        { n: inputs.length, v: 1, a: 1 },
-        inputs.flatMap((input) => [
-          filters.label(input.video.track(0)),
-          filters.label(input.audio.track(0))
-        ]),
-        [video, audio]
-      )
+  const [video, audio] = [Filter.label("v"), Filter.label("a")]
+  const graph = Filter.graph(
+    Filter.make(
+      "concat",
+      { n: inputs.length, v: 1, a: 1 },
+      {
+        inputs: inputs.flatMap((input) => [input.video.track(0), input.audio.track(0)]),
+        outputs: [video, audio]
+      }
     )
   )
 
-  return run(
+  return FFmpeg.run(
     Command.make({
-      global: options.overwrite(),
+      global: Options.overwrite(),
       inputs,
       outputs: [
         Output.toFile(
           target,
-          Options.create(options.filterComplex(graph), options.map(video), options.map(audio))
+          Options.filterComplex(graph),
+          Options.map(video),
+          Options.map(audio)
         )
       ]
     })
@@ -235,20 +223,22 @@ export const concatenate = (paths: ReadonlyArray<string>, target: string) => {
 `lavfi` inputs synthesize media, which is handy in tests:
 
 ```ts
-import { Command, Input, Output, Options, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 export const testClip = (target: string) =>
-  run(
+  FFmpeg.run(
     Command.make({
-      global: options.overwrite(),
+      global: Options.overwrite(),
       inputs: [
-        Input.fromFile("testsrc2=size=640x360:rate=30:duration=2", options.format("lavfi")),
-        Input.fromFile("sine=frequency=440:duration=2", options.format("lavfi"))
+        Input.fromFile("testsrc2=size=640x360:rate=30:duration=2", Options.format("lavfi")),
+        Input.fromFile("sine=frequency=440:duration=2", Options.format("lavfi"))
       ],
       outputs: [
         Output.toFile(
           target,
-          Options.create(options.videoCodec("libx264"), options.pixelFormat("yuv420p"), options.audioCodec("aac"))
+          Options.videoCodec("libx264"),
+          Options.pixelFormat("yuv420p"),
+          Options.audioCodec("aac")
         )
       ]
     })
@@ -259,13 +249,13 @@ export const testClip = (target: string) =>
 
 ```ts
 import { Schema } from "effect"
-import { Options, probeWith } from "ffmpegu"
+import { FFprobe } from "ffmpegu"
 
 const Duration = Schema.Struct({
   format: Schema.Struct({ duration: Schema.NumberFromString })
 })
 
 export const durationSeconds = (path: string) =>
-  probeWith(path, Options.create({ show_entries: "format=duration", v: "error" }), Duration)
+  FFprobe.probeWith(path, { show_entries: "format=duration", v: "error" }, Duration)
 // Effect<{ readonly format: { readonly duration: number } }, ProbeError, FFprobe>
 ```

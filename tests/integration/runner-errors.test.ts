@@ -8,9 +8,7 @@ import {
   FFprobe,
   Input,
   Options,
-  Output,
-  probe,
-  run
+  Output
 } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
@@ -35,10 +33,10 @@ it.live.each(["missing", "not executable"] as const)(
           outputs: [Output.toFile(`${dir}/output.mp4`)]
         })
         const ffmpegError = yield* Effect.flip(
-          run(command).pipe(Effect.provide(FFmpeg.layer({ binary })))
+          FFmpeg.run(command).pipe(Effect.provide(FFmpeg.layer({ binary })))
         )
         const ffprobeError = yield* Effect.flip(
-          probe("./assets/video.mp4").pipe(
+          FFprobe.probe("./assets/video.mp4").pipe(
             Effect.provide(FFprobe.layer({ binary }))
           )
         )
@@ -70,16 +68,16 @@ it.live("preserves a Node writable's final flush failure", () =>
         onError: (cause) => cause
       })
       const error = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromStream(
                 Stream.make(new Uint8Array(16000)),
-                Options.create({ f: "s16le", ar: 8000, ac: 1 })
+                Options.make({ f: "s16le", ar: 8000, ac: 1 })
               )
             ],
             outputs: [
-              Output.toSink(sink, Options.create({ f: "s16le", c: "copy" }))
+              Output.toSink(sink, Options.make({ f: "s16le", c: "copy" }))
             ]
           })
         )
@@ -96,15 +94,15 @@ it.live("preserves an input failure before it emits any bytes", () =>
     Effect.gen(function* () {
       const failure = new Error("source already destroyed")
       const error = yield* Effect.flip(
-        run(
+        FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromStream(
                 Stream.fail(failure),
-                Options.create({ f: "s16le", ar: 8000, ac: 1 })
+                Options.make({ f: "s16le", ar: 8000, ac: 1 })
               )
             ],
-            outputs: [Output.toFile("/dev/null", Options.create({ f: "null" }))]
+            outputs: [Output.toFile("/dev/null", Options.make({ f: "null" }))]
           })
         )
       )

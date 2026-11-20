@@ -12,25 +12,22 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import {
-  ExitError,
+  Argument,
   CommandError,
+  ExitError,
   FFprobe,
-  Options,
-  options,
+  type FFprobeConfig,
   Input,
-  type FFprobeOptions,
+  Options,
   ProbeDecodeError,
   ProbeOutputError,
-  probe,
-  probeWith,
   SpawnError
 } from "../../src/index.ts"
-import { FFmpeguArgument } from "../../src/core/argument.ts"
-import type { FFmpeguReferencesInterface } from "../../src/types/index.ts"
+import type { References } from "../../src/types/index.ts"
 import { makeFakeSpawner, platformError } from "./fake-spawner.ts"
 import { makeRecordingTracer } from "./tracer.ts"
 
-const setup = Effect.fnUntraced(function* (options?: FFprobeOptions) {
+const setup = Effect.fnUntraced(function* (options?: FFprobeConfig) {
   const spawner = yield* makeFakeSpawner()
   const layer = FFprobe.layer(options).pipe(Layer.provide(spawner.layer))
   return { layer, next: spawner.next }
@@ -41,14 +38,14 @@ const probeOutput = (
   stdout: string,
   code = 0,
   stderr = "",
-  options?: Options
+  options?: Options.Arg
 ) =>
   Effect.gen(function* () {
     const { layer, next } = yield* setup()
     const fiber = yield* Effect.forkChild(
       (options === undefined
-        ? probe("/test/input.mp4")
-        : probeWith("/test/input.mp4", options)
+        ? FFprobe.probe("/test/input.mp4")
+        : FFprobe.probeWith("/test/input.mp4", options)
       ).pipe(Effect.provide(layer))
     )
     const process = yield* next
@@ -155,9 +152,9 @@ describe("FFprobe", () => {
     "renders composed options and decodes projected streams without an index",
     () =>
       Effect.gen(function* () {
-        const options = Options.merge(
-          Options.create({ protocol_whitelist: "file", v: "quiet" }),
-          Options.create({
+        const options = Options.make(
+          Options.make({ protocol_whitelist: "file", v: "quiet" }),
+          Options.make({
             select_streams: "v:0",
             show_entries: "stream=codec_name:format=duration"
           })
@@ -192,6 +189,43 @@ describe("FFprobe", () => {
       })
   )
 
+  it.effect("accepts a record of options in place of a bundle", () =>
+    Effect.gen(function* () {
+      const { process } = yield* probeOutput(JSON.stringify({}), 0, "", {
+        select_streams: "a:0",
+        show_streams: true
+      })
+      assert.deepStrictEqual(process.args, [
+        "-hide_banner",
+        "-of",
+        "json",
+        "-i",
+        "/test/input.mp4",
+        "-select_streams",
+        "a:0",
+        "-show_streams"
+      ])
+    })
+  )
+
+  it.effect("reads plain options when the probe is described", () =>
+    Effect.gen(function* () {
+      const { layer, next } = yield* setup()
+      const selection = { show_entries: "stream=codec_name" }
+      const probing = FFprobe.probeWith("/test/input.mp4", selection)
+      selection.show_entries = "stream=width"
+      const fiber = yield* Effect.forkChild(probing.pipe(Effect.provide(layer)))
+      const process = yield* next
+      yield* process.emit(1, "{}")
+      yield* process.exit(0)
+      yield* Fiber.await(fiber)
+      assert.deepStrictEqual(process.args.slice(-2), [
+        "-show_entries",
+        "stream=codec_name"
+      ])
+    })
+  )
+
   it.effect("still validates known fields in a projection", () =>
     Effect.gen(function* () {
       for (const stream of [{ index: "0" }, { index: 0.5 }, { width: "32" }]) {
@@ -199,7 +233,7 @@ describe("FFprobe", () => {
           JSON.stringify({ streams: [stream] }),
           0,
           "",
-          Options.create({ show_entries: "stream" })
+          Options.make({ show_entries: "stream" })
         )
         assert.instanceOf(yield* Effect.flip(exit), ProbeDecodeError)
       }
@@ -220,9 +254,9 @@ describe("FFprobe", () => {
             Schema.Struct({ width: Schema.NumberFromString })
           )
         })
-        const options = Options.create({ show_entries: "stream=width" })
+        const options = Options.make({ show_entries: "stream=width" })
         const fiber = yield* Effect.forkChild(
-          probeWith("/test/input.mp4", options, Widths).pipe(
+          FFprobe.probeWith("/test/input.mp4", options, Widths).pipe(
             Effect.provide(layer)
           )
         )
@@ -254,10 +288,10 @@ describe("FFprobe", () => {
           )
           .map((span) => span.name)
       const probes: Array<Effect.Effect<unknown, unknown, FFprobe>> = [
-        probe("/test/input.mp4"),
-        probeWith(
+        FFprobe.probe("/test/input.mp4"),
+        FFprobe.probeWith(
           "/test/input.mp4",
-          Options.create("-show_streams"),
+          Options.make("-show_streams"),
           Schema.Struct({ streams: Schema.Array(Schema.Number) })
         )
       ]
@@ -284,7 +318,7 @@ describe("FFprobe", () => {
         FFprobe.use((service) =>
           service.probeJson(
             "/test/input.mp4",
-            Options.create({ show_entries: "stream=index" })
+            Options.make({ show_entries: "stream=index" })
           )
         ).pipe(Effect.provide(layer))
       )
@@ -300,7 +334,7 @@ describe("FFprobe", () => {
       const { layer, next } = yield* setup()
       const fiber = yield* Effect.forkChild(
         FFprobe.use((service) =>
-          service.probeJson("/test/input.mp4", Options.create("-show_streams"))
+          service.probeJson("/test/input.mp4", Options.make("-show_streams"))
         ).pipe(Effect.provide(layer))
       )
       const process = yield* next
@@ -322,17 +356,17 @@ describe("FFprobe", () => {
           probeWith: () => Effect.die("unused"),
           probeJson: () => Effect.succeed(fixture)
         })
-        const options = Options.create({ show_entries: "stream=width" })
+        const options = Options.make({ show_entries: "stream=width" })
         const Widths = Schema.Struct({
           streams: Schema.Array(Schema.Struct({ width: Schema.Number }))
         })
         assert.deepStrictEqual(
-          yield* probeWith("/test/input.mp4", options, Widths).pipe(
+          yield* FFprobe.probeWith("/test/input.mp4", options, Widths).pipe(
             Effect.provide(mock)
           ),
           fixture
         )
-        const mismatch = yield* probeWith(
+        const mismatch = yield* FFprobe.probeWith(
           "/test/input.mp4",
           options,
           Schema.Number
@@ -352,9 +386,9 @@ describe("FFprobe", () => {
         streams: Schema.Array(Schema.Struct({ height: Schema.Number }))
       })
       const fiber = yield* Effect.forkChild(
-        probeWith(
+        FFprobe.probeWith(
           "/test/input.mp4",
-          Options.create({ show_entries: "stream=width" }),
+          Options.make({ show_entries: "stream=width" }),
           Dims
         ).pipe(Effect.provide(layer))
       )
@@ -372,7 +406,7 @@ describe("FFprobe", () => {
         const { layer, next } = yield* setup()
         const input = "-clip $(touch surprise); 'quoted'.mp4"
         const fiber = yield* Effect.forkChild(
-          probe(input).pipe(Effect.provide(layer))
+          FFprobe.probe(input).pipe(Effect.provide(layer))
         )
         const process = yield* next
         assert.deepStrictEqual(process.args.slice(-2), ["-i", input])
@@ -400,9 +434,9 @@ describe("FFprobe", () => {
         "-of:v",
         "--"
       ]) {
-        const error = yield* probeWith(
+        const error = yield* FFprobe.probeWith(
           "x",
-          Options.create(token, "value")
+          Options.make(token, "value")
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
         assert.deepInclude(error.reason, {
@@ -430,7 +464,7 @@ describe("FFprobe", () => {
         "/proc/self/fd/1",
         "bad\0path"
       ]) {
-        const error = yield* probe(input).pipe(
+        const error = yield* FFprobe.probe(input).pipe(
           Effect.provide(layer),
           Effect.flip
         )
@@ -444,9 +478,9 @@ describe("FFprobe", () => {
             location: { _tag: "Probe" }
           })
         }
-        const optionError = yield* probeWith(
+        const optionError = yield* FFprobe.probeWith(
           "x",
-          Options.create({ custom: input })
+          Options.make({ custom: input })
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(optionError, CommandError)
       }
@@ -461,9 +495,9 @@ describe("FFprobe", () => {
           spawnError: platformError("must not spawn")
         })
         const layer = FFprobe.layer().pipe(Layer.provide(spawner.layer))
-        const error = yield* probeWith(
+        const error = yield* FFprobe.probeWith(
           "x",
-          options.duration(Duration.infinity)
+          Options.duration(Duration.infinity)
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
         assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -474,9 +508,9 @@ describe("FFprobe", () => {
   it.effect("rejects FFmpeg stream references in probe options", () =>
     Effect.gen(function* () {
       const { layer } = yield* setup()
-      const error = yield* probeWith(
+      const error = yield* FFprobe.probeWith(
         "x",
-        Options.create({ select_streams: Input.fromFile("x").video })
+        Options.make({ select_streams: Input.fromFile("x").video })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "ForeignReference")
@@ -486,9 +520,9 @@ describe("FFprobe", () => {
   it.effect("rejects an invalid track index in probe options", () =>
     Effect.gen(function* () {
       const { layer } = yield* setup()
-      const error = yield* probeWith(
+      const error = yield* FFprobe.probeWith(
         "x",
-        Options.create({ select_streams: Input.fromFile("x").video.track(-1) })
+        Options.make({ select_streams: Input.fromFile("x").video.track(-1) })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -504,14 +538,14 @@ describe("FFprobe", () => {
       Effect.gen(function* () {
         const { layer } = yield* setup()
         const boom = new Error("https://user:secret@example.com")
-        class Broken extends FFmpeguArgument {
+        class Broken extends Argument {
           getArgs(): string[] {
             throw boom
           }
         }
-        const error = yield* probeWith(
+        const error = yield* FFprobe.probeWith(
           "x",
-          Options.create({ select_streams: new Broken() })
+          Options.make({ select_streams: new Broken() })
         ).pipe(Effect.provide(layer), Effect.flip)
         assert.instanceOf(error, CommandError)
         assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -529,14 +563,14 @@ describe("FFprobe", () => {
           throw new Error("unreadable")
         }
       })
-      class Broken extends FFmpeguArgument {
+      class Broken extends Argument {
         getArgs(): string[] {
           throw boom
         }
       }
-      const error = yield* probeWith(
+      const error = yield* FFprobe.probeWith(
         "x",
-        Options.create({ select_streams: new Broken() })
+        Options.make({ select_streams: new Broken() })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -548,8 +582,8 @@ describe("FFprobe", () => {
     Effect.gen(function* () {
       const { layer } = yield* setup()
       let tampered: unknown
-      class Wrapper extends FFmpeguArgument {
-        getArgs(refs: FFmpeguReferencesInterface): string[] {
+      class Wrapper extends Argument {
+        getArgs(refs: References): string[] {
           try {
             return Input.fromFile("x").video.track(-1).getArgs(refs)
           } catch (error) {
@@ -563,9 +597,9 @@ describe("FFprobe", () => {
           }
         }
       }
-      const error = yield* probeWith(
+      const error = yield* FFprobe.probeWith(
         "x",
-        Options.create({ select_streams: new Wrapper() })
+        Options.make({ select_streams: new Wrapper() })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -582,8 +616,8 @@ describe("FFprobe", () => {
       const { layer } = yield* setup()
       const input = Input.fromFile("https://user:secret@example.com/input.mp4")
       let annotated: unknown
-      class Contextual extends FFmpeguArgument {
-        getArgs(refs: FFmpeguReferencesInterface): string[] {
+      class Contextual extends Argument {
+        getArgs(refs: References): string[] {
           try {
             return input.video.track(-1).getArgs(refs)
           } catch (error) {
@@ -593,9 +627,9 @@ describe("FFprobe", () => {
           }
         }
       }
-      const error = yield* probeWith(
+      const error = yield* FFprobe.probeWith(
         "x",
-        Options.create({ select_streams: new Contextual() })
+        Options.make({ select_streams: new Contextual() })
       ).pipe(Effect.provide(layer), Effect.flip)
       assert.instanceOf(error, CommandError)
       assert.strictEqual(error.reason._tag, "InvalidArgument")
@@ -611,7 +645,7 @@ describe("FFprobe", () => {
       Effect.gen(function* () {
         const { layer, next } = yield* setup({ forceKillAfter: "100 millis" })
         const fiber = yield* Effect.forkChild(
-          probeWith("x", Options.create("-show_streams")).pipe(
+          FFprobe.probeWith("x", Options.make("-show_streams")).pipe(
             Effect.provide(layer)
           )
         )
@@ -655,7 +689,7 @@ describe("FFprobe", () => {
         binary: "/home/user/secret-token/bin/ffprobe-7"
       })
       const fiber = yield* Effect.forkChild(
-        probe("x").pipe(Effect.provide(layer))
+        FFprobe.probe("x").pipe(Effect.provide(layer))
       )
       const process = yield* next
       yield* process.exitWithSignal()
@@ -677,7 +711,7 @@ describe("FFprobe", () => {
     Effect.gen(function* () {
       const { layer, next } = yield* setup({ maxOutputBytes: 8 })
       const fiber = yield* Effect.forkChild(
-        probe("/test/input.mp4").pipe(Effect.provide(layer))
+        FFprobe.probe("/test/input.mp4").pipe(Effect.provide(layer))
       )
       const process = yield* next
       yield* process.emit(1, '{"streams":', "[]}")
@@ -693,7 +727,7 @@ describe("FFprobe", () => {
     Effect.gen(function* () {
       const cause = platformError("spawn", "ENOENT")
       const spawner = yield* makeFakeSpawner({ spawnError: cause })
-      const error = yield* probe("/test/input.mp4").pipe(
+      const error = yield* FFprobe.probe("/test/input.mp4").pipe(
         Effect.provide(
           FFprobe.layer({ binary: "/missing/ffprobe" }).pipe(
             Layer.provide(spawner.layer)
@@ -713,7 +747,7 @@ describe("FFprobe", () => {
       const spawner = yield* makeFakeSpawner()
       const recorder = makeRecordingTracer()
       const fiber = yield* Effect.forkChild(
-        probe("https://user:secret@example.com/in.mp4").pipe(
+        FFprobe.probe("https://user:secret@example.com/in.mp4").pipe(
           Effect.provide(
             FFprobe.layer({ binary: "/opt/bin/ffprobe" }).pipe(
               Layer.provide(spawner.layer)
@@ -739,7 +773,7 @@ describe("FFprobe", () => {
       const spawner = yield* makeFakeSpawner()
       const recorder = makeRecordingTracer()
       const fiber = yield* Effect.forkChild(
-        probe("/test/input.mp4").pipe(
+        FFprobe.probe("/test/input.mp4").pipe(
           Effect.provide(
             FFprobe.layer({ maxOutputBytes: 1 }).pipe(
               Layer.provide(spawner.layer)
@@ -769,7 +803,7 @@ describe("FFprobe", () => {
         const spawner = yield* makeFakeSpawner({ killExitCode: 23 })
         const recorder = makeRecordingTracer()
         const fiber = yield* Effect.forkChild(
-          probe("/test/input.mp4").pipe(
+          FFprobe.probe("/test/input.mp4").pipe(
             Effect.provide(
               FFprobe.layer({ maxOutputBytes: 1 }).pipe(
                 Layer.provide(spawner.layer)
@@ -800,7 +834,7 @@ describe("FFprobe", () => {
     alter: (
       handle: ChildProcessSpawner.ChildProcessHandle
     ) => Partial<ChildProcessSpawner.ChildProcessHandle>,
-    options?: FFprobeOptions
+    options?: FFprobeConfig
   ) {
     const spawner = yield* makeFakeSpawner()
     const altered = Layer.effect(
@@ -816,7 +850,7 @@ describe("FFprobe", () => {
     ).pipe(Layer.provide(spawner.layer))
     const recorder = makeRecordingTracer()
     const fiber = yield* Effect.forkChild(
-      probe("/test/input.mp4").pipe(
+      FFprobe.probe("/test/input.mp4").pipe(
         Effect.provide(FFprobe.layer(options).pipe(Layer.provide(altered))),
         Effect.withTracer(recorder.tracer)
       )
@@ -875,7 +909,7 @@ describe("FFprobe", () => {
         )
       )
       const fiber = yield* Effect.forkChild(
-        probe("/test/input.mp4").pipe(Effect.provide(layer))
+        FFprobe.probe("/test/input.mp4").pipe(Effect.provide(layer))
       )
       const process = yield* spawner.next
       yield* process.emit(1, '{"streams":', "[]}")
@@ -890,7 +924,7 @@ describe("FFprobe", () => {
     Effect.gen(function* () {
       const spawner = yield* makeFakeSpawner()
       const fiber = yield* Effect.forkChild(
-        probe("/test/input.mp4").pipe(
+        FFprobe.probe("/test/input.mp4").pipe(
           Effect.provide(
             FFprobe.layerConfig({ maxOutputBytes: undefined }).pipe(
               Layer.provide(spawner.layer)
@@ -908,7 +942,7 @@ describe("FFprobe", () => {
   it.effect("fails with ConfigError for invalid configured limits", () =>
     Effect.gen(function* () {
       const spawner = yield* makeFakeSpawner()
-      const error = yield* probe("x").pipe(
+      const error = yield* FFprobe.probe("x").pipe(
         Effect.provide(
           FFprobe.layerConfig({
             maxOutputBytes: Config.Int("FFPROBE_MAX_OUTPUT")
@@ -961,7 +995,7 @@ describe("FFprobe", () => {
   ])("fails with ConfigError for a grace period whose %s", ([, config, env]) =>
     Effect.gen(function* () {
       const spawner = yield* makeFakeSpawner()
-      const error = yield* probe("x").pipe(
+      const error = yield* FFprobe.probe("x").pipe(
         Effect.provide(
           FFprobe.layerConfig({ forceKillAfter: config }).pipe(
             Layer.provide(spawner.layer),
@@ -975,7 +1009,7 @@ describe("FFprobe", () => {
     })
   )
 
-  it.effect.each<[FFprobeOptions]>([
+  it.effect.each<[FFprobeConfig]>([
     [{ maxOutputBytes: Number.NaN }],
     [{ forceKillAfter: -1 }],
     [{ forceKillAfter: { seconds: Infinity, milliseconds: -Infinity } }],
@@ -995,7 +1029,9 @@ describe("FFprobe", () => {
   ])("rejects invalid options %j", ([options]) =>
     Effect.gen(function* () {
       const { layer } = yield* setup(options)
-      const exit = yield* Effect.exit(probe("x").pipe(Effect.provide(layer)))
+      const exit = yield* Effect.exit(
+        FFprobe.probe("x").pipe(Effect.provide(layer))
+      )
       assert.isTrue(
         Exit.isFailure(exit) && exit.cause.reasons[0]?._tag === "Die"
       )

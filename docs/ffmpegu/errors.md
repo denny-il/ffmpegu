@@ -10,7 +10,7 @@ Every failure is a tagged error in the Effect error channel, so it can be handle
 | `SpawnError`       | all                | The binary could not be started (missing, not executable, …).             | `binary`, `cause`                       |
 | `ExitError`        | all                | The process exited with a nonzero code or was killed.                     | `binary`, `exitCode`, `stderr`, `cause` |
 | `PipeError`        | all                | I/O on a library-owned descriptor failed.                                 | `fd`, `direction`, `cause`              |
-| `OutputError`      | `run`, `stream`    | An output sink completed before EOF.                                      | `reason` (`SinkEndedEarly`)             |
+| `OutputError`      | `FFmpeg.run`, `FFmpeg.stream`    | An output sink completed before EOF.                                      | `reason` (`SinkEndedEarly`)             |
 | `ProbeOutputError` | probes             | FFprobe output exceeded `maxOutputBytes`.                                  | `maxOutputBytes`                        |
 | `ProbeDecodeError` | probes             | FFprobe output is not valid probe data or does not match your schema.     | `message`, `cause`                      |
 
@@ -22,14 +22,14 @@ Errors from your own code keep their identity and type: a failing input stream, 
 
 ```ts
 import { Effect } from "effect"
-import { Command, Input, Output, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 const command = Command.make({
   inputs: [Input.fromFile("input.mp4")],
   outputs: [Output.toFile("output.mp4")]
 })
 
-const handled = run(command).pipe(
+const handled = FFmpeg.run(command).pipe(
   Effect.catchTag("ExitError", (error) =>
     Effect.logError("ffmpeg failed", { exitCode: error.exitCode, stderr: error.stderr })
   ),
@@ -43,14 +43,14 @@ const handled = run(command).pipe(
 
 ```ts
 import { Effect } from "effect"
-import { Command, Input, Output, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 const command = Command.make({
   inputs: [Input.fromFile("/dev/stdin")],
   outputs: [Output.toFile("output.mp4")]
 })
 
-const handled = run(command).pipe(
+const handled = FFmpeg.run(command).pipe(
   Effect.catchReason("CommandError", "ReservedPath", (reason) =>
     Effect.logWarning(`Use Input.fromStream instead of ${reason.path}`)
   )
@@ -65,7 +65,7 @@ const handled = run(command).pipe(
 | `ReservedPath`     | `path`, `location`    | A path or option value addresses a descriptor owned by ffmpegu.                    |
 | `ReservedOption`   | `option`, `location`  | An option managed by ffmpegu is set (`-i`, `-progress`, `-stdin`, probe output).   |
 | `InvalidArgument`  |                       | Any other invalid value, including invalid durations and track indices.           |
-| `StreamOutput`     | `count`               | `run` got an `Output.toStream` output, or `stream` did not get exactly one.        |
+| `StreamOutput`     | `count`               | `FFmpeg.run` got an `Output.toStream` output, or `FFmpeg.stream` did not get exactly one.        |
 | `SinkEndedEarly`   | `fd`                  | (`OutputError` only) an output sink completed before EOF.                          |
 
 Every reason has a `message`, which is also the error's message. `location` is a `CommandLocation`: `{ _tag: "Global" }`, `{ _tag: "Input", index }`, `{ _tag: "Output", index }`, or `{ _tag: "Probe" }`. When a builder throws while rendering, the thrown value becomes the `CommandError`'s `cause`.
@@ -89,9 +89,9 @@ Other values can still carry them, and should be treated as sensitive when you l
 - `R`: the union of their requirements;
 - `S` (commands and outputs): the number of `Output.toStream` outputs.
 
-`run` adds `FFmpegError` and the `FFmpeg` service, plus the error and requirement types of `onProgress`. File-only commands have `E = never` and `R = never`.
+`FFmpeg.run` adds `FFmpegError` and the `FFmpeg` service, plus the error and requirement types of `onProgress`. File-only commands have `E = never` and `R = never`.
 
-`S` is `0`, `1`, or `2` (two or more). `toFile` and `toSink` produce `Output<E, R, 0>`, `toStream` produces `Output<never, never, 1>`, and `Command.make`/`withOutput` add them up. `run` requires `0` and `stream` requires `1`, so choosing the wrong runner is a compile error.
+`S` is `0`, `1`, or `2` (two or more). `toFile` and `toSink` produce `Output<E, R, 0>`, `toStream` produces `Output<never, never, 1>`, and `Command.make`/`withOutput` add them up. `FFmpeg.run` requires `0` and `FFmpeg.stream` requires `1`, so choosing the wrong runner is a compile error.
 
 The check falls back to runtime (`CommandError` reason `StreamOutput`) when the count is unknown:
 
@@ -102,3 +102,24 @@ The check falls back to runtime (`CommandError` reason `StreamOutput`) when the 
 An output chosen at runtime, such as `flag ? Output.toStream() : Output.toFile(path)`, has `S = 0 | 1` and is accepted by neither runner; branch on the whole command instead. A variable inferred with one count cannot be reassigned a command with another; annotate it as `Command<E, R>`.
 
 `Progress`, `RunResult`, and the probe result types are described in [running](running.md#progress) and [FFprobe](ffprobe.md).
+
+## Builder types
+
+The types of the builders live in their namespaces, next to the functions that use them:
+
+| Namespace | Types                                                                                         |
+| --------- | --------------------------------------------------------------------------------------------- |
+| `Options` | `Options` (a bundle), `Arg`, `ArgValue`, `VideoCodec`, `AudioCodec`, `SubtitleCodec`, `Format`, `BitrateUnit`, `TimeValue`, `HlsOptions`, `DashOptions`, … |
+| `Filter`  | `Filter`, `Chain`, `Graph`, `Label`, `Labels`, `Options`, `OptionValue`, and each helper's options such as `ScaleOptions` |
+| `Time`    | `TimeObject`, `DurationValue`                                                                  |
+
+```ts
+import { Filter, Options } from "ffmpegu"
+
+const encode = (codec: Options.VideoCodec, extra: Options.Options): Options.Options =>
+  Options.make(Options.videoCodec(codec), extra)
+
+const resize = (size: Filter.ScaleOptions): Filter.Filter => Filter.scale(size)
+```
+
+To build option or filter values of your own, extend the exported `Argument` class: its `getArgs(refs)` returns the rendered tokens, and `refs.get(input)` resolves an input to its index in the command.

@@ -1,53 +1,26 @@
-import { FFmpeguCommand } from "./core/command.ts"
-import { FFmpeguInput } from "./core/input.ts"
-import { FFmpeguOutput } from "./core/output.ts"
-import * as _filters from "./filters/index.ts"
-import * as _options from "./options/index.ts"
-import * as _time from "./time.ts"
-
+export { Argument } from "./core/argument.ts"
 export {
-  FFmpeguCommand,
-  FFmpeguCommand as Command,
+  Command,
+  type CommandOptions,
   type CompiledCommand,
   type CompiledInputStream,
-  type CompiledOutputStream,
-  type FFmpeguCommandOptions
+  type CompiledOutputStream
 } from "./core/command.ts"
 export {
-  FFmpeguInput,
-  FFmpeguInput as Input,
-  type FFmpeguAnyInput,
-  type FFmpeguInputSource,
-  FFmpeguStreamReference,
-  FFmpeguStreamTrackReference
-} from "./core/input.ts"
-export {
-  FFmpeguOutput,
-  FFmpeguOutput as Output,
-  type FFmpeguOutputDestination
-} from "./core/output.ts"
-export {
   FFmpeg,
-  type FFmpegOptions,
+  type FFmpegConfig,
   type FFmpegService,
-  run,
-  stream,
   type RunOptions
 } from "./core/ffmpeg.ts"
 export {
-  FFprobe,
-  type FFprobeOptions,
-  type FFprobeService,
-  probe,
-  probeWith
-} from "./probe/ffprobe.ts"
-export {
-  ProbeFormat,
-  ProbeResult,
-  ProbeStream,
-  ProjectedProbeResult,
-  ProjectedProbeStream
-} from "./probe/schema.ts"
+  type AnyInput,
+  Input,
+  type InputSource,
+  StreamReference,
+  StreamTrackReference,
+  type StreamType
+} from "./core/input.ts"
+export { Output, type OutputDestination } from "./core/output.ts"
 export {
   CommandError,
   type CommandErrorReason,
@@ -69,26 +42,19 @@ export {
   SpawnError,
   StreamOutput
 } from "./errors.ts"
-export { FFmpeguFilterBuilder } from "./filters/builder.ts"
-export { FFmpeguFilterChain } from "./filters/chain.ts"
-export { FFmpeguFilterGraph } from "./filters/graph.ts"
-export { FFmpeguFilterLabelRef } from "./filters/label.ts"
-export { FFmpeguSimpleFilter } from "./filters/simple.ts"
-export { FFmpeguOptions, FFmpeguOptions as Options } from "./options/core.ts"
-export type { Progress, RunResult } from "./types/index.ts"
-
-export const filters = _filters
-export const options = _options
-export const time = _time
-
-/** Pure builder aliases. */
-export const ffmpegu = {
-  input: FFmpeguInput,
-  output: FFmpeguOutput,
-  command: FFmpeguCommand.make,
-  filters: _filters,
-  options: _options,
-  time: _time
-} as const
-
-export default ffmpegu
+export * as Filter from "./filters/index.ts"
+export * as Options from "./options/index.ts"
+export {
+  FFprobe,
+  type FFprobeConfig,
+  type FFprobeService
+} from "./probe/ffprobe.ts"
+export {
+  ProbeFormat,
+  ProbeResult,
+  ProbeStream,
+  ProjectedProbeResult,
+  ProjectedProbeStream
+} from "./probe/schema.ts"
+export * as Time from "./time.ts"
+export type { Progress, References, RunResult } from "./types/index.ts"

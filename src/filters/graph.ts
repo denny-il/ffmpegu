@@ -1,26 +1,25 @@
-import { FFmpeguArgument } from "../core/argument.ts"
-import type { FFmpeguReferencesInterface } from "../types/index.ts"
-import type { FFmpeguFilterChain } from "./chain.ts"
+import { Argument } from "../core/argument.ts"
+import type { References } from "../types/index.ts"
+import type { Chain } from "./chain.ts"
+import type { Filter } from "./core.ts"
 
 /**
- * Represents a complete filtergraph with multiple chains
- * Chains are separated by semicolons in FFmpeg syntax
+ * A complete filtergraph: chains separated by semicolons in FFmpeg syntax. A
+ * filter stands for a chain of its own.
  */
-export class FFmpeguFilterGraph extends FFmpeguArgument {
-  private readonly chains: ReadonlyArray<FFmpeguFilterChain>
+export class Graph extends Argument {
+  private readonly chains: ReadonlyArray<Chain | Filter>
 
-  constructor(chains: ReadonlyArray<FFmpeguFilterChain>) {
+  constructor(chains: ReadonlyArray<Chain | Filter>) {
     super()
     // Copy so later changes to the caller's array cannot alter this value.
     this.chains = [...chains]
   }
 
-  static create(...chains: FFmpeguFilterChain[]): FFmpeguFilterGraph {
-    return new FFmpeguFilterGraph(chains)
-  }
-
-  getArgs(refs: FFmpeguReferencesInterface): string[] {
-    const chainArgs = this.chains.map((chain) => chain.getArgs(refs)[0])
-    return [chainArgs.join(";")]
+  getArgs(refs: References): string[] {
+    return [this.chains.map((chain) => chain.getArgs(refs)[0]).join(";")]
   }
 }
+
+export const graph = (...chains: ReadonlyArray<Chain | Filter>): Graph =>
+  new Graph(chains)

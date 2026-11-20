@@ -1,7 +1,7 @@
 import * as Duration from "effect/Duration"
-import { FFmpeguArgument } from "./core/argument.ts"
+import { Argument } from "./core/argument.ts"
 
-export type FFmpeguTimeObject = {
+export type TimeObject = {
   hours?: number
   minutes?: number
   seconds?: number
@@ -12,14 +12,14 @@ export type FFmpeguTimeObject = {
  * `Temporal.Duration` when the TypeScript lib declares `Temporal`, otherwise
  * `never`, so the declarations also compile without `esnext.temporal`.
  */
-export type FFmpeguTemporalDuration = typeof globalThis extends {
+export type TemporalDuration = typeof globalThis extends {
   Temporal: { Duration: new (...args: any[]) => infer T }
 }
   ? T
   : never
 
 /** Converted when the command is compiled, so invalid values fail there. */
-export type FFmpeguDurationValue = Duration.Duration | FFmpeguTemporalDuration
+export type DurationValue = Duration.Duration | TemporalDuration
 
 const MS_IN_SECOND = 1_000
 const MS_IN_MINUTE = 60 * MS_IN_SECOND
@@ -37,7 +37,7 @@ const NS_IN_DAY = 24n * NS_IN_HOUR
 // longer values render as decimal seconds, which it parses exactly.
 const MAX_TIMESTAMP_HOURS = 9_999
 
-export const isTimeObject = (value: unknown): value is FFmpeguTimeObject =>
+export const isTimeObject = (value: unknown): value is TimeObject =>
   typeof value === "object" &&
   value !== null &&
   !Array.isArray(value) &&
@@ -75,20 +75,18 @@ const isEffectDuration = (value: object): value is Duration.Duration => {
  * `Temporal.Duration` even has the time object's fields. The native check
  * runs first because it never consults the prototype chain.
  */
-export const isDurationValue = (
-  value: unknown
-): value is FFmpeguDurationValue =>
+export const isDurationValue = (value: unknown): value is DurationValue =>
   typeof value === "object" &&
   value !== null &&
   (isTemporalDuration(value) || isEffectDuration(value))
 
 type ResolvedTimeOptions<T, K extends keyof T> = {
   [P in keyof T]: P extends K
-    ? Exclude<T[P], FFmpeguTimeObject | FFmpeguDurationValue> | FFmpeguArgument
+    ? Exclude<T[P], TimeObject | DurationValue> | Argument
     : T[P]
 }
 
-const timeObjectToMilliseconds = (t: FFmpeguTimeObject): number =>
+const timeObjectToMilliseconds = (t: TimeObject): number =>
   Math.trunc(
     (t.hours ?? 0) * MS_IN_HOUR +
       (t.minutes ?? 0) * MS_IN_MINUTE +
@@ -104,7 +102,7 @@ const MAX_MICROSECONDS = 9_223_372_036_854_775_807n
  * ffmpeg's time base is microseconds; finer precision is truncated. A number
  * is a time object's total, already truncated to milliseconds.
  */
-const toMicroseconds = (value: FFmpeguDurationValue | number): bigint => {
+const toMicroseconds = (value: DurationValue | number): bigint => {
   const microseconds =
     typeof value === "number"
       ? millisecondsToMicroseconds(value)
@@ -124,7 +122,7 @@ const millisecondsToMicroseconds = (milliseconds: number): bigint => {
   return BigInt(milliseconds) * US_IN_MS
 }
 
-const durationToMicroseconds = (value: FFmpeguDurationValue): bigint => {
+const durationToMicroseconds = (value: DurationValue): bigint => {
   // Same order as `isDurationValue`: anything else is an Effect Duration.
   if (!isTemporalDuration(value)) {
     if (!Duration.isFinite(value)) {
@@ -190,13 +188,13 @@ const formatSeconds = (microseconds: bigint): string => {
  * A single time value. Filters escape it like a string, unlike other
  * arguments, whose rendered values are spliced into the filter unescaped.
  */
-export class FFmpeguTimeArgument extends FFmpeguArgument {
+export class TimeArgument extends Argument {
   // Time objects are mutable, so their total is captured here, matching how
   // option bundles copy their inputs. Validation still waits for compile.
-  private readonly value: FFmpeguDurationValue | number
+  private readonly value: DurationValue | number
 
   constructor(
-    value: FFmpeguDurationValue | FFmpeguTimeObject,
+    value: DurationValue | TimeObject,
     private readonly format: (microseconds: bigint) => string
   ) {
     super()
@@ -210,20 +208,18 @@ export class FFmpeguTimeArgument extends FFmpeguArgument {
   }
 }
 
-export const timestampArgument = (
-  value: FFmpeguDurationValue | FFmpeguTimeObject
-) => new FFmpeguTimeArgument(value, formatTimestamp)
+export const timestampArgument = (value: DurationValue | TimeObject) =>
+  new TimeArgument(value, formatTimestamp)
 
-export const secondsArgument = (
-  value: FFmpeguDurationValue | FFmpeguTimeObject
-) => new FFmpeguTimeArgument(value, formatSeconds)
+export const secondsArgument = (value: DurationValue | TimeObject) =>
+  new TimeArgument(value, formatSeconds)
 
 export const resolveSecondsOptions = <
   T extends Record<string, unknown>,
   K extends keyof T
 >(
   options: T,
-  keys: K[]
+  keys: ReadonlyArray<K>
 ): ResolvedTimeOptions<T, K> => {
   const resolved = { ...options } as ResolvedTimeOptions<T, K>
 
@@ -239,6 +235,3 @@ export const resolveSecondsOptions = <
 
   return resolved
 }
-
-export const formatBitrate = (value: string | number, unit?: string) =>
-  typeof unit === "undefined" ? value : `${value}${unit}`

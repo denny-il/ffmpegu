@@ -3,18 +3,18 @@
  * `tsc -p tsconfig.test.json`, never executed.
  */
 import { Duration } from "effect"
-import { Options, filters, options, time } from "../../src/index.ts"
+import { Filter, Options, Time } from "../../src/index.ts"
 
-const start = time.timestamp(Duration.seconds(1))
+const start = Time.timestamp(Duration.seconds(1))
 // Adapters are values for raw options, helpers, muxer keys, and filters.
-Options.create({ ss: start }, ["t", time.seconds({ seconds: 2 })])
-options.startTime(start)
-options.hls({ hls_time: time.seconds(Duration.seconds(4)) })
-options.dash({ suggested_presentation_delay: time.seconds({ seconds: 2 }) })
-filters.atrim({ start })
-filters.custom("trim", { start })
+Options.make({ ss: start }, ["t", Time.seconds({ seconds: 2 })])
+Options.startTime(start)
+Options.hls({ hls_time: Time.seconds(Duration.seconds(4)) })
+Options.dash({ suggested_presentation_delay: Time.seconds({ seconds: 2 }) })
+Filter.atrim({ start })
+Filter.make("trim", { start })
 
 // @ts-expect-error strings are already FFmpeg syntax and have nothing to convert
-time.timestamp("00:01")
+Time.timestamp("00:01")
 // @ts-expect-error numbers are ambiguous: Effect reads them as milliseconds
-time.seconds(1500)
+Time.seconds(1500)

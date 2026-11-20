@@ -1,9 +1,7 @@
-import type { FFmpeguUserArgValue } from "../../types/index.ts"
-import { formatBitrate } from "../../utils.ts"
-import type { FFmpeguBitrateUnit, FFmpeguBitrateValue } from "../common.ts"
-import { FFmpeguOptions } from "../core.ts"
+import { make } from "../core.ts"
+import { bitrateOption, filterOption } from "../internal.ts"
 
-export type FFmpeguAudioCodec =
+export type AudioCodec =
   | "aac"
   | "libfdk_aac"
   | "libopus"
@@ -28,37 +26,17 @@ export type FFmpeguAudioCodec =
   | "copy"
   | ({} & string)
 
-export const audioCopy = () => FFmpeguOptions.create(["-c:a", "copy"])
+export const audioCopy = () => make(["-c:a", "copy"])
 
-export const audioCodec = (codec: FFmpeguAudioCodec) =>
-  FFmpeguOptions.create(["-c:a", codec])
+export const audioCodec = (codec: AudioCodec) => make(["-c:a", codec])
 
-export function audioBitrate(
-  bitrate: number,
-  unit: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function audioBitrate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function audioBitrate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions {
-  return FFmpeguOptions.create(["-b:a", formatBitrate(bitrate, unit)])
-}
+export const audioBitrate = bitrateOption("-b:a")
 
-export const profileAudio = (value: string) =>
-  FFmpeguOptions.create(["-profile:a", value])
+export const audioProfile = (value: string) => make(["-profile:a", value])
 
-export const audioChannels = (value: number) =>
-  FFmpeguOptions.create(["-ac", value])
-export const audioSampleRate = (value: number) =>
-  FFmpeguOptions.create(["-ar", value])
-export const audioSampleFormat = (value: string) =>
-  FFmpeguOptions.create(["-sample_fmt", value])
-export const audioQuality = (value: number) =>
-  FFmpeguOptions.create(["-q:a", value])
+export const audioChannels = (value: number) => make(["-ac", value])
+export const audioSampleRate = (value: number) => make(["-ar", value])
+export const audioSampleFormat = (value: string) => make(["-sample_fmt", value])
+export const audioQuality = (value: number) => make(["-q:a", value])
 
-export const audioFilter = (value: FFmpeguUserArgValue) =>
-  FFmpeguOptions.create(["-af", value])
+export const audioFilter = filterOption("-af")

@@ -1,41 +1,31 @@
-import { FFmpeguArgument } from "../core/argument.ts"
-import type {
-  FFmpeguPrimitiveUserArgValue,
-  FFmpeguUserArgValue
-} from "../types/index.ts"
+import { Argument } from "../core/argument.ts"
 import {
-  type FFmpeguDurationValue,
-  type FFmpeguTimeObject,
+  type DurationValue,
+  type TimeObject,
   timestampArgument
 } from "../utils.ts"
-import { FFmpeguOptions } from "./core.ts"
+import { type ArgValue, make } from "./core.ts"
 
 /**
  * Appended verbatim. Lowercase `m` is milli and lowercase `g`/`t` are rejected
  * by FFmpeg, so mega, giga, and tera are only offered uppercase.
  */
-export type FFmpeguBitrateUnit = "k" | "K" | "M" | "G" | "T"
-export type FFmpeguBitrateValue = string | number
-export type FFmpeguRateValue = string | number
-export type FFmpeguSizeValue = string
-export type { FFmpeguDurationValue, FFmpeguTimeObject }
-/** Numbers are seconds. Arguments, such as `time.seconds(d)`, pass through. */
-export type FFmpeguTimeValue =
-  | string
-  | number
-  | FFmpeguDurationValue
-  | FFmpeguTimeObject
-  | FFmpeguArgument
+export type BitrateUnit = "k" | "K" | "M" | "G" | "T"
+export type BitrateValue = string | number
+export type RateValue = string | number
+export type SizeValue = string
+/** Numbers are seconds. Arguments, such as `Time.seconds(d)`, pass through. */
+export type TimeValue = string | number | DurationValue | TimeObject | Argument
 
-const resolveTime = (value: FFmpeguTimeValue): FFmpeguUserArgValue =>
+const resolveTime = (value: TimeValue): ArgValue =>
   // Checked first: an argument is an object, but not a time value.
-  value instanceof FFmpeguArgument
+  value instanceof Argument
     ? value
     : typeof value === "object"
       ? timestampArgument(value)
       : value
 
-export type FFmpeguFormat =
+export type Format =
   | "mp4"
   | "mov"
   | "mkv"
@@ -71,37 +61,29 @@ export type FFmpeguFormat =
   | "null"
   | ({} & string)
 
-export const overwrite = () => FFmpeguOptions.create("-y")
-export const noOverwrite = () => FFmpeguOptions.create("-n")
+export const overwrite = () => make("-y")
+export const noOverwrite = () => make("-n")
 
-export const format = (value: FFmpeguFormat) =>
-  FFmpeguOptions.create(["-f", value])
-export const logLevel = (value: string) =>
-  FFmpeguOptions.create(["-loglevel", value])
-export const threads = (value: number) =>
-  FFmpeguOptions.create(["-threads", value])
+export const format = (value: Format) => make(["-f", value])
+export const logLevel = (value: string) => make(["-loglevel", value])
+export const threads = (value: number) => make(["-threads", value])
 
-export const map = (value: FFmpeguPrimitiveUserArgValue) =>
-  FFmpeguOptions.create(["-map", value])
+export const map = (value: string | Argument) => make(["-map", value])
 
-export const noVideo = () => FFmpeguOptions.create("-vn")
-export const noAudio = () => FFmpeguOptions.create("-an")
-export const noSubtitle = () => FFmpeguOptions.create("-sn")
-export const noData = () => FFmpeguOptions.create("-dn")
+export const noVideo = () => make("-vn")
+export const noAudio = () => make("-an")
+export const noSubtitle = () => make("-sn")
+export const noData = () => make("-dn")
 
-export const shortest = () => FFmpeguOptions.create("-shortest")
-export const startTime = (value: FFmpeguTimeValue) =>
-  FFmpeguOptions.create(["-ss", resolveTime(value)])
-export const duration = (value: FFmpeguTimeValue) =>
-  FFmpeguOptions.create(["-t", resolveTime(value)])
-export const to = (value: FFmpeguTimeValue) =>
-  FFmpeguOptions.create(["-to", resolveTime(value)])
+export const shortest = () => make("-shortest")
+export const startTime = (value: TimeValue) => make(["-ss", resolveTime(value)])
+export const duration = (value: TimeValue) => make(["-t", resolveTime(value)])
+export const to = (value: TimeValue) => make(["-to", resolveTime(value)])
 
-export const copy = () => FFmpeguOptions.create(["-c", "copy"])
-export const filterComplex = (value: FFmpeguUserArgValue) =>
-  FFmpeguOptions.create(["-filter_complex", value])
+export const copy = () => make(["-c", "copy"])
+export const filterComplex = (value: ArgValue) =>
+  make(["-filter_complex", value])
 
-export const movFlags = (value: string) =>
-  FFmpeguOptions.create(["-movflags", value])
+export const movFlags = (value: string) => make(["-movflags", value])
 export const metadata = (key: string, value: string | number) =>
-  FFmpeguOptions.create(["-metadata", `${key}=${value}`])
+  make(["-metadata", `${key}=${value}`])

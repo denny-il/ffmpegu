@@ -1,4 +1,4 @@
-import { filters, options } from "ffmpegu"
+import { Filter, Options } from "ffmpegu"
 
-options.startTime(Temporal.Duration.from({ seconds: 1 }))
-filters.atrim({ duration: Temporal.Duration.from({ milliseconds: 500 }) })
+Options.startTime(Temporal.Duration.from({ seconds: 1 }))
+Filter.atrim({ duration: Temporal.Duration.from({ milliseconds: 500 }) })

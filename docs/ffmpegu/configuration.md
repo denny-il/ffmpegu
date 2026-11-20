@@ -52,20 +52,20 @@ Choose the seam that matches what you are testing.
 
 ### Commands
 
-`compile()` and `Command.toArgs` are pure, so command construction can be asserted without FFmpeg:
+`compile()` and `toArgs()` are pure, so command construction can be asserted without FFmpeg:
 
 ```ts
 import { expect, it } from "@effect/vitest"
 import { Result } from "effect"
-import { Command, Input, Output, options } from "ffmpegu"
+import { Command, Input, Options, Output } from "ffmpegu"
 
 it("maps only the video stream", () => {
   const input = Input.fromFile("in.mp4")
   const command = Command.make({
     inputs: [input],
-    outputs: [Output.toFile("out.mp4", options.map(input.video))]
+    outputs: [Output.toFile("out.mp4", Options.map(input.video))]
   })
-  expect(Result.getOrThrow(Command.toArgs(command))).toEqual([
+  expect(Result.getOrThrow(command.toArgs())).toEqual([
     "-i", "in.mp4", "-map", "0:v", "out.mp4"
   ])
 })
@@ -73,12 +73,12 @@ it("maps only the video stream", () => {
 
 ### Code that uses the services
 
-Replace the services with `Layer.mock`. It takes a partial implementation; members left out die with an "unimplemented" defect when called. Callers of `run` and `stream` keep their command's error and requirement types, so the mock does not need to be generic.
+Replace the services with `Layer.mock`. It takes a partial implementation; members left out die with an "unimplemented" defect when called. Callers of `FFmpeg.run` and `FFmpeg.stream` keep their command's error and requirement types, so the mock does not need to be generic.
 
 ```ts
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { FFmpeg, FFprobe, probe } from "ffmpegu"
+import { FFmpeg, FFprobe } from "ffmpegu"
 
 const FFmpegTest = Layer.mock(FFmpeg, {
   run: () => Effect.succeed({ args: [], stderr: "" })
@@ -90,13 +90,13 @@ const FFprobeTest = Layer.mock(FFprobe, {
 
 it.effect("reads the stream count", () =>
   Effect.gen(function* () {
-    const metadata = yield* probe("song.mp3")
+    const metadata = yield* FFprobe.probe("song.mp3")
     expect(metadata.streams).toHaveLength(1)
   }).pipe(Effect.provide(Layer.merge(FFmpegTest, FFprobeTest)))
 )
 ```
 
-`probeWith` with a schema calls the service's `probeJson`, which returns FFprobe's raw JSON as `unknown`; the library then decodes it with your schema. Mock `probeJson` for those calls, and note that a fixture that does not match the schema fails with `ProbeDecodeError`.
+`FFprobe.probeWith` with a schema calls the service's `probeJson`, which returns FFprobe's raw JSON as `unknown`; the library then decodes it with your schema. Mock `probeJson` for those calls, and note that a fixture that does not match the schema fails with `ProbeDecodeError`.
 
 ### Process behavior
 

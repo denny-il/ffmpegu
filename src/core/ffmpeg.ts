@@ -34,7 +34,7 @@ import {
   type CompiledCommand,
   type CompiledInputStream,
   type CompiledOutputStream,
-  type FFmpeguCommand,
+  type Command,
   PROGRESS_FD
 } from "./command.ts"
 import { ByteTail, ProgressParser } from "./diagnostics.ts"
@@ -70,7 +70,7 @@ export interface RunOptions<PE = never, PR = never> {
     | undefined
 }
 
-export interface FFmpegOptions {
+export interface FFmpegConfig {
   /** Binary name or path. Defaults to `"ffmpeg"`. */
   readonly binary?: string | undefined
   /**
@@ -91,7 +91,7 @@ export interface FFmpegOptions {
 export interface FFmpegService {
   /** Run a command without `Output.toStream` outputs. */
   readonly run: <E, R, PE = never, PR = never>(
-    command: FFmpeguCommand<E, R, 0>,
+    command: Command<E, R, 0>,
     options?: RunOptions<PE, PR>
   ) => Effect.Effect<RunResult, FFmpegError | E | PE, R | PR>
   /**
@@ -102,7 +102,7 @@ export interface FFmpegService {
    * ffmpeg and releases the inputs.
    */
   readonly stream: <E, R, PE = never, PR = never>(
-    command: FFmpeguCommand<E, R, 1>,
+    command: Command<E, R, 1>,
     options?: RunOptions<PE, PR>
   ) => Stream.Stream<Uint8Array, FFmpegError | E | PE, R | PR>
 }
@@ -115,7 +115,7 @@ export class FFmpeg extends Context.Service<FFmpeg, FFmpegService>()(
    * Invalid options are defects.
    */
   static layer = (
-    options: FFmpegOptions = {}
+    options: FFmpegConfig = {}
   ): Layer.Layer<FFmpeg, never, ChildProcessSpawner> =>
     Layer.effect(
       FFmpeg,
@@ -128,29 +128,29 @@ export class FFmpeg extends Context.Service<FFmpeg, FFmpegService>()(
    * values fail with `ConfigError`.
    */
   static layerConfig = (
-    options: Config.Wrap<FFmpegOptions>
+    options: Config.Wrap<FFmpegConfig>
   ): Layer.Layer<FFmpeg, Config.ConfigError, ChildProcessSpawner> =>
     Layer.effect(
       FFmpeg,
       Effect.flatMap(validatedConfig(options, toSettings), make)
     )
+
+  /** Run a command with the `FFmpeg` service from the context. */
+  static run = <E, R, PE = never, PR = never>(
+    command: Command<E, R, 0>,
+    options?: RunOptions<PE, PR>
+  ): Effect.Effect<RunResult, FFmpegError | E | PE, FFmpeg | R | PR> =>
+    FFmpeg.use((ffmpeg) => ffmpeg.run(command, options))
+
+  /** Stream a command's output with the `FFmpeg` service from the context. */
+  static stream = <E, R, PE = never, PR = never>(
+    command: Command<E, R, 1>,
+    options?: RunOptions<PE, PR>
+  ): Stream.Stream<Uint8Array, FFmpegError | E | PE, FFmpeg | R | PR> =>
+    Stream.unwrap(
+      FFmpeg.use((ffmpeg) => Effect.succeed(ffmpeg.stream(command, options)))
+    )
 }
-
-/** Run a command with the `FFmpeg` service from the context. */
-export const run = <E, R, PE = never, PR = never>(
-  command: FFmpeguCommand<E, R, 0>,
-  options?: RunOptions<PE, PR>
-): Effect.Effect<RunResult, FFmpegError | E | PE, FFmpeg | R | PR> =>
-  FFmpeg.use((ffmpeg) => ffmpeg.run(command, options))
-
-/** Stream a command's output with the `FFmpeg` service from the context. */
-export const stream = <E, R, PE = never, PR = never>(
-  command: FFmpeguCommand<E, R, 1>,
-  options?: RunOptions<PE, PR>
-): Stream.Stream<Uint8Array, FFmpegError | E | PE, FFmpeg | R | PR> =>
-  Stream.unwrap(
-    FFmpeg.use((ffmpeg) => Effect.succeed(ffmpeg.stream(command, options)))
-  )
 
 interface Settings {
   readonly binary: string
@@ -158,7 +158,7 @@ interface Settings {
   readonly stderrTailBytes: number
 }
 
-const toSettings = Effect.fnUntraced(function* (options: FFmpegOptions) {
+const toSettings = Effect.fnUntraced(function* (options: FFmpegConfig) {
   return {
     binary: options.binary ?? "ffmpeg",
     forceKillAfter: yield* durationOption(
@@ -178,7 +178,7 @@ const make = Effect.fnUntraced(function* (settings: Settings) {
   const spawner = yield* ChildProcessSpawner
 
   const run = Effect.fn("ffmpegu/FFmpeg.run")(function* (
-    command: FFmpeguCommand<unknown, unknown>,
+    command: Command<unknown, unknown>,
     options?: RunOptions<unknown, unknown>
   ) {
     const compiled = yield* Effect.fromResult(command.compile())
@@ -192,7 +192,7 @@ const make = Effect.fnUntraced(function* (settings: Settings) {
         reason: new StreamOutput({
           count: compiled.streamOutputFds.length,
           message:
-            "The command has an Output.toStream output, which run cannot consume. Use stream(command) instead."
+            "The command has an Output.toStream output, which FFmpeg.run cannot consume. Use FFmpeg.stream instead."
         })
       })
     }
@@ -206,7 +206,7 @@ const make = Effect.fnUntraced(function* (settings: Settings) {
   })
 
   const stream = (
-    command: FFmpeguCommand<unknown, unknown>,
+    command: Command<unknown, unknown>,
     options?: RunOptions<unknown, unknown>
   ) =>
     Stream.unwrap(
@@ -221,8 +221,8 @@ const make = Effect.fnUntraced(function* (settings: Settings) {
               count: fds.length,
               message:
                 fds.length === 0
-                  ? "The command has no Output.toStream output to stream."
-                  : `The command has ${fds.length} Output.toStream outputs; stream reads exactly one. Write the others to files or sinks.`
+                  ? "The command has no Output.toStream output for FFmpeg.stream to read."
+                  : `The command has ${fds.length} Output.toStream outputs; FFmpeg.stream reads exactly one. Write the others to files or sinks.`
             })
           })
         }
@@ -299,7 +299,7 @@ const make = Effect.fnUntraced(function* (settings: Settings) {
  */
 const runAttributes = (
   settings: Settings,
-  command: FFmpeguCommand<unknown, unknown>,
+  command: Command<unknown, unknown>,
   compiled: CompiledCommand<unknown, unknown>,
   options: RunOptions<unknown, unknown> | undefined
 ) => ({
