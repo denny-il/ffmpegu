@@ -4,7 +4,7 @@ Notable changes to ffmpegu, newest first. Versions follow [semantic versioning](
 
 Releases before 0.6.0 are described in the [GitHub releases](https://github.com/denny-il/ffmpegu/releases).
 
-## 0.6.0 (unreleased)
+## 0.6.0
 
 The public API now has one name per concept. Builders, helpers, and their types live in three namespaces, `Options`, `Filter`, and `Time`, and commands run through the `FFmpeg` and `FFprobe` services. This release is breaking and ships no compatibility aliases.
 
