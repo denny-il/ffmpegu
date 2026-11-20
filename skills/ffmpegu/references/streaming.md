@@ -13,9 +13,9 @@
 | MPEG-TS | `Options.format("mpegts")` |
 | WebM / Matroska | `Options.format("webm")` / `Options.format("matroska")` |
 | Ogg (Opus, Vorbis) | `Options.format("ogg")` |
-| Raw PCM | `Options.make({ f: "s16le", ar: 48000, ac: 2 })` |
-| Raw video | `Options.make({ f: "rawvideo", pix_fmt: "rgb24" })` |
-| Image frames | `Options.make({ f: "image2pipe", "c:v": "mjpeg" })` |
+| Raw PCM | `{ f: "s16le", ar: 48000, ac: 2 }` |
+| Raw video | `{ f: "rawvideo", pix_fmt: "rgb24" }` |
+| Image frames | `{ f: "image2pipe", "c:v": "mjpeg" }` |
 
 For regular, seekable MP4 files, use `Output.toFile` with `Options.movFlags("+faststart")`.
 
@@ -40,7 +40,7 @@ const output = Output.toFile(
 //   -hls_segment_filename hls/segment_%03d.ts -hls_flags independent_segments hls/index.m3u8
 ```
 
-FFmpeg does not create the output directory; create it first, for example with Effect `FileSystem.makeDirectory(dir, { recursive: true })`. For an adaptive ladder, use `split` and `scale` in a `filterComplex`, map each rendition, and set `var_stream_map` (`"v:0,a:0 v:1,a:1"`) and `master_pl_name`, with `%v` in the segment and playlist names.
+FFmpeg does not create the output directory; create it first, for example with Effect's `FileSystem` service: `const fs = yield* FileSystem.FileSystem`, then `yield* fs.makeDirectory(dir, { recursive: true })`. For an adaptive ladder, use `split` and `scale` in a `filterComplex`, map each rendition, and set `var_stream_map` (`"v:0,a:0 v:1,a:1"`) and `master_pl_name`, with `%v` in the segment and playlist names.
 
 Typed DASH keys: `seg_duration`, `frag_duration`, `frag_type` (`none`, `every_frame`, `duration`, `pframes`), `dash_segment_type` (`auto`, `mp4`, `webm`), `window_size`, `extra_window_size`, `adaptation_sets`, `use_template`, `use_timeline`, `single_file`, `single_file_name`, `init_seg_name`, `media_seg_name`, `streaming`, `ldash`, `lhls`, `target_latency`, `min_playback_rate`, `max_playback_rate`, `update_period`, `utc_timing_url`, `write_prft` (`auto` or a boolean), `hls_playlist`, `hls_master_name`, `master_m3u8_publish_rate`, `mpd_profile` (`dash`, `dvb_dash`), `global_sidx`, `index_correction`, `remove_at_exit`, `format_options`, `method`, `http_opts`, `http_user_agent`, `http_persistent`, `timeout`, `ignore_io_errors`.
 

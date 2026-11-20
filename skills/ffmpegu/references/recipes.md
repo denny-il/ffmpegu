@@ -1,6 +1,6 @@
 # Recipes
 
-Each recipe shows a command and the argv that `command.toArgs()` returns for it. Run it with `FFmpeg.run(command)` and provide `FFmpeg` (and `FFprobe` where used). Imports: `import { Command, FFmpeg, FFprobe, Filter, Input, Options, Output } from "ffmpegu"`, plus `Duration`, `Effect`, `FileSystem`, `Schema`, and `Stream` from `effect`.
+Each recipe shows a command and the argv that `command.toArgs()` returns for it. Run it with `FFmpeg.run(command)`, or with `FFmpeg.stream(command)` when it has an `Output.toStream`, and provide `FFmpeg` (and `FFprobe` where used). Imports: `import { Command, FFmpeg, FFprobe, Filter, Input, Options, Output } from "ffmpegu"`, plus `Duration`, `Effect`, `FileSystem`, `Schema`, and `Stream` from `effect`.
 
 ## Transcode for the web
 
@@ -152,11 +152,9 @@ const toMp3 = <E, R>(upload: Stream.Stream<Uint8Array, E, R>) =>
   FFmpeg.stream(
     Command.make({
       inputs: [Input.fromStream(upload)],
-      outputs: [Output.toStream(
-        Options.noVideo(),
-        Options.audioCodec("libmp3lame"),
-        Options.format("mp3")
-      )]
+      outputs: [
+        Output.toStream(Options.noVideo(), Options.audioCodec("libmp3lame"), Options.format("mp3"))
+      ]
     })
   )
 // -i pipe:4 -vn -c:a libmp3lame -f mp3 pipe:5
@@ -192,12 +190,14 @@ Command.make({
     Input.fromFile("testsrc2=size=640x360:rate=30:duration=2", Options.format("lavfi")),
     Input.fromFile("sine=frequency=440:duration=2", Options.format("lavfi"))
   ],
-  outputs: [Output.toFile(
-    "test.mp4",
-    Options.videoCodec("libx264"),
-    Options.pixelFormat("yuv420p"),
-    Options.audioCodec("aac")
-  )]
+  outputs: [
+    Output.toFile(
+      "test.mp4",
+      Options.videoCodec("libx264"),
+      Options.pixelFormat("yuv420p"),
+      Options.audioCodec("aac")
+    )
+  ]
 })
 // -y -f lavfi -i testsrc2=size=640x360:rate=30:duration=2 -f lavfi -i sine=frequency=440:duration=2
 //   -c:v libx264 -pix_fmt yuv420p -c:a aac test.mp4

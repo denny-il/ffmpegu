@@ -126,6 +126,7 @@ FFmpeg.run(command).pipe(
 
 - [Guide and reference](docs/README.md): [getting started](docs/ffmpegu/getting-started.md), [commands](docs/ffmpegu/command.md), [inputs and outputs](docs/ffmpegu/inputs-outputs.md), [running](docs/ffmpegu/running.md), [FFprobe](docs/ffmpegu/ffprobe.md), [options](docs/ffmpegu/options.md), [filters](docs/ffmpegu/filters.md), [errors and types](docs/ffmpegu/errors.md), [configuration and testing](docs/ffmpegu/configuration.md)
 - [Recipes](docs/ffmpegu/recipes.md): thumbnails, clips, web encodes, HLS, concatenation, progress percentages, and more.
+- [Changelog](CHANGELOG.md): what changed in each release, with migration notes for breaking ones.
 
 ## Agent skill
 

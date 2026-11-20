@@ -53,7 +53,8 @@ Reasons are tagged classes, so never compare `error.reason === "ReservedPath"`.
 | --- | --- |
 | `SpawnError` | FFmpeg is not on `PATH`; set `binary` in the layer |
 | `ExitError`, stderr "Unknown encoder" | This FFmpeg build lacks the codec; check `ffmpeg -encoders` |
-| `ExitError`, stderr "Output file … does not contain any stream" | A `map` references a stream that doesn't exist; use `track(n)` or drop the map |
+| `ExitError`, stderr "Stream map … matches no streams" | A `map` references a stream the input doesn't have; map another stream or drop the map |
+| `ExitError`, stderr "Output file does not contain any stream" | Every stream was disabled or left unmapped, for example `noAudio()` on an audio-only input |
 | `ExitError`, "muxer does not support non seekable output" | A pipe output needs a streamable muxer; see [streaming.md](streaming.md#pipes-and-sinks) |
 | `ExitError`, "Invalid data found when processing input" on a stream input | A missing `f` for a raw or ambiguous pipe input, or an MP4 with a trailing `moov` |
 | `OutputError` / `SinkEndedEarly` | The sink stopped early (for example `Sink.take`); consume everything |

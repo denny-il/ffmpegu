@@ -4,12 +4,13 @@ Everything here is pure: building values never spawns a process or touches the f
 
 ## Imports
 
-Use named exports: `import { Command, Input, Output, Options, Filter, Time } from "ffmpegu"`. `Options`, `Filter`, and `Time` are namespaces holding a constructor, helpers, and types (`Options.Options` is the bundle type, `Filter.ScaleOptions` a helper's options). There is no default export, and the names of 0.5 and earlier (`options.*`, `filters.*`, `Options.create`, `FFmpegu*` classes, bare `run`/`probe`) no longer exist.
+Use named exports: `import { Command, Input, Output, Options, Filter, Time } from "ffmpegu"`. `Options`, `Filter`, and `Time` are namespaces holding a constructor, helpers, and types (`Options.Options` is the bundle type, `Filter.ScaleOptions` a helper's options). Types live in the namespaces too: `Options.Arg` (any option form, written `Arg` below), `Options.VideoCodec`, `Options.HlsOptions`, `Filter.Filter`, `Filter.Labels`. There is no default export.
 
 ## Commands
 
 ```ts
 Command.make({ global?: Arg, inputs?: Input[], outputs?: Output[] }): Command<E, R, S>
+Command.make()                                      // empty; add parts with the methods below
 command.withGlobal(options: Arg)                    // appends to existing global options
 command.withInput(input) / command.withOutput(output)
 Command.withOutput(output)(command)                 // data-last, for command.pipe(...)
@@ -23,9 +24,9 @@ Rendering: `[global] ([input options] -i <input>)... ([output options] <output>)
 Type parameters:
 
 - `E` and `R`: unions of the error and requirement types of all input streams and output sinks.
-- `S`: number of `Output.toStream` outputs, `0`, `1`, or `2` (two or more). `FFmpeg.run` requires `0` and `FFmpeg.stream` requires `1`. `S = any` (from a `Command<E, R>` annotation, `new Output(...)`, or arrays of unknown length) defers the check to runtime. An output chosen by a ternary has `S = 0 | 1` and fits neither runner, so branch on the whole command instead.
+- `S`: number of `Output.toStream` outputs, `0`, `1`, or `2` (two or more). `FFmpeg.run` requires `0` and `FFmpeg.stream` requires `1`. `S = any` (from a `Command<E, R>` annotation, `new Output(...)`, or an array of unknown length that may hold a stream output) defers the check to runtime, where the runner fails with `CommandError` (`StreamOutput`). An output chosen by a ternary has `S = 0 | 1` and fits neither runner, so branch on the whole command instead.
 
-Compile failures are `CommandError` with a tagged `reason`:
+Failures are `CommandError` with a tagged `reason`. `compile()` and `toArgs()` report all of them except `StreamOutput`, which only the runners raise:
 
 | Reason | Cause |
 | --- | --- |
@@ -34,18 +35,18 @@ Compile failures are `CommandError` with a tagged `reason`:
 | `ReservedPath` | A path or option value is `pipe:…`, `fd:…`, `/dev/std*`, `/dev/fd/*`, or `/proc/*/fd/*`, or an input or output path is `-`. |
 | `ReservedOption` | Options set `-i`, `-progress`, or `-stdin`, including forms such as `-progress:v`. |
 | `InvalidArgument` | Invalid duration, track index outside 0..2147483647, output path starting with `-` (write `./-x.mp4`), or a builder that threw. |
-| `StreamOutput` | Wrong runner for the stream-output count, when it was unknown at compile time. |
+| `StreamOutput` | From `FFmpeg.run` or `FFmpeg.stream`: wrong runner for the stream-output count, when the types could not tell. |
 
 A standalone token spelled exactly like a reserved option is rejected even as another option's value; embedded text such as `title=-i` is fine.
 
 ## Inputs and outputs
 
 ```ts
-Input.fromFile(pathOrUrl: string, ...options: Arg[]): Input<never, never>
-Input.fromStream(stream: Stream<Uint8Array, E, R>, ...options: Arg[]): Input<E, R>
-Output.toFile(path: string, ...options: Arg[]): Output<never, never, 0>
-Output.toSink(sink: Sink<void, Uint8Array, never, E, R>, ...options: Arg[]): Output<E, R, 0>
-Output.toStream(...options: Arg[]): Output<never, never, 1>
+Input.fromFile(pathOrUrl: string, ...options: (Arg | undefined)[]): Input<never, never>
+Input.fromStream(stream: Stream<Uint8Array, E, R>, ...options: (Arg | undefined)[]): Input<E, R>
+Output.toFile(path: string, ...options: (Arg | undefined)[]): Output<never, never, 0>
+Output.toSink(sink: Sink<void, Uint8Array, never, E, R>, ...options: (Arg | undefined)[]): Output<E, R, 0>
+Output.toStream(...options: (Arg | undefined)[]): Output<never, never, 1>
 ```
 
 - `Arg` (`Options.Arg`) is any [option form](#option-bundles): a bundle, a record, a tuple, or a verbatim string. Pass them directly, as in `Output.toFile("out.mp4", Options.videoCodec("libx264"), { crf: 23 })`; no `Options.make` wrapper is needed, and `undefined` entries are skipped, so an optional bundle can be passed as it is. `global` and `withGlobal` take one form, so wrap several in `Options.make`.
@@ -116,7 +117,7 @@ Video helpers are in [video.md](video.md), audio helpers in [audio.md](audio.md)
 | Value | Renders as option | Renders in filter |
 | --- | --- | --- |
 | `90.5` (seconds) | `90.5` | `90.5` |
-| `"00:01:30.5"` (verbatim) | `00:01:30.5` | `00:01:30.5` (must be in the filter's own syntax: `atrim` accepts timestamps, but `fps.start_time` takes seconds only) |
+| `"00:01:30.5"` (verbatim) | `00:01:30.5` | `00:01:30.5`, colons escaped (must be in the filter's own syntax: `atrim` accepts timestamps, but `fps.start_time` takes seconds only) |
 | `{ minutes: 1, seconds: 30, milliseconds: 500 }` | `00:01:30.500` | `90.5` |
 | `Duration.millis(1500)` | `00:00:01.500` | `1.5` |
 | `Temporal.Duration.from({ seconds: 2, microseconds: 5 })` | `00:00:02.000005` | `2.000005` |
@@ -146,7 +147,7 @@ Filter.scale(options?, { inputs?, outputs? })       // every typed helper has th
 Filter.chain(...filters)             // "a,b"
 Filter.graph(...chainsOrFilters)     // "c1;c2" → Options.filterComplex(graph); a filter is a chain of one
 Filter.label("name")                 // [name], also usable as an option value: Options.map(label)
-Options.videoFilter(...filters) / Options.audioFilter(...filters)  // one filter, several (a chain), a chain, or a raw string
+Options.videoFilter(first, ...moreFilters)  // first: a filter, a chain, or a raw string; more: filters. Same for audioFilter
 ```
 
 - `inputs` take names, stream references, and labels directly (`{ inputs: [main.video, "logo"] }`); `outputs` take names and labels. Use `Filter.label` only for a label you also pass to `-map`.

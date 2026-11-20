@@ -58,7 +58,7 @@ interface Progress {
 - The callback returns an `Effect` and runs serially. Updates that arrive while it is busy are coalesced to the latest, so a slow callback never stalls encoding.
 - On success the final update is delivered and awaited. A failing callback fails the run.
 - Fields are `undefined` for `N/A`. A final `"end"` is never fabricated for a killed process.
-- For a percentage, probe `format.duration` first: `Duration.toSeconds(p.outTime) / Number(duration)`.
+- For a percentage, probe `format.duration` first, and guard `p.outTime`, which can be `undefined`: `p.outTime && Duration.toSeconds(p.outTime) / Number(duration)`. See the progress recipe in [recipes.md](recipes.md#progress-percentage).
 
 ## Cancellation, deadlines, and concurrency
 

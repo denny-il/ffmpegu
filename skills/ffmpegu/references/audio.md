@@ -15,14 +15,14 @@
 | `audioFilter(...filters)` | `-af chain` |
 | `noAudio()` | `-an` |
 
-Raw PCM has no header, so describe it on both sides of a pipe: `Options.make({ f: "s16le", ar: 48000, ac: 2 })`. Use the same record as input options for raw input and as output options for raw output.
+Raw PCM has no header, so describe it on both sides of a pipe: `{ f: "s16le", ar: 48000, ac: 2 }`. Use the same record as input options for raw input and as output options for raw output.
 
 Common choices:
 
 - **AAC in MP4/HLS:** `audioCodec("aac")` and `audioBitrate(128, "k")`.
 - **Opus in Ogg or WebM:** `audioCodec("libopus")`, `audioBitrate(64, "k")`, and `format("ogg")` when piping.
 - **MP3 VBR:** `audioCodec("libmp3lame")` and `audioQuality(2)`.
-- **Speech-recognition input:** `Options.make({ f: "s16le", ac: 1, ar: 16000 })`.
+- **Speech-recognition input:** `{ f: "s16le", ac: 1, ar: 16000 }`.
 
 ## Filters
 

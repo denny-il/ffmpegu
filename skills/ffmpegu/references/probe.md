@@ -7,11 +7,11 @@ FFprobe.probeWith<S extends Schema.Top>(input: string, options: Arg, schema: S)
   : Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
 ```
 
-`input` is any path or URL FFprobe can open. Every call spawns FFprobe and decodes its JSON; there is no wrapper object.
+`input` is any path or URL FFprobe can open. `options` (`Options.Arg`) is a bundle or a single option form, usually a record of FFprobe option names. Every call spawns FFprobe and decodes its JSON; there is no wrapper object.
 
 ## probe
 
-`FFprobe.probe` runs `ffprobe -show_format -show_streams`. It is unary, so `Effect.forEach(paths, FFprobe.probe)` works directly. `options` is a bundle or a single option form, usually a record of FFprobe option names.
+`FFprobe.probe` runs `ffprobe -show_format -show_streams`. It is unary, so `Effect.forEach(paths, FFprobe.probe)` works directly.
 
 ```ts
 const metadata = yield* FFprobe.probe("input.mp4")
@@ -19,7 +19,7 @@ const video = metadata.streams.find((s) => s.codec_type === "video")
 const seconds = Number(metadata.format?.duration)   // numeric strings stay strings
 ```
 
-`ProbeResult` is `{ streams: ProbeStream[]; format?: ProbeFormat }`, with unknown keys preserved as `unknown`. `streams` defaults to `[]`.
+`ProbeResult` is `{ readonly streams: ReadonlyArray<ProbeStream>; readonly format?: ProbeFormat }`, with unknown keys preserved as `unknown`. `streams` defaults to `[]`.
 
 | Stream field | Type | Stream field | Type |
 | --- | --- | --- | --- |
@@ -40,15 +40,16 @@ Format fields: `filename`, `format_name`, `format_long_name`, `duration`, `size`
 Explicit options **replace** `-show_format -show_streams`; use FFprobe's option names.
 
 ```ts
-const selected = FFprobe.probeWith(
-  "input.mp4",
-  { show_entries: "stream=codec_name,width,height:format=duration", select_streams: "v:0", v: "error" }
-)
+const selected = FFprobe.probeWith("input.mp4", {
+  show_entries: "stream=codec_name,width,height:format=duration",
+  select_streams: "v:0",
+  v: "error"
+})
 // To keep the full output while adding options:
-Options.make({ show_format: true, show_streams: true, protocol_whitelist: "file" })
+FFprobe.probeWith("input.mp4", { show_format: true, show_streams: true, protocol_whitelist: "file" })
 ```
 
-`ProjectedProbeResult` matches `ProbeResult` except that stream `index` is optional, and `width`, `height`, `start_pts`, and `duration_ts` may be `"N/A"` (with `show_optional_fields: "always"`). An empty bundle decodes to `{ streams: [] }`. Options that change field types (such as `unit`, `prefix`, or `sexagesimal`) can fail with `ProbeDecodeError`.
+`ProjectedProbeResult` matches `ProbeResult` except that stream `index` is optional, and `width`, `height`, `start_pts`, and `duration_ts` may be `"N/A"` (with `show_optional_fields: "always"`). An empty record or bundle decodes to `{ streams: [] }`. Options that change field types (such as `unit`, `prefix`, or `sexagesimal`) can fail with `ProbeDecodeError`.
 
 ## Custom schema
 
@@ -67,7 +68,7 @@ const duration = FFprobe.probeWith("in.mp4", { show_entries: "format=duration" }
 // { format: { duration: 12.5 } }
 ```
 
-The schema decodes the whole JSON document, and no defaults apply. FFprobe omits sections it did not print, so make keys optional when a selection may lack them. Unlisted keys are dropped.
+Your schema decodes the whole JSON document as it is; the library adds nothing, so `streams` has no default here. FFprobe omits sections it did not print, so make keys optional when a selection may lack them. A `Schema.Struct` drops the keys it does not list.
 
 ## Rules
 

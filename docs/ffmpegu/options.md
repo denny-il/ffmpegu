@@ -167,7 +167,7 @@ const playlist = Output.toFile(
 //   out/stream.m3u8
 ```
 
-FFmpeg does not create the `out/` directory itself; create it before running, for example with Effect `FileSystem.makeDirectory`.
+FFmpeg does not create the `out/` directory itself; create it before running, for example with `makeDirectory` of Effect's `FileSystem` service.
 
 Typed HLS keys: `hls_time`, `hls_init_time`, `hls_list_size`, `hls_delete_threshold`, `hls_playlist_type` (`vod`, `event`), `hls_segment_type` (`mpegts`, `fmp4`), `hls_segment_filename`, `hls_segment_options`, `hls_flags`, `hls_base_url`, `hls_fmp4_init_filename`, `hls_fmp4_init_resend`, `hls_allow_cache`, `hls_start_number_source` (`generic`, `epoch`, `epoch_us`, `datetime`), `start_number`, `strftime`, `strftime_mkdir`, `master_pl_name`, `master_pl_publish_rate`, `var_stream_map`, `cc_stream_map`, `method`, `http_user_agent`, `http_persistent`, `headers`, `timeout`, `ignore_io_errors`.
 
