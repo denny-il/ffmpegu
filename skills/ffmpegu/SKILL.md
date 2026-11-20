@@ -9,39 +9,37 @@ ffmpegu describes FFmpeg commands as immutable values and executes them through 
 
 ## Workflow
 
-1. **Describe** the invocation with `Input`, `Output`, `Options`, `options.*`, `filters.*`, and `Command.make`. Builders are pure.
-2. **Check** the argv when unsure: `Command.toArgs(command)` returns `Result<ReadonlyArray<string>, CommandError>` without spawning anything. Use it in unit tests.
-3. **Execute** with `run(command)` (an `Effect`) or `stream(command)` (a `Stream`), and `probe`/`probeWith` for metadata.
+1. **Describe** the invocation with `Input`, `Output`, `Options.*`, `Filter.*`, and `Command.make`. Builders are pure.
+2. **Check** the argv when unsure: `command.toArgs()` returns `Result<ReadonlyArray<string>, CommandError>` without spawning anything. Use it in unit tests.
+3. **Execute** with `FFmpeg.run(command)` (an `Effect`) or `FFmpeg.stream(command)` (a `Stream`), and `FFprobe.probe`/`FFprobe.probeWith` for metadata.
 4. **Provide** `FFmpeg.layer()` / `FFprobe.layer()` plus the platform layer (`NodeServices.layer` or `BunServices.layer`) at the application edge. Never start a runtime inside library code.
 
 ```ts
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
-import { Command, FFmpeg, FFprobe, Input, Options, Output, options, probe, run } from "ffmpegu"
+import { Command, FFmpeg, FFprobe, Input, Options, Output } from "ffmpegu"
 
 const input = Input.fromFile("input.mov")
 const command = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [input],
   outputs: [
     Output.toFile(
       "output.mp4",
-      Options.create(
-        { map: input.video },
-        { map: input.audio },
-        options.videoCodec("libx264"),
-        options.crf(23),
-        options.audioCodec("aac")
-      )
+      { map: input.video },
+      { map: input.audio },
+      Options.videoCodec("libx264"),
+      Options.crf(23),
+      Options.audioCodec("aac")
     )
   ]
 })
 
 const program = Effect.gen(function* () {
-  yield* run(command, {
+  yield* FFmpeg.run(command, {
     onProgress: (p) => Effect.logDebug("encoding", { frame: p.frame, speed: p.speed })
   })
-  const metadata = yield* probe("output.mp4")
+  const metadata = yield* FFprobe.probe("output.mp4")
   return metadata.format?.duration
 })
 
@@ -53,14 +51,14 @@ program.pipe(Effect.provide(MediaLive), NodeRuntime.runMain)
 
 ## API shape
 
-- **Imports.** Use named exports: `Command`, `Input`, `Output`, `Options` (raw bundles), `options` (helpers), `filters`, `time` (time value adapters), `FFmpeg`, `FFprobe`, `run`, `stream`, `probe`, `probeWith`, plus the error classes. Don't use the default `ffmpegu` export or the `FFmpegu*` class aliases.
-- **Inputs and outputs.** `Input.fromFile(pathOrUrl, inputOptions?)` and `Input.fromStream(stream, inputOptions?)`; `Output.toFile(path, outputOptions?)`, `Output.toSink(sink, outputOptions?)`, and `Output.toStream(outputOptions?)`. Seek fast with `Input.fromFile(path, options.startTime(t))`.
+- **Imports.** Use named exports: `Command`, `Input`, `Output`, `Options` (bundles and option helpers), `Filter` (filters, chains, graphs, labels), `Time` (time value adapters), `FFmpeg`, `FFprobe`, plus the error classes. Runners are statics: `FFmpeg.run`, `FFmpeg.stream`, `FFprobe.probe`, `FFprobe.probeWith`. There is no default export, and the lowercase `options`/`filters`/`time` namespaces, `Options.create`, and bare `run`/`probe` of 0.5 and earlier are gone.
+- **Inputs and outputs.** `Input.fromFile(pathOrUrl, ...inputOptions)` and `Input.fromStream(stream, ...inputOptions)`; `Output.toFile(path, ...outputOptions)`, `Output.toSink(sink, ...outputOptions)`, and `Output.toStream(...outputOptions)`. Options are passed directly, in any mix of forms: `Output.toFile("out.mp4", Options.videoCodec("libx264"), { crf: 23 })`. Seek fast with `Input.fromFile(path, Options.startTime(t))`.
 - **Stream references.** `input.video`, `input.audio`, `input.subtitle`, `input.data`, and `.track(n)` replace hand-written `0:v` specifiers in `map` and filter labels.
-- **Options.** `Options.create("-y", ["c:v", "libx264"], { crf: 23, map: input.audio }, options.preset("slow"))`. Merging only appends, so later options don't replace earlier ones. Codec, format, and preset parameters accept any string FFmpeg accepts.
-- **HLS and DASH.** `options.hls({...})` / `options.dash({...})` take FFmpeg's own muxer option names (`hls_time`, `hls_playlist_type`, `seg_duration`, `use_template`, …) and pass unknown keys through. Booleans render `1`/`0`, arrays join with `+`, and durations on the known duration keys render as seconds.
-- **Time values.** `startTime`/`duration`/`to` and known time keys accept numbers (seconds), strings, time objects, `Duration`, and `Temporal.Duration`. Elsewhere, use `time.seconds(d)` or `time.timestamp(d)`; ffmpegu never converts a time value on a key it does not know.
-- **Filters.** `filters.chain(...)` goes in `options.videoFilter` or `options.audioFilter`, and `filters.graph(...)` in `options.filterComplex`. Use labels via `filters.label`, and `filters.custom` for any filter without a helper. Values are escaped automatically.
-- **Execution.** `run(command, { onProgress })` returns `Effect<RunResult>`, `stream(command)` returns `Stream<Uint8Array>`, `probe(input)` returns `ProbeResult`, and `probeWith(input, options, schema?)` returns a projected result or the schema's type.
+- **Options.** Forms are verbatim strings, tuples, records, and bundles: `"-y"`, `["c:v", "libx264"]`, `{ crf: 23, map: input.audio }`, `Options.preset("slow")`. `Options.make(...forms)` names a reusable bundle; bundles nest, and nesting only appends, so later options don't replace earlier ones. Codec, format, and preset parameters accept any string FFmpeg accepts.
+- **HLS and DASH.** `Options.hls({...})` / `Options.dash({...})` take FFmpeg's own muxer option names (`hls_time`, `hls_playlist_type`, `seg_duration`, `use_template`, …) and pass unknown keys through. Booleans render `1`/`0`, arrays join with `+`, and durations on the known duration keys render as seconds.
+- **Time values.** `startTime`/`duration`/`to` and known time keys accept numbers (seconds), strings, time objects, `Duration`, and `Temporal.Duration`. Elsewhere, use `Time.seconds(d)` or `Time.timestamp(d)`; ffmpegu never converts a time value on a key it does not know.
+- **Filters.** `Options.videoFilter(...filters)` and `Options.audioFilter(...filters)` take one filter or several as a chain, and `Filter.graph(...)` goes in `Options.filterComplex`. Label pads with `{ inputs, outputs }`: inputs take names or stream references directly, outputs take names; use `Filter.label` for a label you also `map`, and `Filter.make(name, options?, labels?)` for any filter without a helper. Values are escaped automatically.
+- **Execution.** `FFmpeg.run(command, { onProgress })` returns `Effect<RunResult>`, `FFmpeg.stream(command)` returns `Stream<Uint8Array>`, `FFprobe.probe(input)` returns `Effect<ProbeResult>`, and `FFprobe.probeWith(input, options, schema?)` returns an `Effect` of a projected result or the schema's type.
 
 ## References
 
@@ -72,14 +70,14 @@ These files sit next to this one and are self-contained. Read the ones the task 
 | [references/video.md](references/video.md) | Video codecs, rate control, scaling, cropping, overlays, text, frame extraction |
 | [references/audio.md](references/audio.md) | Audio codecs, raw PCM, resampling, volume, trimming, fades, mixing |
 | [references/streaming.md](references/streaming.md) | HLS, DASH, fragmented MP4, or any `Input.fromStream`, `toSink`, or `toStream` |
-| [references/running.md](references/running.md) | `run` and `stream` semantics, progress, cancellation, layers, configuration, tracing, testing |
-| [references/probe.md](references/probe.md) | Reading metadata, `probeWith` selections, decoding FFprobe output with a schema |
+| [references/running.md](references/running.md) | `FFmpeg.run` and `FFmpeg.stream` semantics, progress, cancellation, layers, configuration, tracing, testing |
+| [references/probe.md](references/probe.md) | Reading metadata, `FFprobe.probeWith` selections, decoding FFprobe output with a schema |
 | [references/errors.md](references/errors.md) | Handling failures, or diagnosing an `ExitError` or a type error |
 | [references/recipes.md](references/recipes.md) | The task matches a common job: web transcode, clip, thumbnail, concat, in-memory conversion, and so on |
 
 ## Rules
 
-- **Pick the runner by stream-output count.** `run` needs zero `Output.toStream` outputs and `stream` needs exactly one; the command type enforces this. Don't annotate commands as `Command<E, R>` unless needed, as that defers the check to runtime.
+- **Pick the runner by stream-output count.** `FFmpeg.run` needs zero `Output.toStream` outputs and `FFmpeg.stream` needs exactly one; the command type enforces this. Don't annotate commands as `Command<E, R>` unless needed, as that defers the check to runtime.
 - **Declare every input in `inputs`.** Never pass `-i`, `-progress`, or `-stdin` as options, and never use `pipe:`, `fd:`, `-`, or `/dev/std*` paths. These fail with `CommandError`. Use `Input.fromStream`, `Output.toSink`, `Output.toStream`, and `onProgress` instead.
 - **Prefer files for data on disk.** `Input.fromFile` lets FFmpeg seek. Pipes are not seekable: give stream inputs an explicit `f` for raw or ambiguous formats, and give sink and stream outputs a streamable muxer (`f`), using `movflags: "frag_keyframe+empty_moov"` for MP4.
 - **Sinks must consume everything.** A sink that completes before EOF fails with `OutputError` (`SinkEndedEarly`). Map sinks with other results to `void` with `Sink.map(sink, () => undefined)`.
@@ -88,8 +86,8 @@ These files sit next to this one and are self-contained. Read the ones the task 
 - **Never add automatic retries.** Outputs are not atomic or idempotent, and failed runs can leave partial files.
 - **Control concurrency in Effect.** For example `Effect.forEach(items, task, { concurrency: 4 })`. The library has no queue.
 - **Keep secrets out of logs.** Don't put argv, paths, URLs, or stderr into spans or logs. `RunResult.args` and error causes can contain credentials embedded in URLs.
-- **Remember what `probeWith` replaces.** Explicit options replace the default `-show_format -show_streams`; add `{ show_format: true, show_streams: true }` to keep them. Its projected stream `index` is optional. The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`.
-- **Mock the services in tests.** Use `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` and `Layer.mock(FFprobe, { probe: () => Effect.succeed({ streams: [] }) })`. `probeWith` with a schema calls `probeJson`, so mock that for those calls.
+- **Remember what `FFprobe.probeWith` replaces.** Explicit options replace the default `-show_format -show_streams`; add `{ show_format: true, show_streams: true }` to keep them. Its projected stream `index` is optional. The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`.
+- **Mock the services in tests.** Use `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` and `Layer.mock(FFprobe, { probe: () => Effect.succeed({ streams: [] }) })`. `FFprobe.probeWith` with a schema calls `probeJson`, so mock that for those calls.
 
 ## Configuration
 
@@ -101,4 +99,4 @@ Typed option and filter names are verified against FFmpeg 6.1 through 9.0 (excep
 
 ## FFmpeg itself
 
-ffmpegu does not restrict FFmpeg's options: anything FFmpeg accepts can go into `Options.create` or `filters.custom`. For FFmpeg's own flags, codecs, formats, and filters, see https://ffmpeg.org/ffmpeg.html, https://ffmpeg.org/ffmpeg-filters.html, and https://ffmpeg.org/ffprobe.html. Run `ffmpeg -h filter=<name>` or `ffmpeg -encoders` to check what the installed build supports.
+ffmpegu does not restrict FFmpeg's options: anything FFmpeg accepts can go into `Options.make` or `Filter.make`. For FFmpeg's own flags, codecs, formats, and filters, see https://ffmpeg.org/ffmpeg.html, https://ffmpeg.org/ffmpeg-filters.html, and https://ffmpeg.org/ffprobe.html. Run `ffmpeg -h filter=<name>` or `ffmpeg -encoders` to check what the installed build supports.

@@ -1,6 +1,6 @@
-import { FFmpeguOptions } from "../core.ts"
+import { make } from "../core.ts"
 
-export type FFmpeguSubtitleCodec =
+export type SubtitleCodec =
   | "mov_text"
   | "srt"
   | "subrip"
@@ -14,7 +14,6 @@ export type FFmpeguSubtitleCodec =
   | "copy"
   | ({} & string)
 
-export const subtitleCopy = () => FFmpeguOptions.create(["-c:s", "copy"])
+export const subtitleCopy = () => make(["-c:s", "copy"])
 
-export const subtitleCodec = (codec: FFmpeguSubtitleCodec) =>
-  FFmpeguOptions.create(["-c:s", codec])
+export const subtitleCodec = (codec: SubtitleCodec) => make(["-c:s", codec])

@@ -1,9 +1,10 @@
 import type * as Sink from "effect/Sink"
-import type { FFmpeguOptions } from "../options/core.ts"
+import { type Arg, fromArgs, type Options } from "../options/core.ts"
 
 /**
- * Destination of an output read as the stream returned by `stream`; see
- * {@link FFmpeguOutput.toStream}.
+ * Destination of an output read as the stream returned by `FFmpeg.stream`;
+ * see
+ * {@link Output.toStream}.
  */
 export const STREAM_DESTINATION: unique symbol = Symbol.for(
   "ffmpegu/StreamDestination"
@@ -21,7 +22,7 @@ export const StreamOutputs: unique symbol = Symbol.for("ffmpegu/StreamOutputs")
  * ffmpeg writes to a dedicated pipe, or {@link STREAM_DESTINATION} for a
  * pipe read as a stream.
  */
-export type FFmpeguOutputDestination<E, R> =
+export type OutputDestination<E, R> =
   | string
   | Sink.Sink<void, Uint8Array, never, E, R>
   | typeof STREAM_DESTINATION
@@ -36,12 +37,12 @@ export type FFmpeguOutputDestination<E, R> =
  * A sink must consume the whole output: completing early fails the run with
  * `OutputError` (`SinkEndedEarly`).
  */
-export class FFmpeguOutput<E = never, R = never, S extends 0 | 1 = any> {
+export class Output<E = never, R = never, S extends 0 | 1 = any> {
   declare readonly [StreamOutputs]: S
 
   constructor(
-    readonly destination: FFmpeguOutputDestination<E, R>,
-    readonly options?: FFmpeguOptions
+    readonly destination: OutputDestination<E, R>,
+    readonly options?: Options
   ) {}
 
   /**
@@ -49,9 +50,9 @@ export class FFmpeguOutput<E = never, R = never, S extends 0 | 1 = any> {
    */
   static toFile(
     filePath: string,
-    options?: FFmpeguOptions
-  ): FFmpeguOutput<never, never, 0> {
-    return new FFmpeguOutput(filePath, options)
+    ...options: ReadonlyArray<Arg | undefined>
+  ): Output<never, never, 0> {
+    return new Output(filePath, fromArgs(options))
   }
 
   /**
@@ -59,16 +60,18 @@ export class FFmpeguOutput<E = never, R = never, S extends 0 | 1 = any> {
    */
   static toSink<E, R>(
     sink: Sink.Sink<void, Uint8Array, never, E, R>,
-    options?: FFmpeguOptions
-  ): FFmpeguOutput<E, R, 0> {
-    return new FFmpeguOutput(sink, options)
+    ...options: ReadonlyArray<Arg | undefined>
+  ): Output<E, R, 0> {
+    return new Output(sink, fromArgs(options))
   }
 
   /**
-   * Create an output read as the stream returned by `stream(command)`, which
-   * requires exactly one such output. `run` rejects commands containing one.
+   * Create an output read as the stream returned by `FFmpeg.stream(command)`, which
+   * requires exactly one such output. `FFmpeg.run` rejects commands containing one.
    */
-  static toStream(options?: FFmpeguOptions): FFmpeguOutput<never, never, 1> {
-    return new FFmpeguOutput(STREAM_DESTINATION, options)
+  static toStream(
+    ...options: ReadonlyArray<Arg | undefined>
+  ): Output<never, never, 1> {
+    return new Output(STREAM_DESTINATION, fromArgs(options))
   }
 }

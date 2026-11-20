@@ -1,29 +1,27 @@
 # Recipes
 
-Each recipe shows a command and the argv that `Command.toArgs` returns for it. Run it with `run(command)` and provide `FFmpeg` (and `FFprobe` where used). Imports: `import { Command, Input, Options, Output, filters, options, probe, probeWith, run, stream } from "ffmpegu"`, plus `Duration`, `Effect`, `FileSystem`, `Schema`, and `Stream` from `effect`.
+Each recipe shows a command and the argv that `command.toArgs()` returns for it. Run it with `FFmpeg.run(command)` and provide `FFmpeg` (and `FFprobe` where used). Imports: `import { Command, FFmpeg, FFprobe, Filter, Input, Options, Output } from "ffmpegu"`, plus `Duration`, `Effect`, `FileSystem`, `Schema`, and `Stream` from `effect`.
 
 ## Transcode for the web
 
 ```ts
 const input = Input.fromFile("in.mov")
 Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [input],
   outputs: [
     Output.toFile(
       "out.mp4",
-      Options.create(
-        { map: input.video.track(0) },
-        { map: input.audio.track(0) },
-        options.videoFilter(filters.chain(filters.scale({ w: -2, h: 720 }))),
-        options.videoCodec("libx264"),
-        options.preset("medium"),
-        options.crf(23),
-        options.pixelFormat("yuv420p"),
-        options.audioCodec("aac"),
-        options.audioBitrate(128, "k"),
-        options.movFlags("+faststart")
-      )
+      { map: input.video.track(0) },
+      { map: input.audio.track(0) },
+      Options.videoFilter(Filter.scale({ w: -2, h: 720 })),
+      Options.videoCodec("libx264"),
+      Options.preset("medium"),
+      Options.crf(23),
+      Options.pixelFormat("yuv420p"),
+      Options.audioCodec("aac"),
+      Options.audioBitrate(128, "k"),
+      Options.movFlags("+faststart")
     )
   ]
 })
@@ -36,27 +34,27 @@ Command.make({
 ```ts
 // Stream copy: instant, but cuts on keyframes.
 Command.make({
-  global: options.overwrite(),
-  inputs: [Input.fromFile("in.mp4", options.startTime(Duration.minutes(12)))],
-  outputs: [Output.toFile("clip.mp4", Options.create(options.duration(45), options.copy()))]
+  global: Options.overwrite(),
+  inputs: [Input.fromFile("in.mp4", Options.startTime(Duration.minutes(12)))],
+  outputs: [Output.toFile("clip.mp4", Options.duration(45), Options.copy())]
 })
 // -y -ss 00:12:00.000 -i in.mp4 -t 45 -c copy clip.mp4
-// For a frame-accurate cut, re-encode: replace options.copy() with options.videoCodec("libx264"), options.audioCodec("aac").
+// For a frame-accurate cut, re-encode: replace Options.copy() with Options.videoCodec("libx264"), Options.audioCodec("aac").
 ```
 
 ## Thumbnail, or one image per N seconds
 
 ```ts
 Command.make({
-  global: options.overwrite(),
-  inputs: [Input.fromFile("in.mp4", options.startTime(5))],
-  outputs: [Output.toFile("thumb.jpg", Options.create({ "frames:v": 1 }, { "q:v": 2 }))]
+  global: Options.overwrite(),
+  inputs: [Input.fromFile("in.mp4", Options.startTime(5))],
+  outputs: [Output.toFile("thumb.jpg", { "frames:v": 1 }, { "q:v": 2 })]
 })
 // -y -ss 5 -i in.mp4 -frames:v 1 -q:v 2 thumb.jpg
 
 Command.make({
   inputs: [Input.fromFile("in.mp4")],
-  outputs: [Output.toFile("frames/%04d.jpg", options.videoFilter(filters.chain(filters.fps({ fps: "1/10" }))))]
+  outputs: [Output.toFile("frames/%04d.jpg", Options.videoFilter(Filter.fps({ fps: "1/10" })))]
 })
 // -i in.mp4 -vf fps=fps=1/10 frames/%04d.jpg
 ```
@@ -67,12 +65,16 @@ Command.make({
 const video = Input.fromFile("video.mp4")
 const audio = Input.fromFile("voiceover.wav")
 Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [video, audio],
   outputs: [
     Output.toFile(
       "out.mp4",
-      Options.create(options.map(video.video), options.map(audio.audio), options.videoCopy(), options.audioCodec("aac"), options.shortest())
+      Options.map(video.video),
+      Options.map(audio.audio),
+      Options.videoCopy(),
+      Options.audioCodec("aac"),
+      Options.shortest()
     )
   ]
 })
@@ -85,21 +87,23 @@ Every clip needs the mapped video and audio tracks, the same dimensions and SAR,
 
 ```ts
 const inputs = ["a.mp4", "b.mp4"].map((path) => Input.fromFile(path))
-const [v, a] = [filters.label("v"), filters.label("a")]
-const graph = filters.graph(
-  filters.chain(
-    filters.custom(
-      "concat",
-      { n: inputs.length, v: 1, a: 1 },
-      inputs.flatMap((input) => [filters.label(input.video.track(0)), filters.label(input.audio.track(0))]),
-      [v, a]
-    )
+const [v, a] = [Filter.label("v"), Filter.label("a")]
+const graph = Filter.graph(
+  Filter.make(
+    "concat",
+    { n: inputs.length, v: 1, a: 1 },
+    {
+      inputs: inputs.flatMap((input) => [input.video.track(0), input.audio.track(0)]),
+      outputs: [v, a]
+    }
   )
 )
 Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs,
-  outputs: [Output.toFile("joined.mp4", Options.create(options.filterComplex(graph), options.map(v), options.map(a)))]
+  outputs: [
+    Output.toFile("joined.mp4", Options.filterComplex(graph), Options.map(v), Options.map(a))
+  ]
 })
 // -y -i a.mp4 -i b.mp4 -filter_complex [0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a] -map [v] -map [a] joined.mp4
 ```
@@ -112,8 +116,8 @@ Command.make({
   outputs: [
     Output.toFile(
       "out.mp4",
-      options.videoFilter(
-        filters.chain(filters.drawtext({ text: "Draft: v2", fontsize: 32, fontcolor: "white", x: 20, y: 20, box: true, boxcolor: "black@0.5" }))
+      Options.videoFilter(
+        Filter.drawtext({ text: "Draft: v2", fontsize: 32, fontcolor: "white", x: 20, y: 20, box: true, boxcolor: "black@0.5" })
       )
     )
   ]
@@ -127,9 +131,9 @@ Command.make({
 ```ts
 const transcode = (source: string, target: string) =>
   Effect.gen(function* () {
-    const total = Number((yield* probe(source)).format?.duration)
-    yield* run(
-      Command.make({ global: options.overwrite(), inputs: [Input.fromFile(source)], outputs: [Output.toFile(target)] }),
+    const total = Number((yield* FFprobe.probe(source)).format?.duration)
+    yield* FFmpeg.run(
+      Command.make({ global: Options.overwrite(), inputs: [Input.fromFile(source)], outputs: [Output.toFile(target)] }),
       {
         onProgress: (p) =>
           p.outTime && total > 0
@@ -145,10 +149,14 @@ const transcode = (source: string, target: string) =>
 ```ts
 // Stream<Uint8Array> in, Stream<Uint8Array> out. Errors and requirements of `upload` are preserved.
 const toMp3 = <E, R>(upload: Stream.Stream<Uint8Array, E, R>) =>
-  stream(
+  FFmpeg.stream(
     Command.make({
       inputs: [Input.fromStream(upload)],
-      outputs: [Output.toStream(Options.create(options.noVideo(), options.audioCodec("libmp3lame"), options.format("mp3")))]
+      outputs: [Output.toStream(
+        Options.noVideo(),
+        Options.audioCodec("libmp3lame"),
+        Options.format("mp3")
+      )]
     })
   )
 // -i pipe:4 -vn -c:a libmp3lame -f mp3 pipe:5
@@ -159,13 +167,15 @@ const toMp3 = <E, R>(upload: Stream.Stream<Uint8Array, E, R>) =>
 ```ts
 const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
-  yield* run(
+  yield* FFmpeg.run(
     Command.make({
       inputs: [Input.fromFile("in.mp4")],
       outputs: [
         Output.toSink(
           fs.sink("out.mp4"),
-          Options.create(options.videoCodec("libx264"), options.format("mp4"), options.movFlags("frag_keyframe+empty_moov"))
+          Options.videoCodec("libx264"),
+          Options.format("mp4"),
+          Options.movFlags("frag_keyframe+empty_moov")
         )
       ]
     })
@@ -177,12 +187,17 @@ const program = Effect.gen(function* () {
 
 ```ts
 Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [
-    Input.fromFile("testsrc2=size=640x360:rate=30:duration=2", options.format("lavfi")),
-    Input.fromFile("sine=frequency=440:duration=2", options.format("lavfi"))
+    Input.fromFile("testsrc2=size=640x360:rate=30:duration=2", Options.format("lavfi")),
+    Input.fromFile("sine=frequency=440:duration=2", Options.format("lavfi"))
   ],
-  outputs: [Output.toFile("test.mp4", Options.create(options.videoCodec("libx264"), options.pixelFormat("yuv420p"), options.audioCodec("aac")))]
+  outputs: [Output.toFile(
+    "test.mp4",
+    Options.videoCodec("libx264"),
+    Options.pixelFormat("yuv420p"),
+    Options.audioCodec("aac")
+  )]
 })
 // -y -f lavfi -i testsrc2=size=640x360:rate=30:duration=2 -f lavfi -i sine=frequency=440:duration=2
 //   -c:v libx264 -pix_fmt yuv420p -c:a aac test.mp4
@@ -195,7 +210,7 @@ const Format = Schema.Struct({ format: Schema.Struct({ duration: Schema.NumberFr
 const durations = (paths: ReadonlyArray<string>) =>
   Effect.forEach(
     paths,
-    (path) => probeWith(path, Options.create({ show_entries: "format=duration", v: "error" }), Format).pipe(
+    (path) => FFprobe.probeWith(path, { show_entries: "format=duration", v: "error" }, Format).pipe(
       Effect.map((r) => r.format.duration),
       Effect.timeout("10 seconds")
     ),

@@ -22,7 +22,7 @@ import {
   SpawnError
 } from "../errors.ts"
 import { ByteTail } from "../core/diagnostics.ts"
-import type { FFmpeguOptions } from "../options/core.ts"
+import { type Arg, fromArgs, type Options } from "../options/core.ts"
 import {
   annotateExitCode,
   awaitExit,
@@ -40,7 +40,7 @@ import {
 import { probeArgs } from "./command.ts"
 import { ProbeResult, ProjectedProbeResult } from "./schema.ts"
 
-export interface FFprobeOptions {
+export interface FFprobeConfig {
   /** Binary name or path. Defaults to `"ffprobe"`. */
   readonly binary?: string | undefined
   /**
@@ -66,18 +66,18 @@ export interface FFprobeService {
   /** Explicit options replace the default format/stream selection. */
   readonly probeWith: (
     input: string,
-    options: FFmpeguOptions
+    options: Options
   ) => Effect.Effect<ProjectedProbeResult, ProbeError>
   /**
    * Like `probeWith`, returning FFprobe's parsed JSON document undecoded.
    *
-   * `probeWith(input, options, schema)` decodes this output with the caller's
-   * schema. Decoding stays in the library so a custom implementation cannot
+   * `FFprobe.probeWith(input, options, schema)` decodes this output with the
+   * caller's schema. Decoding stays in the library so a custom implementation cannot
    * return a value that does not match the schema's type.
    */
   readonly probeJson: (
     input: string,
-    options: FFmpeguOptions
+    options: Options
   ) => Effect.Effect<unknown, ProbeError>
 }
 
@@ -89,7 +89,7 @@ export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
    * Invalid options are defects.
    */
   static layer = (
-    options: FFprobeOptions = {}
+    options: FFprobeConfig = {}
   ): Layer.Layer<FFprobe, never, ChildProcessSpawner> =>
     Layer.effect(
       FFprobe,
@@ -102,48 +102,55 @@ export class FFprobe extends Context.Service<FFprobe, FFprobeService>()(
    * values fail with `ConfigError`.
    */
   static layerConfig = (
-    options: Config.Wrap<FFprobeOptions>
+    options: Config.Wrap<FFprobeConfig>
   ): Layer.Layer<FFprobe, Config.ConfigError, ChildProcessSpawner> =>
     Layer.effect(
       FFprobe,
       Effect.flatMap(validatedConfig(options, toSettings), make)
     )
-}
 
-/** Probe with the `FFprobe` service from the context. */
-export const probe = (
-  input: string
-): Effect.Effect<ProbeResult, ProbeError, FFprobe> =>
-  FFprobe.use((ffprobe) => ffprobe.probe(input))
+  /**
+   * Probe a file path or URL with the `FFprobe` service from the context.
+   * Unary, so it can be passed to `Effect.forEach`.
+   */
+  static probe = (
+    input: string
+  ): Effect.Effect<ProbeResult, ProbeError, FFprobe> =>
+    FFprobe.use((ffprobe) => ffprobe.probe(input))
 
-/**
- * Probe selected metadata using the existing options builder, optionally
- * decoding the output with a caller-supplied schema. A schema decodes the
- * service's `probeJson` output here, not in the service.
- */
-export function probeWith<S extends Schema.Top>(
-  input: string,
-  options: FFmpeguOptions,
-  schema: S
-): Effect.Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
-// Kept last: `Parameters`/`ReturnType` resolve to the final overload, so
-// wrappers derived from them keep the two-argument API.
-export function probeWith(
-  input: string,
-  options: FFmpeguOptions
-): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
-export function probeWith(
-  input: string,
-  options: FFmpeguOptions,
-  schema?: Schema.Top
-): Effect.Effect<unknown, ProbeError, unknown> {
-  return schema === undefined
-    ? FFprobe.use((ffprobe) => ffprobe.probeWith(input, options))
-    : FFprobe.use((ffprobe) => ffprobe.probeJson(input, options)).pipe(
-        Effect.flatMap(decodeOutput(schema)),
-        // The service span ends before this decode; this one covers both.
-        Effect.withSpan("ffmpegu/probeWith")
-      )
+  /**
+   * Probe selected metadata: `options` (a bundle or any single option form)
+   * replace the default selection. A schema decodes the service's
+   * `probeJson` output here, not in the service.
+   */
+  static probeWith: {
+    <S extends Schema.Top>(
+      input: string,
+      options: Arg,
+      schema: S
+    ): Effect.Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
+    // Kept last: `Parameters`/`ReturnType` resolve to the final overload, so
+    // wrappers derived from them keep the two-argument API.
+    (
+      input: string,
+      options: Arg
+    ): Effect.Effect<ProjectedProbeResult, ProbeError, FFprobe>
+  } = (
+    input: string,
+    options: Arg,
+    schema?: Schema.Top
+  ): Effect.Effect<any, ProbeError, any> => {
+    // The service takes a bundle. Built now, like any other bundle: later
+    // changes to a record or tuple passed here must not alter the probe.
+    const bundle = fromArgs([options])!
+    return schema === undefined
+      ? FFprobe.use((ffprobe) => ffprobe.probeWith(input, bundle))
+      : FFprobe.use((ffprobe) => ffprobe.probeJson(input, bundle)).pipe(
+          Effect.flatMap(decodeOutput(schema)),
+          // The service span ends before this decode; this one covers both.
+          Effect.withSpan("ffmpegu/probeWith")
+        )
+  }
 }
 
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
@@ -174,7 +181,7 @@ interface Settings {
   readonly stderrTailBytes: number
 }
 
-const toSettings = Effect.fnUntraced(function* (options: FFprobeOptions) {
+const toSettings = Effect.fnUntraced(function* (options: FFprobeConfig) {
   return {
     binary: options.binary ?? "ffprobe",
     forceKillAfter: yield* durationOption(
@@ -206,7 +213,7 @@ const make = Effect.fnUntraced(function* ({
   const execute = Effect.fn("ffmpegu/FFprobe.probe")(function* <A, R>(
     input: string,
     decodeOutput: (output: unknown) => Effect.Effect<A, ProbeDecodeError, R>,
-    options?: FFmpeguOptions
+    options?: Options
   ) {
     // The input path or URL can carry credentials, so it is not recorded.
     yield* Effect.annotateCurrentSpan(

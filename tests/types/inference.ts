@@ -17,33 +17,27 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import {
+  type AnyInput,
   Command,
   type CommandError,
   type CompiledCommand,
   FFmpeg,
   type FFmpegError,
-  type FFmpeguAnyInput,
-  type FFmpeguCommand,
-  type FFmpeguOptions,
-  type OutputError,
   FFprobe,
   type FFprobeService,
-  filters,
+  Filter,
   Input,
-  options,
+  Options,
   Output,
-  probe,
-  probeWith,
+  type OutputError,
   type ProbeError,
   type ProbeResult,
-  type ProjectedProbeResult,
   type Progress,
+  type ProjectedProbeResult,
   type ReservedPath,
-  run,
-  type RunResult,
-  stream
+  type RunResult
 } from "../../src/index.ts"
-import type { FFmpeguTemporalDuration } from "../../src/utils.ts"
+import type { TemporalDuration } from "../../src/utils.ts"
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -79,7 +73,7 @@ declare const sink: Sink.Sink<void, Uint8Array, never, SinkError, Uploader>
 
 // Heterogeneous literal arrays infer the exact unions.
 const literal = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [
     Input.fromStream(source),
     Input.fromFile("in.mp4"),
@@ -90,26 +84,18 @@ const literal = Command.make({
 assertType<
   Equals<
     typeof literal,
-    FFmpeguCommand<
-      SourceError | OtherSourceError | SinkError,
-      Storage | Uploader,
-      0
-    >
+    Command<SourceError | OtherSourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
 // Arrays built separately (not literals) still infer the unions.
 const inputs = [Input.fromStream(source), Input.fromStream(otherSource)]
 const outputs = [Output.toSink(sink)]
-const separate = Command.create({ inputs, outputs })
+const separate = Command.make({ inputs, outputs })
 assertType<
   Equals<
     typeof separate,
-    FFmpeguCommand<
-      SourceError | OtherSourceError | SinkError,
-      Storage | Uploader,
-      0
-    >
+    Command<SourceError | OtherSourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
@@ -118,11 +104,11 @@ const chained = Command.make({})
   .withInput(Input.fromStream(source))
   .withInput(Input.fromFile("in.mp4"))
   .withOutput(Output.toSink(sink))
-  .withGlobal(options.overwrite())
+  .withGlobal(Options.overwrite())
 assertType<
   Equals<
     typeof chained,
-    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, 0>
+    Command<SourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
@@ -131,7 +117,7 @@ const piped = Command.make({}).pipe(
   Command.withInput(Input.fromStream(source)),
   Command.withInput(Input.fromFile("in.mp4")),
   Command.withOutput(Output.toSink(sink)),
-  Command.withGlobal(options.overwrite())
+  Command.withGlobal(Options.overwrite())
 )
 assertType<Equals<typeof piped, typeof chained>>(true)
 
@@ -143,17 +129,17 @@ const dataFirst = Command.withOutput(
 assertType<
   Equals<
     typeof dataFirst,
-    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, 0>
+    Command<SourceError | SinkError, Storage | Uploader, 0>
   >
 >(true)
 
 // A data-last combinator stays generic over the command it is applied to.
-const overwrite = Command.withGlobal(options.overwrite())
+const overwrite = Command.withGlobal(Options.overwrite())
 const addSink = Command.withOutput(Output.toSink(sink))
 assertType<
   Equals<
     ReturnType<typeof addSink<OtherSourceError, Metrics, 1>>,
-    FFmpeguCommand<OtherSourceError | SinkError, Metrics | Uploader, 1>
+    Command<OtherSourceError | SinkError, Metrics | Uploader, 1>
   >
 >(true)
 const pipedWithStreamInput = Command.make({
@@ -162,7 +148,7 @@ const pipedWithStreamInput = Command.make({
 assertType<
   Equals<
     typeof pipedWithStreamInput,
-    FFmpeguCommand<OtherSourceError | SinkError, Uploader, 0>
+    Command<OtherSourceError | SinkError, Uploader, 0>
   >
 >(true)
 
@@ -171,8 +157,7 @@ const files = Command.make({
   inputs: [Input.fromFile("in.mp4")],
   outputs: [Output.toFile("out.mp4")]
 })
-assertType<Equals<typeof files, FFmpeguCommand<never, never, 0>>>(true)
-assertType<Equals<typeof Command.make, typeof Command.create>>(true)
+assertType<Equals<typeof files, Command<never, never, 0>>>(true)
 
 // Inputs and outputs built inline with the constructor contribute their own
 // types, `never` without a stream or sink, instead of `any`.
@@ -180,17 +165,11 @@ const constructedFiles = Command.make({
   inputs: [new Input("in.mp4")],
   outputs: [new Output("out.mp4")]
 })
-assertType<Equals<typeof constructedFiles, FFmpeguCommand<never, never, any>>>(
-  true
-)
+assertType<Equals<typeof constructedFiles, Command<never, never, any>>>(true)
 const constructedInput = Command.make({ inputs: [new Input("in.mp4")] })
-assertType<Equals<typeof constructedInput, FFmpeguCommand<never, never, 0>>>(
-  true
-)
+assertType<Equals<typeof constructedInput, Command<never, never, 0>>>(true)
 const constructedDrain = Command.make({ outputs: [new Output(Sink.drain)] })
-assertType<Equals<typeof constructedDrain, FFmpeguCommand<never, never, any>>>(
-  true
-)
+assertType<Equals<typeof constructedDrain, Command<never, never, any>>>(true)
 const constructedMixed = Command.make({
   inputs: [new Input(source), new Input("in.mp4"), Input.fromFile("b.mp4")],
   outputs: [new Output(sink), new Output("out.mp4"), Output.toStream()]
@@ -198,7 +177,7 @@ const constructedMixed = Command.make({
 assertType<
   Equals<
     typeof constructedMixed,
-    FFmpeguCommand<SourceError | SinkError, Storage | Uploader, any>
+    Command<SourceError | SinkError, Storage | Uploader, any>
   >
 >(true)
 const constructedByConstructor = new Command({
@@ -206,20 +185,17 @@ const constructedByConstructor = new Command({
   outputs: [new Output("out.mp4")]
 })
 assertType<
-  Equals<
-    typeof constructedByConstructor,
-    FFmpeguCommand<SourceError, Storage, any>
-  >
+  Equals<typeof constructedByConstructor, Command<SourceError, Storage, any>>
 >(true)
 const constructedPiped = Command.make({}).pipe(
   Command.withInput(new Input("in.mp4")),
   Command.withOutput(new Output("out.mp4")),
   Command.withOutput(new Output(sink))
 )
-assertType<
-  Equals<typeof constructedPiped, FFmpeguCommand<SinkError, Uploader, any>>
->(true)
-const constructedRun = run(
+assertType<Equals<typeof constructedPiped, Command<SinkError, Uploader, any>>>(
+  true
+)
+const constructedRun = FFmpeg.run(
   Command.make({
     inputs: [new Input("in.mp4")],
     outputs: [Output.toFile("out.mp4")]
@@ -235,31 +211,21 @@ const streamed = Command.make({
   inputs: [Input.fromStream(source)],
   outputs: [Output.toFile("out.mp4"), Output.toStream()]
 })
-assertType<Equals<typeof streamed, FFmpeguCommand<SourceError, Storage, 1>>>(
-  true
-)
+assertType<Equals<typeof streamed, Command<SourceError, Storage, 1>>>(true)
 const streamedByMethod = files.withOutput(Output.toStream())
-assertType<Equals<typeof streamedByMethod, FFmpeguCommand<never, never, 1>>>(
-  true
-)
+assertType<Equals<typeof streamedByMethod, Command<never, never, 1>>>(true)
 const twoStreams = streamed.pipe(
   Command.withOutput(Output.toStream()),
   Command.withOutput(Output.toFile("other.mp4"))
 )
-assertType<Equals<typeof twoStreams, FFmpeguCommand<SourceError, Storage, 2>>>(
-  true
-)
+assertType<Equals<typeof twoStreams, Command<SourceError, Storage, 2>>>(true)
 const threeStreams = Command.withOutput(twoStreams, Output.toStream())
-assertType<
-  Equals<typeof threeStreams, FFmpeguCommand<SourceError, Storage, 2>>
->(true)
+assertType<Equals<typeof threeStreams, Command<SourceError, Storage, 2>>>(true)
 declare const flag: boolean
 const maybeStreamed = Command.make({
   outputs: [flag ? Output.toStream() : Output.toFile("out.mp4")]
 })
-assertType<Equals<typeof maybeStreamed, FFmpeguCommand<never, never, 0 | 1>>>(
-  true
-)
+assertType<Equals<typeof maybeStreamed, Command<never, never, 0 | 1>>>(true)
 // Counting stays within the instantiation depth limit for long output tuples.
 type Repeat<
   T,
@@ -270,15 +236,15 @@ declare const manyFiles: Repeat<Output<never, never, 0>, 100>
 const manyOutputs = Command.make({
   outputs: [...manyFiles, Output.toStream(), ...manyFiles]
 })
-assertType<Equals<typeof manyOutputs, FFmpeguCommand<never, never, 1>>>(true)
+assertType<Equals<typeof manyOutputs, Command<never, never, 1>>>(true)
 // Explicit type arguments written before the count existed still apply.
 const explicitOutput = files.withOutput<SinkError, Uploader>(
   Output.toSink(sink)
 )
-assertType<
-  Equals<typeof explicitOutput, FFmpeguCommand<SinkError, Uploader, any>>
->(true)
-const streamedOutput = stream(streamed)
+assertType<Equals<typeof explicitOutput, Command<SinkError, Uploader, any>>>(
+  true
+)
+const streamedOutput = FFmpeg.stream(streamed)
 assertType<
   Equals<
     typeof streamedOutput,
@@ -302,7 +268,7 @@ assertType<
 >(true)
 
 // run adds the FFmpeg requirement and progress callback types.
-const ran = run(literal, {
+const ran = FFmpeg.run(literal, {
   onProgress: (progress) =>
     progress.frame === undefined
       ? Effect.void
@@ -322,7 +288,7 @@ assertType<
 >(true)
 assertType<
   Equals<
-    ReturnType<typeof run<never, never>>,
+    ReturnType<typeof FFmpeg.run<never, never>>,
     Effect.Effect<RunResult, FFmpegError, FFmpeg>
   >
 >(true)
@@ -342,9 +308,9 @@ assertType<
   >
 >(true)
 
-const probed = probe("in.mp4")
-const probeCallbacks = Effect.forEach(["in.mp4"], probe)
-const probeArray = ["in.mp4"].map(probe)
+const probed = FFprobe.probe("in.mp4")
+const probeCallbacks = Effect.forEach(["in.mp4"], FFprobe.probe)
+const probeArray = ["in.mp4"].map(FFprobe.probe)
 const serviceCallbacks = FFprobe.use((service) =>
   Effect.forEach(["in.mp4"], service.probe)
 )
@@ -382,9 +348,9 @@ Effect.map(probed, (result) => {
     void index
   }
 })
-const projected = probeWith(
+const projected = FFprobe.probeWith(
   "in.mp4",
-  options.custom({ show_entries: "stream=width" })
+  Options.make({ show_entries: "stream=width" })
 )
 assertType<
   Equals<
@@ -404,7 +370,7 @@ Effect.map(projected, (result) => {
   }
 })
 const projectedViaService = FFprobe.use((service) =>
-  service.probeWith("in.mp4", options.custom("-show_chapters"))
+  service.probeWith("in.mp4", Options.make("-show_chapters"))
 )
 assertType<
   Equals<
@@ -419,9 +385,9 @@ const Dims = Schema.Struct({
     Schema.Struct({ width: Schema.Number, height: Schema.Number })
   )
 })
-const dims = probeWith(
+const dims = FFprobe.probeWith(
   "in.mp4",
-  options.custom({ show_entries: "stream=width,height" }),
+  Options.make({ show_entries: "stream=width,height" }),
   Dims
 )
 assertType<
@@ -444,9 +410,9 @@ declare const StoredDims: Schema.Codec<
   unknown,
   Storage
 >
-const storedDims = probeWith(
+const storedDims = FFprobe.probeWith(
   "in.mp4",
-  options.custom("-show_streams"),
+  Options.make("-show_streams"),
   StoredDims
 )
 assertType<
@@ -457,14 +423,14 @@ assertType<
 >(true)
 // The service returns raw JSON; only the library decodes with the schema.
 const rawViaService = FFprobe.use((service) =>
-  service.probeJson("in.mp4", options.custom("-show_streams"))
+  service.probeJson("in.mp4", Options.make("-show_streams"))
 )
 assertType<
   Equals<typeof rawViaService, Effect.Effect<unknown, ProbeError, FFprobe>>
 >(true)
 // Generic helpers and schema unions keep the schema's types.
 const probeWithHelper = <S extends Schema.Top>(schema: S) =>
-  probeWith("in.mp4", options.custom("-show_streams"), schema)
+  FFprobe.probeWith("in.mp4", Options.make("-show_streams"), schema)
 const helperDims = probeWithHelper(StoredDims)
 assertType<
   Equals<
@@ -473,22 +439,22 @@ assertType<
   >
 >(true)
 declare const eitherSchema: typeof Schema.String | typeof Schema.Number
-const either = probeWith(
+const either = FFprobe.probeWith(
   "in.mp4",
-  options.custom("-show_streams"),
+  Options.make("-show_streams"),
   eitherSchema
 )
 assertType<
   Equals<typeof either, Effect.Effect<string | number, ProbeError, FFprobe>>
 >(true)
 // @ts-expect-error the third argument must be a Schema
-probeWith("in.mp4", options.custom("-show_streams"), { width: 0 })
+FFprobe.probeWith("in.mp4", Options.make("-show_streams"), { width: 0 })
 // `Parameters`/`ReturnType` read the last overload, so wrappers derived from
 // them keep the two-argument API.
 const forwardProbeWith = (
-  ...args: Parameters<typeof probeWith>
-): ReturnType<typeof probeWith> => probeWith(...args)
-const forwarded = forwardProbeWith("in.mp4", options.custom("-show_streams"))
+  ...args: Parameters<typeof FFprobe.probeWith>
+): ReturnType<typeof FFprobe.probeWith> => FFprobe.probeWith(...args)
+const forwarded = forwardProbeWith("in.mp4", Options.make("-show_streams"))
 assertType<
   Equals<
     typeof forwarded,
@@ -512,7 +478,7 @@ export const withoutProbeJson: FFprobeService = {
 // no longer fits the service: it never receives a schema.
 const ignoresSchema = <S extends Schema.Top>(
   _input: string,
-  _options: FFmpeguOptions,
+  _options: Options.Arg,
   _schema: S
 ): Effect.Effect<S["Type"]> => Effect.succeed({ streams: [] })
 export const schemaIgnoringService: FFprobeService = {
@@ -559,8 +525,8 @@ failing.pipe(
 
 // ExitError names the failed binary when probing and transcoding together.
 Effect.gen(function* () {
-  yield* probe("in.mp4")
-  return yield* run(files)
+  yield* FFprobe.probe("in.mp4")
+  return yield* FFmpeg.run(files)
 }).pipe(
   Effect.catchTag("ExitError", (error) => {
     const binary: string | undefined = error.binary
@@ -570,21 +536,21 @@ Effect.gen(function* () {
 
 // References of inputs with any error/requirement types are usable everywhere.
 const typedInput = Input.fromStream(source)
-const anyInput: FFmpeguAnyInput = typedInput
-options.map(typedInput.video)
-options.map(anyInput.audio.track(1))
-filters.label(typedInput.video.track(0))
+const anyInput: AnyInput = typedInput
+Options.map(typedInput.video)
+Options.map(anyInput.audio.track(1))
+Filter.label(typedInput.video.track(0))
 
 // Time values accept Duration values and Temporal.Duration directly.
 // Temporal.Duration also fits the time object shape, so check the alias.
-assertType<Equals<FFmpeguTemporalDuration, Temporal.Duration>>(true)
-options.startTime(Duration.seconds(1))
-options.to(Temporal.Duration.from({ milliseconds: 1500 }))
-filters.atrim({
+assertType<Equals<TemporalDuration, Temporal.Duration>>(true)
+Options.startTime(Duration.seconds(1))
+Options.to(Temporal.Duration.from({ milliseconds: 1500 }))
+Filter.atrim({
   start: Duration.millis(500),
   duration: Temporal.Duration.from({ seconds: 1 })
 })
-filters.fps({ start_time: Duration.micros(1n) })
+Filter.fps({ start_time: Duration.micros(1n) })
 
 // Progress fields are camelCase; the marker and output time are typed.
 assertType<Equals<Progress["progress"], "continue" | "end">>(true)
@@ -592,13 +558,20 @@ assertType<Equals<Progress["outTime"], Duration.Duration | undefined>>(true)
 assertType<Equals<Progress["totalSize"], number | undefined>>(true)
 
 // Filter labels accept readonly arrays.
-const readonlyLabels: ReadonlyArray<ReturnType<typeof filters.label>> = [
-  filters.label("in")
+const readonlyLabels: ReadonlyArray<ReturnType<typeof Filter.label>> = [
+  Filter.label("in")
 ]
-filters.scale({ w: 320 }, { inputs: readonlyLabels, outputs: readonlyLabels })
-filters.custom("null", {}, readonlyLabels, readonlyLabels)
+Filter.scale({ w: 320 }, { inputs: readonlyLabels, outputs: readonlyLabels })
+Filter.make("null", {}, { inputs: readonlyLabels, outputs: readonlyLabels })
+// Labels are also given as names and stream references.
+Filter.scale(
+  { w: 320 },
+  { inputs: [Input.fromFile("in.mp4").video], outputs: ["out"] }
+)
+// @ts-expect-error an input stream cannot name a filter output
+Filter.scale({}, { outputs: [Input.fromFile("in.mp4").video] })
 // @ts-expect-error option bundles are immutable
-options.custom("-y").args.push("-n")
+Options.make("-y").args.push("-n")
 
 // Partial mocks of the generic service methods for code under test.
 const ffmpegMock = Layer.mock(FFmpeg, {
@@ -606,11 +579,13 @@ const ffmpegMock = Layer.mock(FFmpeg, {
   stream: () => Stream.make(new Uint8Array([1]))
 })
 assertType<Equals<typeof ffmpegMock, Layer.Layer<FFmpeg>>>(true)
-const mockedRun = run(files).pipe(Effect.provide(ffmpegMock))
+const mockedRun = FFmpeg.run(files).pipe(Effect.provide(ffmpegMock))
 assertType<Equals<typeof mockedRun, Effect.Effect<RunResult, FFmpegError>>>(
   true
 )
-const mockedStream = stream(streamedByMethod).pipe(Stream.provide(ffmpegMock))
+const mockedStream = FFmpeg.stream(streamedByMethod).pipe(
+  Stream.provide(ffmpegMock)
+)
 assertType<Equals<typeof mockedStream, Stream.Stream<Uint8Array, FFmpegError>>>(
   true
 )
@@ -653,7 +628,7 @@ Output.toSink(Sink.collect<Uint8Array>())
 // @ts-expect-error output sinks must not declare leftovers
 Output.toSink(Sink.take<Uint8Array>(1).pipe(Sink.as(undefined)))
 // @ts-expect-error progress callbacks return Effects
-run(files, { onProgress: () => undefined })
+FFmpeg.run(files, { onProgress: () => undefined })
 // @ts-expect-error byte sizes need a known unit
 FFprobe.layer({ maxOutputBytes: "16 MB/s" })
 // @ts-expect-error configured binaries are strings
@@ -661,7 +636,7 @@ FFmpeg.layerConfig({ binary: Config.Int("FFMPEG_PATH") })
 // @ts-expect-error commands are not Effects
 Effect.runPromise(files)
 // @ts-expect-error time values take Duration values, not other Duration.Input forms
-options.duration([1, 0])
+Options.duration([1, 0])
 // @ts-expect-error inputs are not outputs
 Command.withOutput(Input.fromFile("in.mp4"))
 // @ts-expect-error inputs are not outputs
@@ -675,17 +650,17 @@ Command.make({
   outputs: [{ ...Output.toFile("out.mp4"), destination: 1 }]
 })
 // @ts-expect-error run cannot consume an Output.toStream output
-run(streamed)
+FFmpeg.run(streamed)
 // @ts-expect-error run cannot consume an Output.toStream output
-run(twoStreams)
+FFmpeg.run(twoStreams)
 // @ts-expect-error stream needs an Output.toStream output
-stream(files)
+FFmpeg.stream(files)
 // @ts-expect-error stream reads exactly one Output.toStream output
-stream(twoStreams)
+FFmpeg.stream(twoStreams)
 // @ts-expect-error the output may be a stream output
-run(maybeStreamed)
+FFmpeg.run(maybeStreamed)
 // @ts-expect-error the output may not be a stream output
-stream(maybeStreamed)
+FFmpeg.stream(maybeStreamed)
 Effect.flatMap(Effect.service(FFmpeg), (ffmpeg) => {
   // @ts-expect-error the service checks like run
   ffmpeg.run(streamedByMethod)
@@ -696,13 +671,69 @@ Effect.flatMap(Effect.service(FFmpeg), (ffmpeg) => {
 // Commands whose count is unknown are accepted by both and checked at runtime:
 // explicitly typed commands, arrays of unknown length that may contain stream
 // outputs, and outputs built with the constructor.
-const annotated: FFmpeguCommand<SourceError, Storage> = streamed
+const annotated: Command<SourceError, Storage> = streamed
 const mixedOutputs = [Output.toFile("out.mp4"), Output.toStream()]
 const fromArray = Command.make({ outputs: mixedOutputs })
 const constructed = files.withOutput(new Output("out.mkv"))
-run(annotated)
-stream(annotated)
-run(fromArray)
-stream(fromArray)
-run(constructed)
-stream(constructed)
+FFmpeg.run(annotated)
+FFmpeg.stream(annotated)
+FFmpeg.run(fromArray)
+FFmpeg.stream(fromArray)
+FFmpeg.run(constructed)
+FFmpeg.stream(constructed)
+
+// Bundle entries are tokens, bundles, tuples and records. A bare argument
+// would render as a stray positional token, so it is only accepted as a value.
+const referenced = Input.fromFile("in.mp4")
+Options.make({ map: referenced.video }, ["map", referenced.audio], "-y")
+// @ts-expect-error a stream reference is an option value, not an option
+Options.make(referenced.video)
+// @ts-expect-error a filter is an option value, not an option
+Options.make(Filter.hflip())
+// Optional keys of a typed record are accepted and omitted when unset.
+const optionalKeys: { crf?: number; preset?: string } = {}
+Options.make(optionalKeys)
+
+// Inputs, outputs and global options take option forms directly.
+Command.make({ global: { y: true } })
+Input.fromFile("in.mp4", { ss: 1 }, ["t", 2], Options.format("mp4"))
+Output.toStream({ f: "ogg" }, "-vn")
+// @ts-expect-error a bare argument is not an option form here either
+Output.toFile("out.mp4", referenced.video)
+const emptyCommand = Command.make()
+assertType<Equals<typeof emptyCommand, Command<never, never, 0>>>(true)
+declare const maybeStreaming:
+  | { readonly outputs: readonly [Output<never, never, 1>] }
+  | undefined
+// @ts-expect-error a configuration that may be absent would keep its count
+Command.make(maybeStreaming)
+// An optional bundle may be passed as it is.
+declare const maybeSeek: Options.Options | undefined
+Input.fromFile("in.mp4", maybeSeek)
+Output.toFile("out.mp4", maybeSeek, { crf: 23 })
+
+// Filter options take one raw string, chain or filter, or several filters.
+Options.videoFilter("scale=1:1")
+Options.videoFilter(Filter.chain(Filter.hflip()))
+Options.videoFilter(Filter.scale({ w: 1 }), Filter.hflip())
+Options.videoFilter("scale=1:1", Filter.hflip())
+// @ts-expect-error at least one filter is required
+Options.audioFilter()
+// @ts-expect-error as a callback it would read the index as a filter
+;["hflip"].map(Options.videoFilter)
+// Wrappers derived from the helper keep every form.
+const wrappedFilter = (...args: Parameters<typeof Options.videoFilter>) =>
+  Options.videoFilter(...args)
+wrappedFilter("scale=1:1")
+wrappedFilter(Filter.chain(Filter.hflip()))
+// Their signatures can be named from the package entry.
+const namedFilter: Options.FilterHelper = Options.audioFilter
+const namedBitrate: Options.BitrateHelper = Options.videoBitrate
+void [namedFilter, namedBitrate]
+
+// Filters without typed options still take only filter option values.
+Filter.hflip({ enable: "gte(t,1)" })
+// @ts-expect-error options are a record
+Filter.hflip(123)
+// @ts-expect-error time objects are only accepted on a helper's time keys
+Filter.vflip({ enable: { seconds: 1 } })

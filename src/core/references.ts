@@ -1,10 +1,10 @@
-import type { FFmpeguReferencesInterface } from "../types/index.ts"
+import type { References } from "../types/index.ts"
 
 /**
  * Standalone resolver for rendering builders outside a command: unknown refs
  * get the next free index on first use. Commands never use this resolver.
  */
-export class FFmpeguReferences implements FFmpeguReferencesInterface {
+export class StandaloneReferences implements References {
   #refs: Map<object, number> = new Map()
 
   get(ref: object): number {
@@ -78,9 +78,9 @@ export const invalidStreamIndexDetail = (cause: unknown): string | undefined =>
 /**
  * @internal Command-scoped resolver: only the command's own inputs resolve.
  * Builders render synchronously through `getArgs`, so a foreign reference can
- * only be reported by throwing; `FFmpeguCommand.compile` converts it.
+ * only be reported by throwing; `Command.compile` converts it.
  */
-export class CommandReferences implements FFmpeguReferencesInterface {
+export class CommandReferences implements References {
   constructor(private readonly refs: ReadonlyMap<object, number>) {}
 
   get(ref: object): number {

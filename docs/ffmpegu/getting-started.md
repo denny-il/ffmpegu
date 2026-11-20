@@ -24,7 +24,7 @@ ffmpegu separates describing an FFmpeg invocation from executing it:
 
 1. **Describe.** `Input`, `Output`, `Options`, filters, and `Command` are immutable values. Building them never touches the filesystem or spawns a process.
 2. **Compile.** `command.compile()` validates the description and renders the exact argv. It is pure and synchronous, so you can unit-test commands without FFmpeg.
-3. **Execute.** `run(command)` is an `Effect` that needs the `FFmpeg` service. Providing `FFmpeg.layer()` and your platform's services turns it into a real process with a scope of its own.
+3. **Execute.** `FFmpeg.run(command)` is an `Effect` that needs the `FFmpeg` service. Providing `FFmpeg.layer()` and your platform's services turns it into a real process with a scope of its own.
 
 The library never starts a runtime. Your application decides where Effects run, typically with `NodeRuntime.runMain` or `BunRuntime.runMain`.
 
@@ -33,29 +33,27 @@ The library never starts a runtime. Your application decides where Effects run, 
 ```ts
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
-import { Command, FFmpeg, Input, Options, Output, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 const input = Input.fromFile("input.mov")
 
 const command = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [input],
   outputs: [
     Output.toFile(
       "output.mp4",
-      Options.create(
-        { map: input.video },
-        { map: input.audio },
-        options.videoCodec("libx264"),
-        options.crf(23),
-        options.audioCodec("aac")
-      )
+      { map: input.video },
+      { map: input.audio },
+      Options.videoCodec("libx264"),
+      Options.crf(23),
+      Options.audioCodec("aac")
     )
   ]
 })
 
 const program = Effect.gen(function* () {
-  const result = yield* run(command)
+  const result = yield* FFmpeg.run(command)
   yield* Effect.logInfo("Done", { args: result.args.length })
 })
 
@@ -66,7 +64,7 @@ program.pipe(
 )
 ```
 
-`Options.create` accepts raw FFmpeg options (`{ map: input.video }` renders `-map 0:v`) and nests the bundles returned by helpers such as `options.crf(23)`. See [options](options.md) for every form.
+Options are raw FFmpeg options (`{ map: input.video }` renders `-map 0:v`) or the bundles returned by helpers such as `Options.crf(23)`, in any mix. See [options](options.md) for every form.
 
 On Bun, use `BunServices.layer` and `BunRuntime.runMain` from `@effect/platform-bun`.
 
@@ -77,21 +75,21 @@ Most applications provide both services once, next to the platform layer:
 ```ts
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
-import { Command, FFmpeg, FFprobe, Input, Output, options, probe, run } from "ffmpegu"
+import { Command, FFmpeg, FFprobe, Input, Options, Output } from "ffmpegu"
 
 const MediaLive = Layer.mergeAll(FFmpeg.layer(), FFprobe.layer()).pipe(
   Layer.provideMerge(NodeServices.layer)
 )
 
 const program = Effect.gen(function* () {
-  yield* run(
+  yield* FFmpeg.run(
     Command.make({
-      global: options.overwrite(),
+      global: Options.overwrite(),
       inputs: [Input.fromFile("input.mp4")],
-      outputs: [Output.toFile("output.webm", options.videoCodec("libvpx-vp9"))]
+      outputs: [Output.toFile("output.webm", Options.videoCodec("libvpx-vp9"))]
     })
   )
-  const metadata = yield* probe("output.webm")
+  const metadata = yield* FFprobe.probe("output.webm")
   yield* Effect.logInfo("Transcoded", { streams: metadata.streams.length })
 })
 

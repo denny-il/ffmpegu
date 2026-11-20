@@ -1,25 +1,31 @@
-import { FFmpeguArgument } from "../core/argument.ts"
-import type { FFmpeguReferencesInterface } from "../types/index.ts"
-import type { FFmpeguFilter } from "./core.ts"
+import { Argument } from "../core/argument.ts"
+import type { References } from "../types/index.ts"
+import type { Filter } from "./core.ts"
 
 /**
- * Represents a chain of filters connected in sequence
- * Filters in a chain are separated by commas in FFmpeg syntax
+ * Filters applied in sequence, separated by commas in FFmpeg syntax. Raw
+ * filter text and nested chains render as they are; every token of another
+ * argument is a filter of the chain.
  */
-export class FFmpeguFilterChain extends FFmpeguArgument {
-  private readonly filters: ReadonlyArray<FFmpeguFilter>
+export class Chain extends Argument {
+  private readonly filters: ReadonlyArray<string | Argument>
 
-  constructor(filters: ReadonlyArray<FFmpeguFilter>) {
+  constructor(filters: ReadonlyArray<string | Argument>) {
     super()
     // Copy so later changes to the caller's array cannot alter this value.
     this.filters = [...filters]
   }
 
-  static create(...filters: FFmpeguFilter[]): FFmpeguFilterChain {
-    return new FFmpeguFilterChain(filters)
-  }
-
-  getArgs(refs: FFmpeguReferencesInterface): string[] {
-    return [this.filters.map((filter) => filter.getArgs(refs)[0]).join(",")]
+  getArgs(refs: References): string[] {
+    return [
+      this.filters
+        .flatMap((filter) =>
+          typeof filter === "string" ? [filter] : filter.getArgs(refs)
+        )
+        .join(",")
+    ]
   }
 }
+
+export const chain = (...filters: ReadonlyArray<Filter>): Chain =>
+  new Chain(filters)

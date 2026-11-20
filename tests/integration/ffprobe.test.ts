@@ -2,13 +2,11 @@ import { it, expect } from "@effect/vitest"
 import { Effect, FileSystem, Schema } from "effect"
 import {
   Command,
+  FFmpeg,
   FFprobe,
   Input,
   Options,
-  Output,
-  probe,
-  probeWith,
-  run
+  Output
 } from "../../src/index.ts"
 import { MediaLive, PlatformLive } from "../helpers/platform.ts"
 
@@ -16,7 +14,7 @@ it.live(
   "decodes real FFprobe metadata and preserves codec-specific fields",
   () =>
     Effect.gen(function* () {
-      const result = yield* probe("./assets/video.mp4")
+      const result = yield* FFprobe.probe("./assets/video.mp4")
       expect(result.streams[0]).toMatchObject({
         codec_type: "video",
         codec_name: "h264",
@@ -24,7 +22,7 @@ it.live(
         height: 360
       })
       expect(result.format?.format_name).toContain("mov")
-      const again = yield* probe("./assets/video.mp4")
+      const again = yield* FFprobe.probe("./assets/video.mp4")
       expect(again.streams).toEqual(result.streams)
     }).pipe(Effect.provide(MediaLive))
 )
@@ -34,8 +32,8 @@ it.live(
   () =>
     Effect.gen(function* () {
       const inputs = ["./assets/video.mp4", "./assets/video.mp4"]
-      const sequential = yield* Effect.forEach(inputs, probe)
-      const mapped = yield* Effect.all(inputs.map(probe))
+      const sequential = yield* Effect.forEach(inputs, FFprobe.probe)
+      const mapped = yield* Effect.all(inputs.map(FFprobe.probe))
       const service = yield* FFprobe.use((service) =>
         Effect.forEach(inputs, service.probe)
       )
@@ -50,14 +48,14 @@ it.live(
   () =>
     Effect.gen(function* () {
       const stray = yield* Effect.flip(
-        probeWith(
+        FFprobe.probeWith(
           "./assets/video.mp4",
-          Options.create("-show_format", "./assets/video.mp4")
+          Options.make("-show_format", "./assets/video.mp4")
         )
       )
       expect(stray).toMatchObject({ _tag: "ExitError", exitCode: 1 })
       const missing = yield* Effect.flip(
-        probeWith("-filename.mp4", Options.create("-show_entries"))
+        FFprobe.probeWith("-filename.mp4", Options.make("-show_entries"))
       )
       expect(missing).toMatchObject({ _tag: "ExitError", exitCode: 1 })
       if (missing._tag === "ExitError")
@@ -71,20 +69,20 @@ it.live("decodes unavailable timestamps with show_optional_fields always", () =>
       const fs = yield* FileSystem.FileSystem
       const dir = yield* fs.makeTempDirectoryScoped()
       const raw = `${dir}/video.h264`
-      yield* run(
+      yield* FFmpeg.run(
         Command.make({
           inputs: [Input.fromFile("./assets/video.mp4")],
           outputs: [
             Output.toFile(
               raw,
-              Options.create({ "c:v": "copy", frames: 1, f: "h264" })
+              Options.make({ "c:v": "copy", frames: 1, f: "h264" })
             )
           ]
         })
       )
-      const result = yield* probeWith(
+      const result = yield* FFprobe.probeWith(
         raw,
-        Options.create({
+        Options.make({
           show_optional_fields: "always",
           show_entries: "stream=start_pts,duration_ts",
           v: "error"
@@ -108,20 +106,17 @@ it.live(
           "1\n00:00:00,000 --> 00:00:00,500\nhello\n"
         )
         const mixed = `${dir}/mixed.mkv`
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [
               Input.fromFile("./assets/video.mp4"),
-              Input.fromFile(
-                "sine=duration=0.5",
-                Options.create({ f: "lavfi" })
-              ),
+              Input.fromFile("sine=duration=0.5", Options.make({ f: "lavfi" })),
               Input.fromFile(subtitles)
             ],
             outputs: [
               Output.toFile(
                 mixed,
-                Options.create(
+                Options.make(
                   ["-map", "0:v"],
                   ["-map", "1:a"],
                   ["-map", "2:s"],
@@ -134,25 +129,25 @@ it.live(
           })
         )
         const timecoded = `${dir}/timecoded.mov`
-        yield* run(
+        yield* FFmpeg.run(
           Command.make({
             inputs: [Input.fromFile("./assets/video.mp4")],
             outputs: [
               Output.toFile(
                 timecoded,
-                Options.create({ "c:v": "copy", timecode: "00:00:00:00" })
+                Options.make({ "c:v": "copy", timecode: "00:00:00:00" })
               )
             ]
           })
         )
-        const always = Options.create({
+        const always = Options.make({
           show_optional_fields: "always",
           show_streams: true,
           show_format: true,
           v: "error"
         })
 
-        const srt = yield* probeWith(subtitles, always)
+        const srt = yield* FFprobe.probeWith(subtitles, always)
         expect(srt.streams).toMatchObject([
           {
             codec_type: "subtitle",
@@ -162,14 +157,14 @@ it.live(
             duration_ts: "N/A"
           }
         ])
-        const mkv = yield* probeWith(mixed, always)
+        const mkv = yield* FFprobe.probeWith(mixed, always)
         expect(mkv.streams).toMatchObject([
           { codec_type: "video", width: 640, height: 360, duration_ts: "N/A" },
           { codec_type: "audio", channels: 1 },
           { codec_type: "subtitle", width: "N/A", height: "N/A" },
           { codec_type: "attachment", codec_name: "unknown" }
         ])
-        const mov = yield* probeWith(timecoded, always)
+        const mov = yield* FFprobe.probeWith(timecoded, always)
         expect(mov.streams.map((stream) => stream.codec_type)).toEqual([
           "video",
           "data"
@@ -182,28 +177,30 @@ it.live(
   "projects real metadata, omits stream indexes and unselected sections, and can run again",
   () =>
     Effect.gen(function* () {
-      const options = Options.create({
+      const options = Options.make({
         protocol_whitelist: "file",
         v: "quiet",
         select_streams: "v:0",
         show_entries: "stream=codec_name,width:format=duration"
       })
-      const result = yield* probeWith("./assets/video.mp4", options)
+      const result = yield* FFprobe.probeWith("./assets/video.mp4", options)
       expect(result.streams).toEqual([{ codec_name: "h264", width: 640 }])
       expect(result.format).toEqual({ duration: expect.any(String) })
-      expect(yield* probeWith("./assets/video.mp4", options)).toEqual(result)
+      expect(yield* FFprobe.probeWith("./assets/video.mp4", options)).toEqual(
+        result
+      )
 
-      const formatOnly = yield* probeWith(
+      const formatOnly = yield* FFprobe.probeWith(
         "./assets/video.mp4",
-        Options.create({ show_entries: "format=duration", v: "error" })
+        Options.make({ show_entries: "format=duration", v: "error" })
       )
       expect(formatOnly).toEqual({
         streams: [],
         format: { duration: expect.any(String) }
       })
-      const empty = yield* probeWith(
+      const empty = yield* FFprobe.probeWith(
         "./assets/video.mp4",
-        Options.create({ v: "error" })
+        Options.make({ v: "error" })
       )
       expect(empty).toEqual({ streams: [] })
     }).pipe(Effect.provide(MediaLive))
@@ -217,9 +214,9 @@ it.live("decodes real projected metadata with a caller schema", () =>
       ),
       format: Schema.Struct({ duration: Schema.NumberFromString })
     })
-    const dims = yield* probeWith(
+    const dims = yield* FFprobe.probeWith(
       "./assets/video.mp4",
-      Options.create({
+      Options.make({
         show_entries: "stream=width,height:format=duration",
         select_streams: "v:0",
         v: "error"
@@ -233,15 +230,15 @@ it.live("decodes real projected metadata with a caller schema", () =>
     const raw = yield* FFprobe.use((service) =>
       service.probeJson(
         "./assets/video.mp4",
-        Options.create({ show_entries: "format=duration", v: "error" })
+        Options.make({ show_entries: "format=duration", v: "error" })
       )
     )
     expect(raw).toEqual({ format: { duration: expect.any(String) } })
 
     const missing = yield* Effect.flip(
-      probeWith(
+      FFprobe.probeWith(
         "./assets/video.mp4",
-        Options.create({ show_entries: "format=duration", v: "error" }),
+        Options.make({ show_entries: "format=duration", v: "error" }),
         Dims
       )
     )
@@ -252,9 +249,9 @@ it.live("decodes real projected metadata with a caller schema", () =>
 it.live("passes protocol restrictions to FFprobe", () =>
   Effect.gen(function* () {
     const error = yield* Effect.flip(
-      probeWith(
+      FFprobe.probeWith(
         "./assets/video.mp4",
-        Options.create({
+        Options.make({
           protocol_whitelist: "http",
           v: "error",
           show_format: true
@@ -271,7 +268,7 @@ it.live(
   "reports a missing FFprobe binary without an unhandled spawn error",
   () =>
     Effect.gen(function* () {
-      const error = yield* Effect.flip(probe("unused"))
+      const error = yield* Effect.flip(FFprobe.probe("unused"))
       expect(error).toMatchObject({ _tag: "SpawnError" })
     }).pipe(
       Effect.provide(FFprobe.layer({ binary: "/ffmpegu/missing-ffprobe" })),
@@ -284,12 +281,14 @@ it.live(
   () =>
     Effect.gen(function* () {
       const invalid = yield* Effect.flip(
-        probe("unused").pipe(
+        FFprobe.probe("unused").pipe(
           Effect.provide(FFprobe.layer({ binary: "/bin/echo" }))
         )
       )
       expect(invalid).toMatchObject({ _tag: "ProbeDecodeError" })
-      const missing = yield* Effect.flip(probe("/ffmpegu/missing-media"))
+      const missing = yield* Effect.flip(
+        FFprobe.probe("/ffmpegu/missing-media")
+      )
       expect(missing).toMatchObject({ _tag: "ExitError" })
     }).pipe(Effect.provide(MediaLive))
 )
@@ -306,7 +305,7 @@ it.live("bounds stdout from an unexpected probe executable", () =>
       )
       yield* fs.chmod(binary, 0o755)
       const error = yield* Effect.flip(
-        probe("ignored").pipe(
+        FFprobe.probe("ignored").pipe(
           Effect.provide(FFprobe.layer({ binary, maxOutputBytes: 128 }))
         )
       )

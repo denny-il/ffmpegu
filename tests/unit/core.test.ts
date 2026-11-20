@@ -1,48 +1,47 @@
 import { Result, Sink, Stream } from "effect"
 import { describe, expect, it } from "vitest"
-import { FFmpeguArgument } from "../../src/core/argument.ts"
-import { FFmpeguCommand } from "../../src/core/command.ts"
-import { StreamType } from "../../src/core/enums.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
 import {
-  FFmpeguInput,
-  FFmpeguStreamReference,
-  FFmpeguStreamTrackReference
-} from "../../src/core/input.ts"
-import { FFmpeguOutput } from "../../src/core/output.ts"
-import { FFmpeguReferences } from "../../src/core/references.ts"
-import { FFmpeguOptions } from "../../src/index.ts"
+  Argument,
+  Command,
+  Input,
+  Options,
+  Output,
+  StreamReference,
+  StreamTrackReference
+} from "../../src/index.ts"
 
 describe("FFmpegu", { concurrent: false }, () => {
   describe("Options", () => {
-    const refs = new FFmpeguReferences()
+    const refs = new StandaloneReferences()
 
     it("should create options", () => {
-      const options = new FFmpeguOptions(["-y", "-i", "input.mp4"])
+      const options = new Options.Options(["-y", "-i", "input.mp4"])
       expect(options).toBeDefined()
-      expect(options).toBeInstanceOf(FFmpeguArgument)
+      expect(options).toBeInstanceOf(Argument)
     })
 
     it("should create options with args", () => {
-      const options = new FFmpeguOptions(["-y", ["-i", "input.mp4"]])
+      const options = new Options.Options(["-y", ["-i", "input.mp4"]])
       expect(options.args).toHaveLength(2)
       expect(options.args[0]).toBe("-y")
       expect(options.args[1]).toEqual(["-i", "input.mp4"])
     })
 
     it("should resolve simple args", () => {
-      const options = new FFmpeguOptions(["-y", "-i", "input.mp4"])
+      const options = new Options.Options(["-y", "-i", "input.mp4"])
       const args = options.getArgs(refs)
       expect(args).toEqual(["-y", "-i", "input.mp4"])
     })
 
     it("should resolve array args", () => {
-      const options = new FFmpeguOptions([["-y"], ["-i", "input.mp4"]])
+      const options = new Options.Options([["-y"], ["-i", "input.mp4"]])
       const args = options.getArgs(refs)
       expect(args).toEqual(["-y", "-i", "input.mp4"])
     })
 
     it("should resolve object args", () => {
-      const options = new FFmpeguOptions([
+      const options = new Options.Options([
         { "-y": true },
         { "-i": "input.mp4" }
       ])
@@ -51,7 +50,7 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should resolve mixed args", () => {
-      const options = new FFmpeguOptions([
+      const options = new Options.Options([
         "-y",
         ["-i", "input.mp4"],
         { "-c:v": "libx264" }
@@ -64,30 +63,30 @@ describe("FFmpegu", { concurrent: false }, () => {
   describe("Input", () => {
     it("should create input from file path", () => {
       const source = "/test/video.mp4"
-      const input = FFmpeguInput.fromFile(source)
+      const input = Input.fromFile(source)
       expect(input.source).toBe(source)
       expect(input.options).toBeUndefined()
     })
 
     it("should create input from stream", () => {
       const source = Stream.make(new Uint8Array([1]))
-      const input = FFmpeguInput.fromStream(source)
+      const input = Input.fromStream(source)
       expect(input.source).toBe(source)
       expect(input.options).toBeUndefined()
     })
 
     it("should create input with args", () => {
-      const input = new FFmpeguInput(
+      const input = new Input(
         "",
-        new FFmpeguOptions(["test", ["test", "test"]])
+        new Options.Options(["test", ["test", "test"]])
       )
       expect(input.options).toBeDefined()
-      expect(input.options).toBeInstanceOf(FFmpeguOptions)
+      expect(input.options).toBeInstanceOf(Options.Options)
       expect(input.options!.args.length).toBe(2)
     })
 
     it("should create references", () => {
-      const input = FFmpeguInput.fromFile("/test/video.mp4")
+      const input = Input.fromFile("/test/video.mp4")
       const videoRef = input.video
       const audioRef = input.audio
       const subtitleRef = input.subtitle
@@ -98,36 +97,36 @@ describe("FFmpegu", { concurrent: false }, () => {
       const subtitleTrackRef = subtitleRef.track(2)
       const dataTrackRef = dataRef.track(3)
 
-      expect(videoRef).toBeInstanceOf(FFmpeguStreamReference)
+      expect(videoRef).toBeInstanceOf(StreamReference)
       expect(videoRef.input).toBe(input)
-      expect(videoRef.streamType).toBe(StreamType.VIDEO)
-      expect(videoTrackRef).toBeInstanceOf(FFmpeguStreamTrackReference)
+      expect(videoRef.streamType).toBe("v")
+      expect(videoTrackRef).toBeInstanceOf(StreamTrackReference)
       expect(videoTrackRef.input).toBe(input)
-      expect(videoTrackRef.streamType).toBe(StreamType.VIDEO)
+      expect(videoTrackRef.streamType).toBe("v")
       expect(videoTrackRef.index).toBe(0)
 
-      expect(audioRef).toBeInstanceOf(FFmpeguStreamReference)
+      expect(audioRef).toBeInstanceOf(StreamReference)
       expect(audioRef.input).toBe(input)
-      expect(audioRef.streamType).toBe(StreamType.AUDIO)
-      expect(audioTrackRef).toBeInstanceOf(FFmpeguStreamTrackReference)
+      expect(audioRef.streamType).toBe("a")
+      expect(audioTrackRef).toBeInstanceOf(StreamTrackReference)
       expect(audioTrackRef.input).toBe(input)
-      expect(audioTrackRef.streamType).toBe(StreamType.AUDIO)
+      expect(audioTrackRef.streamType).toBe("a")
       expect(audioTrackRef.index).toBe(1)
 
-      expect(subtitleRef).toBeInstanceOf(FFmpeguStreamReference)
+      expect(subtitleRef).toBeInstanceOf(StreamReference)
       expect(subtitleRef.input).toBe(input)
-      expect(subtitleRef.streamType).toBe(StreamType.SUBTITLE)
-      expect(subtitleTrackRef).toBeInstanceOf(FFmpeguStreamTrackReference)
+      expect(subtitleRef.streamType).toBe("s")
+      expect(subtitleTrackRef).toBeInstanceOf(StreamTrackReference)
       expect(subtitleTrackRef.input).toBe(input)
-      expect(subtitleTrackRef.streamType).toBe(StreamType.SUBTITLE)
+      expect(subtitleTrackRef.streamType).toBe("s")
       expect(subtitleTrackRef.index).toBe(2)
 
-      expect(dataRef).toBeInstanceOf(FFmpeguStreamReference)
+      expect(dataRef).toBeInstanceOf(StreamReference)
       expect(dataRef.input).toBe(input)
-      expect(dataRef.streamType).toBe(StreamType.DATA)
-      expect(dataTrackRef).toBeInstanceOf(FFmpeguStreamTrackReference)
+      expect(dataRef.streamType).toBe("d")
+      expect(dataTrackRef).toBeInstanceOf(StreamTrackReference)
       expect(dataTrackRef.input).toBe(input)
-      expect(dataTrackRef.streamType).toBe(StreamType.DATA)
+      expect(dataTrackRef.streamType).toBe("d")
       expect(dataTrackRef.index).toBe(3)
     })
   })
@@ -135,35 +134,35 @@ describe("FFmpegu", { concurrent: false }, () => {
   describe("Output", () => {
     it("should create output from file path", () => {
       const destination = "/test/output.mp4"
-      const output = FFmpeguOutput.toFile(destination)
+      const output = Output.toFile(destination)
       expect(output.destination).toBe(destination)
       expect(output.options).toBeUndefined()
     })
 
     it("should create output from stream", () => {
       const stream = Sink.drain
-      const output = FFmpeguOutput.toSink(stream)
+      const output = Output.toSink(stream)
       expect(output.destination).toBe(stream)
       expect(output.options).toBeUndefined()
     })
 
     it("should create output with args", () => {
-      const output = new FFmpeguOutput(
+      const output = new Output(
         "",
-        new FFmpeguOptions(["test", ["test", "test"]])
+        new Options.Options(["test", ["test", "test"]])
       )
       expect(output.options).toBeDefined()
-      expect(output.options).toBeInstanceOf(FFmpeguOptions)
+      expect(output.options).toBeInstanceOf(Options.Options)
       expect(output.options!.args.length).toBe(2)
     })
   })
 
   describe("Command", () => {
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const input = Input.fromFile("/test/input.mp4")
+    const output = Output.toFile("/test/output.mp4")
 
     it("should create a valid command with input and output", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [input],
         outputs: [output]
       })
@@ -174,19 +173,19 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should create a valid command with global arguments", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [input],
         outputs: [output],
-        global: new FFmpeguOptions(["test", ["test", "test"]])
+        global: new Options.Options(["test", ["test", "test"]])
       })
 
       expect(command.inputs).toContain(input)
       expect(command.outputs).toContain(output)
-      expect(command.global).toBeInstanceOf(FFmpeguOptions)
+      expect(command.global).toBeInstanceOf(Options.Options)
     })
 
     it("should reject a command with a duplicate input on compile", () => {
-      const result = new FFmpeguCommand({
+      const result = new Command({
         inputs: [input, input],
         outputs: [output]
       }).compile()
@@ -197,7 +196,7 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should reject a command with a duplicate output on compile", () => {
-      const result = new FFmpeguCommand({
+      const result = new Command({
         inputs: [input],
         outputs: [output, output]
       }).compile()
@@ -208,7 +207,7 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should allow add inputs", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [],
         outputs: []
       })
@@ -223,7 +222,7 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should allow add outputs", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [],
         outputs: []
       })
@@ -238,12 +237,12 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should allow add global arguments", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [],
         outputs: []
       })
       const arg = "test"
-      const newCommand = command.withGlobal(new FFmpeguOptions([arg]))
+      const newCommand = command.withGlobal(new Options.Options([arg]))
 
       expect(command).not.toBe(newCommand)
       expect(command.global).toBeUndefined()
@@ -251,7 +250,7 @@ describe("FFmpegu", { concurrent: false }, () => {
     })
 
     it("should compile command to arguments", () => {
-      const command = new FFmpeguCommand({
+      const command = new Command({
         inputs: [input],
         outputs: [output]
       })

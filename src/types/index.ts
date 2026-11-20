@@ -1,25 +1,12 @@
 import type * as Duration from "effect/Duration"
-import type { FFmpeguArgument } from "../core/argument.ts"
 
 /**
  * Resolves command-owned objects (inputs) to their positional ffmpeg index.
  */
-export interface FFmpeguReferencesInterface {
+export interface References {
   get(ref: object): number
   has(ref: object): boolean
 }
-
-export type FFmpeguPrimitiveUserArgValue = string | FFmpeguArgument
-
-export type FFmpeguUserArgValue =
-  | FFmpeguPrimitiveUserArgValue
-  | number
-  | boolean
-
-export type FFmpeguUserArg =
-  | FFmpeguPrimitiveUserArgValue
-  | readonly [string, FFmpeguUserArgValue?]
-  | Readonly<Record<string, FFmpeguUserArgValue>>
 
 /**
  * One `-progress` block reported by ffmpeg.

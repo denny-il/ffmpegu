@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { FFmpeguInput } from "../../src/core/input.ts"
-import { FFmpeguOutput } from "../../src/core/output.ts"
-import { FFmpeguReferences } from "../../src/core/references.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
+import { Input, Output } from "../../src/index.ts"
 
 describe("References", { concurrent: false }, () => {
   it("should auto-index new references", () => {
-    const refs = new FFmpeguReferences()
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const refs = new StandaloneReferences()
+    const input = Input.fromFile("/test/input.mp4")
+    const output = Output.toFile("/test/output.mp4")
 
     expect(refs.get(input)).toBe(0)
     expect(refs.get(output)).toBe(1)
@@ -17,16 +16,16 @@ describe("References", { concurrent: false }, () => {
   })
 
   it("should throw when setting duplicate references", () => {
-    const refs = new FFmpeguReferences()
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
+    const refs = new StandaloneReferences()
+    const input = Input.fromFile("/test/input.mp4")
 
     refs.set(input, 0)
     expect(() => refs.set(input, 1)).toThrow()
   })
 
   it("should throw when setting negative index", () => {
-    const refs = new FFmpeguReferences()
-    const output = FFmpeguOutput.toFile("/test/output.mp4")
+    const refs = new StandaloneReferences()
+    const output = Output.toFile("/test/output.mp4")
 
     expect(() => refs.set(output, -1)).toThrow()
   })

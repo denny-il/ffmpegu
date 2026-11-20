@@ -1,35 +1,30 @@
-import type { FFmpeguArgument } from "../../core/argument.ts"
-import type { FFmpeguUserArgValue } from "../../types/index.ts"
+import type { Argument } from "../../core/argument.ts"
 import { resolveSecondsOptions } from "../../utils.ts"
 import { format } from "../common.ts"
-import { FFmpeguOptions } from "../core.ts"
+import { type ArgValue, make, type Options } from "../core.ts"
 
 /** Arrays are joined with `+`, the separator of FFmpeg's flag options. */
-export type FFmpeguMuxerOptionValue =
-  | FFmpeguUserArgValue
-  | ReadonlyArray<string>
+export type MuxerOptionValue = ArgValue | ReadonlyArray<string>
 
 type WithArguments<Known> = {
-  [K in keyof Known]?: Known[K] | FFmpeguArgument
+  [K in keyof Known]?: Known[K] | Argument
 }
 
 /**
  * A muxer helper whose `Known` keys are FFmpeg's own option names, typed as
  * hints rather than a closed set: any other key passes through as-is. Mirrors
- * `OpenFilterHelper`, including the plain signature that keeps typed wrappers
+ * `Filter.OpenHelper`, including the plain signature that keeps typed wrappers
  * and `Parameters<typeof helper>` working.
  */
 export type OpenMuxerHelper<Known> = {
   <
     T extends WithArguments<Known> & {
-      [K in keyof T as Exclude<K, keyof Known>]:
-        | FFmpeguMuxerOptionValue
-        | undefined
+      [K in keyof T as Exclude<K, keyof Known>]: MuxerOptionValue | undefined
     }
   >(
     options?: T
-  ): FFmpeguOptions
-  (options?: WithArguments<Known>): FFmpeguOptions
+  ): Options
+  (options?: WithArguments<Known>): Options
 }
 
 /**
@@ -42,10 +37,10 @@ export const muxerOptions = (
   options: Readonly<Record<string, unknown>>,
   durationKeys: ReadonlyArray<string>
 ) => {
-  const args: Record<string, FFmpeguUserArgValue> = {}
+  const args: Record<string, ArgValue> = {}
 
   for (const [key, value] of Object.entries(
-    resolveSecondsOptions(options, [...durationKeys])
+    resolveSecondsOptions(options, durationKeys)
   )) {
     if (value === undefined) continue
     args[key] =
@@ -55,8 +50,8 @@ export const muxerOptions = (
           : 0
         : Array.isArray(value)
           ? value.join("+")
-          : (value as FFmpeguUserArgValue)
+          : (value as ArgValue)
   }
 
-  return FFmpeguOptions.create(format(name), args)
+  return make(format(name), args)
 }

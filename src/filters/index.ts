@@ -1,14 +1,15 @@
-import { FFmpeguFilterBuilder } from "./builder.ts"
-import { FFmpeguFilterChain } from "./chain.ts"
-import { FFmpeguFilterGraph } from "./graph.ts"
-import { FFmpeguFilterLabelRef } from "./label.ts"
-import { FFmpeguSimpleFilter } from "./simple.ts"
-
-export const builder = FFmpeguFilterBuilder.create
-export const custom = FFmpeguSimpleFilter.create
-export const label = FFmpeguFilterLabelRef.create
-export const chain = FFmpeguFilterChain.create
-export const graph = FFmpeguFilterGraph.create
-
+export { Chain, chain } from "./chain.ts"
+export {
+  Filter,
+  type LabelLike,
+  type Labels,
+  make,
+  type OpenHelper,
+  type Options,
+  type OptionValue,
+  type TimeOptionValue
+} from "./core.ts"
+export { Graph, graph } from "./graph.ts"
+export { Label, label } from "./label.ts"
 export * from "./common/audio.ts"
 export * from "./common/video.ts"

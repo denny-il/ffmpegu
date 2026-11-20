@@ -2,14 +2,14 @@
 
 | Function                    | Accepts            | Returns                                                   |
 | --------------------------- | ------------------ | --------------------------------------------------------- |
-| `run(command, options?)`    | `Command<E, R, 0>` | `Effect<RunResult, FFmpegError \| E, FFmpeg \| R>`         |
-| `stream(command, options?)` | `Command<E, R, 1>` | `Stream<Uint8Array, FFmpegError \| E, FFmpeg \| R>`        |
+| `FFmpeg.run(command, options?)`    | `Command<E, R, 0>` | `Effect<RunResult, FFmpegError \| E, FFmpeg \| R>`         |
+| `FFmpeg.stream(command, options?)` | `Command<E, R, 1>` | `Stream<Uint8Array, FFmpegError \| E, FFmpeg \| R>`        |
 
 Both are also available on the `FFmpeg` service itself (`yield* FFmpeg` then `ffmpeg.run(...)`). A progress callback adds its own error and requirement types.
 
 ## Run
 
-`run` starts a fresh process each time it is executed and succeeds once FFmpeg exits with code 0 and every sink has finished. Input feeders, output sinks, stderr, and progress readers are supervised together: if any fails, the others stop and the process is terminated.
+`FFmpeg.run` starts a fresh process each time it is executed and succeeds once FFmpeg exits with code 0 and every sink has finished. Input feeders, output sinks, stderr, and progress readers are supervised together: if any fails, the others stop and the process is terminated.
 
 `RunResult` contains:
 
@@ -20,17 +20,17 @@ A nonzero exit fails with `ExitError`, which carries the exit code and the same 
 
 ## Streaming output
 
-`stream` runs a command with exactly one `Output.toStream` output and emits that output's bytes. Other outputs of the same command can still be files or sinks.
+`FFmpeg.stream` runs a command with exactly one `Output.toStream` output and emits that output's bytes. Other outputs of the same command can still be files or sinks.
 
 ```ts
 import { Effect, Stream } from "effect"
-import { Command, Input, Options, Output, stream } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 // Decode any input to 16 kHz mono PCM for speech recognition.
-const pcm = stream(
+const pcm = FFmpeg.stream(
   Command.make({
     inputs: [Input.fromFile("speech.webm")],
-    outputs: [Output.toStream(Options.create({ f: "s16le", ac: 1, ar: 16000 }))]
+    outputs: [Output.toStream({ f: "s16le", ac: 1, ar: 16000 })]
   })
 )
 
@@ -39,7 +39,7 @@ const bytes = pcm.pipe(Stream.runFold(() => 0, (total, chunk) => total + chunk.l
 
 - FFmpeg starts when the stream is first pulled, and again for every consumption.
 - The consumer sets the pace. A consumer that stops pulling fills the pipe, which blocks FFmpeg and, through it, the input feeders.
-- The stream ends after the output reached EOF and FFmpeg exited successfully. Failures surface after the chunks already emitted, as `run` would report them.
+- The stream ends after the output reached EOF and FFmpeg exited successfully. Failures surface after the chunks already emitted, as `FFmpeg.run` would report them.
 - Ending consumption early (`Stream.take`, interruption, closing the scope) terminates FFmpeg and releases the inputs.
 
 If the stream-output count is unknown at compile time (see [type parameters](errors.md#type-parameters)), the check happens at runtime and fails with `CommandError` reason `StreamOutput`.
@@ -48,15 +48,15 @@ If the stream-output count is unknown at compile time (see [type parameters](err
 
 ```ts
 import { Duration, Effect } from "effect"
-import { Command, Input, Output, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 const command = Command.make({
-  global: options.overwrite(),
+  global: Options.overwrite(),
   inputs: [Input.fromFile("input.mp4")],
-  outputs: [Output.toFile("output.mp4", options.videoCodec("libx264"))]
+  outputs: [Output.toFile("output.mp4", Options.videoCodec("libx264"))]
 })
 
-const execution = run(command, {
+const execution = FFmpeg.run(command, {
   onProgress: (progress) =>
     Effect.logInfo("Encoding", {
       position: progress.outTime && Duration.format(progress.outTime),
@@ -93,17 +93,17 @@ Cancellation is ordinary Effect interruption:
 
 ```ts
 import { Effect, Fiber } from "effect"
-import { Command, Input, Output, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Output } from "ffmpegu"
 
 const command = Command.make({
   inputs: [Input.fromFile("input.mp4")],
   outputs: [Output.toFile("output.mkv")]
 })
 
-const withDeadline = run(command).pipe(Effect.timeout("10 minutes"))
+const withDeadline = FFmpeg.run(command).pipe(Effect.timeout("10 minutes"))
 
 const cancellable = Effect.gen(function* () {
-  const fiber = yield* Effect.forkChild(run(command))
+  const fiber = yield* Effect.forkChild(FFmpeg.run(command))
   // ... later
   yield* Fiber.interrupt(fiber)
 })
@@ -119,17 +119,17 @@ The library has no queue or concurrency setting of its own; use Effect's:
 
 ```ts
 import { Effect } from "effect"
-import { Command, Input, Options, Output, options, run } from "ffmpegu"
+import { Command, FFmpeg, Input, Options, Output } from "ffmpegu"
 
 const thumbnails = (paths: ReadonlyArray<string>) =>
   Effect.forEach(
     paths,
     (path) =>
-      run(
+      FFmpeg.run(
         Command.make({
-          global: options.overwrite(),
-          inputs: [Input.fromFile(path, options.startTime(1))],
-          outputs: [Output.toFile(`${path}.jpg`, Options.create({ "frames:v": 1 }))]
+          global: Options.overwrite(),
+          inputs: [Input.fromFile(path, Options.startTime(1))],
+          outputs: [Output.toFile(`${path}.jpg`, { "frames:v": 1 })]
         })
       ),
     { concurrency: 4 }
@@ -138,7 +138,7 @@ const thumbnails = (paths: ReadonlyArray<string>) =>
 
 ## Tracing
 
-`run` and `stream` run inside the spans `ffmpegu/FFmpeg.run` and `ffmpegu/FFmpeg.stream`; every FFprobe process runs inside `ffmpegu/FFprobe.probe`. `probeWith` with a schema adds an enclosing `ffmpegu/probeWith` span that also covers decoding. Span attributes are limited to values that cannot carry credentials; argv, paths, URLs, and stderr are never recorded.
+`FFmpeg.run` and `FFmpeg.stream` run inside the spans `ffmpegu/FFmpeg.run` and `ffmpegu/FFmpeg.stream`; every FFprobe process runs inside `ffmpegu/FFprobe.probe`. `FFprobe.probeWith` with a schema adds an enclosing `ffmpegu/probeWith` span that also covers decoding. Span attributes are limited to values that cannot carry credentials; argv, paths, URLs, and stderr are never recorded.
 
 | Attribute                 | Spans  | Value                                                    |
 | ------------------------- | ------ | -------------------------------------------------------- |
@@ -147,7 +147,7 @@ const thumbnails = (paths: ReadonlyArray<string>) =>
 | `ffmpegu.inputs`          | FFmpeg | Number of inputs                                         |
 | `ffmpegu.outputs`         | FFmpeg | Number of outputs                                        |
 | `ffmpegu.input_streams`   | FFmpeg | Inputs fed from an Effect `Stream`                       |
-| `ffmpegu.output_streams`  | FFmpeg | Outputs written to a `Sink` or read through `stream`     |
+| `ffmpegu.output_streams`  | FFmpeg | Outputs written to a `Sink` or read through `FFmpeg.stream`     |
 | `ffmpegu.progress`        | FFmpeg | Whether a progress callback is set                       |
 
 The exit code is also recorded when cleanup terminates the process, for example after interruption. It is absent when the process was killed by a signal or had not reported an exit code by the time cleanup finished.

@@ -1,9 +1,9 @@
 # FFprobe
 
 ```ts
-probe(input: string): Effect<ProbeResult, ProbeError, FFprobe>
-probeWith(input: string, options: Options): Effect<ProjectedProbeResult, ProbeError, FFprobe>
-probeWith<S extends Schema.Top>(input: string, options: Options, schema: S)
+FFprobe.probe(input: string): Effect<ProbeResult, ProbeError, FFprobe>
+FFprobe.probeWith(input: string, options: Arg): Effect<ProjectedProbeResult, ProbeError, FFprobe>
+FFprobe.probeWith<S extends Schema.Top>(input: string, options: Arg, schema: S)
   : Effect<S["Type"], ProbeError, FFprobe | S["DecodingServices"]>
 ```
 
@@ -11,10 +11,10 @@ probeWith<S extends Schema.Top>(input: string, options: Options, schema: S)
 
 ## probe
 
-`probe` runs `ffprobe -show_format -show_streams`. It is unary, so `Effect.forEach(paths, probe)` works directly.
+`FFprobe.probe` runs `ffprobe -show_format -show_streams`. It is unary, so `Effect.forEach(paths, FFprobe.probe)` works directly. `options` is a bundle or a single option form, usually a record of FFprobe option names.
 
 ```ts
-const metadata = yield* probe("input.mp4")
+const metadata = yield* FFprobe.probe("input.mp4")
 const video = metadata.streams.find((s) => s.codec_type === "video")
 const seconds = Number(metadata.format?.duration)   // numeric strings stay strings
 ```
@@ -40,12 +40,12 @@ Format fields: `filename`, `format_name`, `format_long_name`, `duration`, `size`
 Explicit options **replace** `-show_format -show_streams`; use FFprobe's option names.
 
 ```ts
-const selected = probeWith(
+const selected = FFprobe.probeWith(
   "input.mp4",
-  Options.create({ show_entries: "stream=codec_name,width,height:format=duration", select_streams: "v:0", v: "error" })
+  { show_entries: "stream=codec_name,width,height:format=duration", select_streams: "v:0", v: "error" }
 )
 // To keep the full output while adding options:
-Options.create({ show_format: true, show_streams: true, protocol_whitelist: "file" })
+Options.make({ show_format: true, show_streams: true, protocol_whitelist: "file" })
 ```
 
 `ProjectedProbeResult` matches `ProbeResult` except that stream `index` is optional, and `width`, `height`, `start_pts`, and `duration_ts` may be `"N/A"` (with `show_optional_fields: "always"`). An empty bundle decodes to `{ streams: [] }`. Options that change field types (such as `unit`, `prefix`, or `sexagesimal`) can fail with `ProbeDecodeError`.
@@ -56,10 +56,14 @@ Options.create({ show_format: true, show_streams: true, protocol_whitelist: "fil
 const Dimensions = Schema.Struct({
   streams: Schema.Array(Schema.Struct({ width: Schema.Number, height: Schema.Number }))
 })
-const dims = probeWith("in.mp4", Options.create({ show_entries: "stream=width,height", select_streams: "v:0" }), Dimensions)
+const dims = FFprobe.probeWith(
+  "in.mp4",
+  { show_entries: "stream=width,height", select_streams: "v:0" },
+  Dimensions
+)
 
 const DurationOnly = Schema.Struct({ format: Schema.Struct({ duration: Schema.NumberFromString }) })
-const duration = probeWith("in.mp4", Options.create({ show_entries: "format=duration" }), DurationOnly)
+const duration = FFprobe.probeWith("in.mp4", { show_entries: "format=duration" }, DurationOnly)
 // { format: { duration: 12.5 } }
 ```
 

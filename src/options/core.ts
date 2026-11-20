@@ -1,104 +1,108 @@
-import { FFmpeguArgument } from "../core/argument.ts"
-import type {
-  FFmpeguReferencesInterface,
-  FFmpeguUserArg,
-  FFmpeguUserArgValue
-} from "../types/index.ts"
+import { Argument } from "../core/argument.ts"
+import type { References } from "../types/index.ts"
 
-export class FFmpeguOptions extends FFmpeguArgument {
-  readonly args: ReadonlyArray<FFmpeguUserArg>
+/**
+ * Value of a named option. `true` renders the bare flag and `false` omits the
+ * option; arguments render themselves.
+ */
+export type ArgValue = string | number | boolean | Argument
 
-  constructor(args: ReadonlyArray<FFmpeguUserArg>) {
+/**
+ * One entry of an options bundle: a token passed verbatim, a nested bundle, a
+ * `[name, value?]` tuple, or a record of named options. Record entries set to
+ * `undefined` are omitted.
+ */
+export type Arg =
+  | string
+  | Options
+  | readonly [string, ArgValue?]
+  | Readonly<Record<string, ArgValue | undefined>>
+
+/** An immutable list of ffmpeg or ffprobe arguments. */
+export class Options extends Argument {
+  readonly args: ReadonlyArray<Arg>
+
+  constructor(args: ReadonlyArray<Arg>) {
     super()
-    // Copy the array and its tuple and record entries so later changes to the
-    // caller's values cannot alter this value or bundles derived from it.
-    this.args = args.map(copyArg)
+    // Flatten nested bundles and copy tuple and record entries, so later
+    // changes to the caller's values or to another bundle's entries cannot
+    // alter this one. A subclass may render differently from its entries, so
+    // it stays nested and renders itself.
+    this.args = args.flatMap((arg) =>
+      arg instanceof Options && arg.constructor === Options
+        ? arg.args.map(copyArg)
+        : [copyArg(arg)]
+    )
   }
 
-  static create(...args: FFmpeguUserArg[]) {
-    return new FFmpeguOptions(args)
-  }
-
-  static concat(source: FFmpeguOptions, ...args: FFmpeguUserArg[]) {
-    return new FFmpeguOptions([...source.args, ...args])
-  }
-
-  static merge(...args: FFmpeguOptions[]) {
-    return new FFmpeguOptions(args.flatMap((arg) => arg.args))
-  }
-
-  getArgs(refs: FFmpeguReferencesInterface): string[] {
+  getArgs(refs: References): string[] {
     const args: string[] = []
 
     for (const arg of this.args) {
-      args.push(...this.resolveOption(arg, refs))
-    }
-
-    return args
-  }
-
-  private resolveOption(
-    arg: FFmpeguUserArg,
-    refs: FFmpeguReferencesInterface
-  ): string[] {
-    if (this.isFFmpeguArgumentable(arg)) {
-      return arg.getArgs(refs)
-    }
-
-    const args: string[] = []
-
-    if (isTupleArg(arg)) {
-      const [name, value] = arg
-      if (typeof value !== "undefined") {
-        args.push(...this.resolveOptionValue(name, value, refs))
+      if (arg instanceof Argument) {
+        args.push(...arg.getArgs(refs))
+      } else if (isTupleArg(arg)) {
+        const [name, value] = arg
+        if (value === undefined) args.push(optionName(name))
+        else pushOption(args, name, value, refs)
+      } else if (typeof arg === "object") {
+        for (const [name, value] of Object.entries(arg)) {
+          // An optional key set to undefined means "not set", as in filters.
+          if (value !== undefined) pushOption(args, name, value, refs)
+        }
       } else {
-        args.push(name.startsWith("-") ? name : `-${name}`)
+        args.push(String(arg))
       }
-    } else if (typeof arg === "object") {
-      for (const [name, value] of Object.entries(arg)) {
-        args.push(...this.resolveOptionValue(name, value, refs))
-      }
-    } else {
-      args.push(String(arg))
     }
 
     return args
-  }
-
-  private resolveOptionValue(
-    name: string,
-    value: FFmpeguUserArgValue,
-    refs: FFmpeguReferencesInterface
-  ): string[] {
-    if (name.startsWith("-") === false) {
-      name = `-${name}`
-    }
-
-    if (this.isFFmpeguArgumentable(value)) {
-      return [name, ...value.getArgs(refs)]
-    }
-
-    if (typeof value === "boolean") {
-      if (value) return [name]
-      else return []
-    }
-
-    return [name, String(value)]
-  }
-
-  private isFFmpeguArgumentable(value: unknown): value is FFmpeguArgument {
-    return value instanceof FFmpeguArgument
   }
 }
 
-type FFmpeguTupleArg = Extract<FFmpeguUserArg, ReadonlyArray<unknown>>
+/** Build a bundle from any mix of option forms, rendered in order. */
+export const make = (...args: ReadonlyArray<Arg>): Options => new Options(args)
+
+/**
+ * @internal Bundle for a parameter that accepts option forms directly;
+ * `undefined` when there are none. `undefined` entries are skipped, so a
+ * caller can pass an optional bundle. A lone bundle is used as it is.
+ */
+export const fromArgs = (
+  args: ReadonlyArray<Arg | undefined>
+): Options | undefined => {
+  const given = args.filter((arg) => arg !== undefined)
+  return given.length === 0
+    ? undefined
+    : given.length === 1 && given[0] instanceof Options
+      ? given[0]
+      : new Options(given)
+}
+
+type TupleArg = Extract<Arg, ReadonlyArray<unknown>>
 
 // `Array.isArray` does not narrow readonly tuples, so check them explicitly.
-function isTupleArg(arg: FFmpeguUserArg): arg is FFmpeguTupleArg {
-  return Array.isArray(arg)
-}
+const isTupleArg = (arg: Arg): arg is TupleArg => Array.isArray(arg)
 
-function copyArg(arg: FFmpeguUserArg): FFmpeguUserArg {
-  if (typeof arg !== "object" || arg instanceof FFmpeguArgument) return arg
-  return isTupleArg(arg) ? [...arg] : { ...arg }
+const copyArg = (arg: Arg): Arg =>
+  typeof arg !== "object" || arg instanceof Argument
+    ? arg
+    : isTupleArg(arg)
+      ? [...arg]
+      : { ...arg }
+
+const optionName = (name: string) => (name.startsWith("-") ? name : `-${name}`)
+
+const pushOption = (
+  args: string[],
+  name: string,
+  value: ArgValue,
+  refs: References
+): void => {
+  if (value instanceof Argument) {
+    args.push(optionName(name), ...value.getArgs(refs))
+  } else if (typeof value !== "boolean") {
+    args.push(optionName(name), String(value))
+  } else if (value) {
+    args.push(optionName(name))
+  }
 }

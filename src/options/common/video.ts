@@ -1,14 +1,8 @@
-import type { FFmpeguUserArgValue } from "../../types/index.ts"
-import { formatBitrate } from "../../utils.ts"
-import type {
-  FFmpeguBitrateUnit,
-  FFmpeguBitrateValue,
-  FFmpeguRateValue,
-  FFmpeguSizeValue
-} from "../common.ts"
-import { FFmpeguOptions } from "../core.ts"
+import { make } from "../core.ts"
+import type { RateValue, SizeValue } from "../common.ts"
+import { bitrateOption, filterOption } from "../internal.ts"
 
-export type FFmpeguVideoCodec =
+export type VideoCodec =
   | "libx264"
   | "libx265"
   | "libvpx"
@@ -36,93 +30,28 @@ export type FFmpeguVideoCodec =
   | "copy"
   | ({} & string)
 
-export const videoCopy = () => FFmpeguOptions.create(["-c:v", "copy"])
+export const videoCopy = () => make(["-c:v", "copy"])
 
-export const videoCodec = (codec: FFmpeguVideoCodec) =>
-  FFmpeguOptions.create(["-c:v", codec])
+export const videoCodec = (codec: VideoCodec) => make(["-c:v", codec])
 
-export function videoBitrate(
-  bitrate: number,
-  unit: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function videoBitrate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function videoBitrate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions {
-  return FFmpeguOptions.create(["-b:v", formatBitrate(bitrate, unit)])
-}
+export const videoBitrate = bitrateOption("-b:v")
+export const minRate = bitrateOption("-minrate")
+export const maxRate = bitrateOption("-maxrate")
+export const bufferSize = bitrateOption("-bufsize")
 
-export function minRate(
-  bitrate: number,
-  unit: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function minRate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function minRate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions {
-  return FFmpeguOptions.create(["-minrate", formatBitrate(bitrate, unit)])
-}
+export const crf = (value: number) => make(["-crf", value])
+export const preset = (value: string) => make(["-preset", value])
+export const tune = (value: string) => make(["-tune", value])
+export const videoProfile = (value: string) => make(["-profile:v", value])
+export const level = (value: string | number) => make(["-level", value])
 
-export function maxRate(
-  bitrate: number,
-  unit: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function maxRate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function maxRate(
-  bitrate: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions {
-  return FFmpeguOptions.create(["-maxrate", formatBitrate(bitrate, unit)])
-}
+export const frameRate = (value: RateValue) => make(["-r", value])
+export const gop = (value: number) => make(["-g", value])
+export const keyintMin = (value: number) => make(["-keyint_min", value])
+export const bFrames = (value: number) => make(["-bf", value])
+export const refs = (value: number) => make(["-refs", value])
+export const pixelFormat = (value: string) => make(["-pix_fmt", value])
+export const size = (value: SizeValue) => make(["-s", value])
+export const aspect = (value: string) => make(["-aspect", value])
 
-export function bufferSize(
-  value: number,
-  unit: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function bufferSize(
-  value: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions
-export function bufferSize(
-  value: FFmpeguBitrateValue,
-  unit?: FFmpeguBitrateUnit
-): FFmpeguOptions {
-  return FFmpeguOptions.create(["-bufsize", formatBitrate(value, unit)])
-}
-
-export const crf = (value: number) => FFmpeguOptions.create(["-crf", value])
-export const preset = (value: string) =>
-  FFmpeguOptions.create(["-preset", value])
-export const tune = (value: string) => FFmpeguOptions.create(["-tune", value])
-export const profileVideo = (value: string) =>
-  FFmpeguOptions.create(["-profile:v", value])
-export const level = (value: string | number) =>
-  FFmpeguOptions.create(["-level", value])
-
-export const frameRate = (value: FFmpeguRateValue) =>
-  FFmpeguOptions.create(["-r", value])
-export const gop = (value: number) => FFmpeguOptions.create(["-g", value])
-export const keyintMin = (value: number) =>
-  FFmpeguOptions.create(["-keyint_min", value])
-export const bFrames = (value: number) => FFmpeguOptions.create(["-bf", value])
-export const refs = (value: number) => FFmpeguOptions.create(["-refs", value])
-export const pixelFormat = (value: string) =>
-  FFmpeguOptions.create(["-pix_fmt", value])
-export const size = (value: FFmpeguSizeValue) =>
-  FFmpeguOptions.create(["-s", value])
-export const aspect = (value: string) =>
-  FFmpeguOptions.create(["-aspect", value])
-
-export const videoFilter = (value: FFmpeguUserArgValue) =>
-  FFmpeguOptions.create(["-vf", value])
+export const videoFilter = filterOption("-vf")

@@ -3,9 +3,9 @@
 ## Execution
 
 ```ts
-run(command: Command<E, R, 0>, options?: { onProgress?: (p: Progress) => Effect<void, PE, PR> })
+FFmpeg.run(command: Command<E, R, 0>, options?: { onProgress?: (p: Progress) => Effect<void, PE, PR> })
   : Effect<RunResult, FFmpegError | E | PE, FFmpeg | R | PR>
-stream(command: Command<E, R, 1>, options?: { onProgress?: ... })
+FFmpeg.stream(command: Command<E, R, 1>, options?: { onProgress?: ... })
   : Stream<Uint8Array, FFmpegError | E | PE, FFmpeg | R | PR>
 
 interface RunResult {
@@ -16,24 +16,24 @@ interface RunResult {
 
 Both are also methods of the `FFmpeg` service (`const ffmpeg = yield* FFmpeg; ffmpeg.run(command)`).
 
-- `run` succeeds once FFmpeg exits with code 0 and every sink has finished. Feeders, sinks, stderr, and progress are supervised together, so any failure stops the rest and terminates the process.
-- `stream` starts FFmpeg on the first pull and again on every consumption. The consumer sets the pace, and a stalled consumer blocks FFmpeg. Ending early (`Stream.take`, interruption) terminates FFmpeg. Failures surface after the chunks already emitted.
+- `FFmpeg.run` succeeds once FFmpeg exits with code 0 and every sink has finished. Feeders, sinks, stderr, and progress are supervised together, so any failure stops the rest and terminates the process.
+- `FFmpeg.stream` starts FFmpeg on the first pull and again on every consumption. The consumer sets the pace, and a stalled consumer blocks FFmpeg. Ending early (`Stream.take`, interruption) terminates FFmpeg. Failures surface after the chunks already emitted.
 
 ```ts
 // stream: exactly one Output.toStream, and run would be a type error here.
-const pcm = stream(
+const pcm = FFmpeg.stream(
   Command.make({
     inputs: [Input.fromFile("speech.webm")],
-    outputs: [Output.toStream(Options.create({ f: "s16le", ac: 1, ar: 16000 }))]
+    outputs: [Output.toStream({ f: "s16le", ac: 1, ar: 16000 })]
   })
 ) // Stream<Uint8Array, FFmpegError, FFmpeg>
 
 // Stream in and stream out keep the source's error and requirement types.
 const toOpus = <E, R>(upload: Stream.Stream<Uint8Array, E, R>) =>
-  stream(
+  FFmpeg.stream(
     Command.make({
       inputs: [Input.fromStream(upload)],
-      outputs: [Output.toStream(Options.create({ vn: true, "c:a": "libopus", f: "ogg" }))]
+      outputs: [Output.toStream({ vn: true, "c:a": "libopus", f: "ogg" })]
     })
   ) // Stream<Uint8Array, FFmpegError | E, FFmpeg | R>
 ```
@@ -102,14 +102,14 @@ The spans are `ffmpegu/FFmpeg.run`, `ffmpegu/FFmpeg.stream`, and `ffmpegu/FFprob
 
 ## Testing
 
-- **Command shape:** assert `Result.getOrThrow(Command.toArgs(command))` with no FFmpeg needed.
+- **Command shape:** assert `Result.getOrThrow(command.toArgs())` with no FFmpeg needed.
 - **Code using the services:** use `Layer.mock`. Members left out die when called.
 
 ```ts
 const FFmpegTest = Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })
 const FFprobeTest = Layer.mock(FFprobe, {
   probe: () => Effect.succeed({ streams: [{ index: 0, codec_type: "audio" }] }),
-  // probeWith(input, options, schema) calls probeJson and decodes its result with the schema
+  // FFprobe.probeWith(input, options, schema) calls probeJson and decodes its result with the schema
   probeJson: () => Effect.succeed({ format: { duration: "12.5" } })
 })
 ```

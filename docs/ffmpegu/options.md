@@ -1,10 +1,10 @@
 # Options
 
-An options bundle (`Options`, also exported as `FFmpeguOptions`) is an immutable list of FFmpeg arguments. Bundles are used for global options, per-input and per-output options, and [FFprobe](ffprobe.md) selections.
+An options bundle (`Options.Options`) is an immutable list of FFmpeg arguments. Bundles are used for global options, per-input and per-output options, and [FFprobe](ffprobe.md) selections. The `Options` namespace holds the constructor, `Options.make`, and the [helpers](#helpers).
 
 ## Writing raw options
 
-`Options.create(...args)` accepts any mix of these forms, rendered in order:
+`Options.make(...args)` accepts any mix of these forms, rendered in order:
 
 | Form          | Example                                  | Renders as                     |
 | ------------- | ---------------------------------------- | ------------------------------ |
@@ -14,19 +14,21 @@ An options bundle (`Options`, also exported as `FFmpeguOptions`) is an immutable
 | Record        | `{ "c:v": "libx264", crf: 23 }`          | `-c:v libx264 -crf 23`         |
 | Boolean entry | `{ shortest: true, an: false }`          | `-shortest` (`false` is omitted) |
 | Reference     | `{ map: input.audio.track(1) }`          | `-map 1:a:1`                   |
-| Bundle        | `options.crf(23)`                        | `-crf 23`                      |
+| Bundle        | `Options.crf(23)`                        | `-crf 23`                      |
 
-Names get a leading `-` when they lack one. Record entries keep their insertion order, and a record cannot repeat a key, so use separate records or tuples for repeated options such as several `-map` entries. Values are passed straight to the process: no shell is involved, so spaces and quotes need no escaping.
+Names get a leading `-` when they lack one. Record entries keep their insertion order, and a record cannot repeat a key, so use separate records or tuples for repeated options such as several `-map` entries. Record entries set to `undefined` are omitted, so optional settings can be passed as they are. Values are passed straight to the process: no shell is involved, so spaces and quotes need no escaping.
+
+References, filters, and other arguments are option values: pass them under a name, as in `{ map: input.video }`, not on their own.
 
 ```ts
-import { Input, Options, options } from "ffmpegu"
+import { Input, Options } from "ffmpegu"
 
 const input = Input.fromFile("input.mkv")
 
-const output = Options.create(
+const output = Options.make(
   { map: input.video },
   { map: input.audio.track(1) },
-  options.videoCodec("libx264"),
+  Options.videoCodec("libx264"),
   { preset: "slow", crf: 20, "b:a": "160k" },
   ["movflags", "+faststart"]
 )
@@ -34,15 +36,23 @@ const output = Options.create(
 
 ## Composing bundles
 
-- `Options.create(...args)` (alias `options.custom`) builds a bundle; bundles can be nested inside it.
-- `Options.concat(bundle, ...args)` (alias `options.concat`) returns `bundle` followed by more arguments.
-- `Options.merge(...bundles)` (alias `options.merge`) concatenates bundles.
+Bundles nest: `Options.make(base, Options.crf(23), { preset: "slow" })` renders `base` followed by the other arguments, so extending and concatenating bundles are the same call.
+
+The functions that take options accept the forms above directly. `Input.fromFile`, `Input.fromStream`, `Output.toFile`, `Output.toSink`, and `Output.toStream` take any number of them, and `global`, `withGlobal`, and `FFprobe.probeWith` take one, so `Options.make` is only needed to name a bundle or to pass several forms where one is taken:
+
+```ts
+import { Options, Output } from "ffmpegu"
+
+const web = Options.make(Options.videoCodec("libx264"), { preset: "slow", crf: 20 })
+
+const output = Output.toFile("out.mp4", web, Options.audioCodec("aac"), ["movflags", "+faststart"])
+```
 
 Bundles copy the arrays and records they receive, so mutating your input afterwards has no effect, and a shared base bundle can be reused safely.
 
 ## Helpers
 
-The helpers in `options` return bundles for frequently used flags. Their string parameters list common values for autocompletion but accept any string, so codecs and formats from newer FFmpeg builds work too.
+The helpers in `Options` return bundles for frequently used flags. Their string parameters list common values for autocompletion but accept any string, so codecs and formats from newer FFmpeg builds work too.
 
 ### Codecs and streams
 
@@ -72,7 +82,7 @@ The helpers in `options` return bundles for frequently used flags. Their string 
 | `crf(n)`                       | `-crf <n>`                |
 | `preset(name)`                 | `-preset <name>`          |
 | `tune(name)`                   | `-tune <name>`            |
-| `profileVideo(name)`           | `-profile:v <name>`       |
+| `videoProfile(name)`           | `-profile:v <name>`       |
 | `level(value)`                 | `-level <value>`          |
 | `frameRate(rate)`              | `-r <rate>`               |
 | `gop(n)`                       | `-g <n>`                  |
@@ -82,7 +92,7 @@ The helpers in `options` return bundles for frequently used flags. Their string 
 | `pixelFormat(format)`          | `-pix_fmt <format>`       |
 | `size("1280x720")`             | `-s 1280x720`             |
 | `aspect("16:9")`               | `-aspect 16:9`            |
-| `videoFilter(chain)`           | `-vf <chain>`             |
+| `videoFilter(...filters)`      | `-vf <chain>`             |
 
 Use FFmpeg's unit suffixes `k`, `M`, `G`, or `T`: `videoBitrate(2500, "k")` renders `-b:v 2500k`. FFmpeg reads a lowercase `m` as milli and rejects `g` and `t`. A string such as `"2.5M"` is passed through.
 
@@ -91,12 +101,12 @@ Use FFmpeg's unit suffixes `k`, `M`, `G`, or `T`: `videoBitrate(2500, "k")` rend
 | Helper                         | Renders                |
 | ------------------------------ | ---------------------- |
 | `audioBitrate(value, unit?)`   | `-b:a <value><unit>`   |
-| `profileAudio(name)`           | `-profile:a <name>`    |
+| `audioProfile(name)`           | `-profile:a <name>`    |
 | `audioChannels(n)`             | `-ac <n>`              |
 | `audioSampleRate(hz)`          | `-ar <hz>`             |
 | `audioSampleFormat(format)`    | `-sample_fmt <format>` |
 | `audioQuality(q)`              | `-q:a <q>`             |
-| `audioFilter(chain)`           | `-af <chain>`          |
+| `audioFilter(...filters)`      | `-af <chain>`          |
 
 ### Timing
 
@@ -137,22 +147,20 @@ The helpers convert three kinds of values, on every key:
 `undefined` values are skipped.
 
 ```ts
-import { Input, Options, Output, options } from "ffmpegu"
+import { Input, Options, Output } from "ffmpegu"
 
 const input = Input.fromFile("input.mp4")
 
 const playlist = Output.toFile(
   "out/stream.m3u8",
-  Options.create(
-    options.videoCodec("libx264"),
-    options.audioCodec("aac"),
-    options.hls({
-      hls_time: 4,
-      hls_playlist_type: "vod",
-      hls_segment_filename: "out/segment_%03d.ts",
-      hls_flags: ["independent_segments"]
-    })
-  )
+  Options.videoCodec("libx264"),
+  Options.audioCodec("aac"),
+  Options.hls({
+    hls_time: 4,
+    hls_playlist_type: "vod",
+    hls_segment_filename: "out/segment_%03d.ts",
+    hls_flags: ["independent_segments"]
+  })
 )
 // -c:v libx264 -c:a aac -f hls -hls_time 4 -hls_playlist_type vod
 //   -hls_segment_filename out/segment_%03d.ts -hls_flags independent_segments
@@ -178,21 +186,21 @@ The listed values are suggestions; any string is accepted. Run `ffmpeg -h muxer=
 | Time object, truncated to milliseconds     | `{ minutes: 1, seconds: 30, milliseconds: 500 }` | `00:01:30.500` |
 | Effect `Duration`                          | `Duration.millis(1500)`                     | `00:00:01.500`    |
 | `Temporal.Duration`                        | `Temporal.Duration.from({ seconds: 2, microseconds: 5 })` | `00:00:02.000005` |
-| [Time adapter](#time-adapters)             | `time.seconds(Duration.millis(1500))`       | `1.5`             |
+| [Time adapter](#time-adapters)             | `Time.seconds(Duration.millis(1500))`       | `1.5`             |
 
 Durations keep microsecond precision (FFmpeg's time base); anything finer is truncated. A time object's fields are added up, and the total is truncated to milliseconds. Values beyond 9999 hours, which FFmpeg cannot read as `HH:MM:SS`, render as decimal seconds instead.
 
 Pass `Duration` values, not `Duration.Input`: a bare number always means seconds here, whereas Effect reads a number as milliseconds.
 
-Time values are read when the option is built and converted when the command compiles. Infinite durations, time objects with fields that are not finite numbers, magnitudes beyond 2^63 − 1 microseconds, and `Temporal.Duration` values with years, months, or weeks (which need a reference date) fail `compile()`, `run`, and `probeWith` with a `CommandError` whose reason is `InvalidArgument`. Days count as 24 hours.
+Time values are read when the option is built and converted when the command compiles. Infinite durations, time objects with fields that are not finite numbers, magnitudes beyond 2^63 − 1 microseconds, and `Temporal.Duration` values with years, months, or weeks (which need a reference date) fail `compile()`, `FFmpeg.run`, and `FFprobe.probeWith` with a `CommandError` whose reason is `InvalidArgument`. Days count as 24 hours.
 
 ```ts
 import { Duration } from "effect"
-import { Options, options } from "ffmpegu"
+import { Options } from "ffmpegu"
 
-const clip = Options.create(
-  options.startTime(Duration.minutes(1)),
-  options.duration(Temporal.Duration.from({ seconds: 30 }))
+const clip = Options.make(
+  Options.startTime(Duration.minutes(1)),
+  Options.duration(Temporal.Duration.from({ seconds: 30 }))
 )
 ```
 
@@ -200,12 +208,12 @@ const clip = Options.create(
 
 ### Time adapters
 
-Everywhere else, convert a time value explicitly with the `time` adapters. Each takes an Effect `Duration`, a `Temporal.Duration`, or a time object, and returns a value usable for any option or filter key:
+Everywhere else, convert a time value explicitly with the `Time` adapters. Each takes an Effect `Duration`, a `Temporal.Duration`, or a time object, and returns a value usable for any option or filter key:
 
 | Adapter              | Example                                       | Renders as     |
 | -------------------- | --------------------------------------------- | -------------- |
-| `time.seconds(d)`    | `time.seconds(Duration.millis(61500))`        | `61.5`         |
-| `time.timestamp(d)`  | `time.timestamp(Duration.millis(61500))`      | `00:01:01.500` |
+| `Time.seconds(d)`    | `Time.seconds(Duration.millis(61500))`        | `61.5`         |
+| `Time.timestamp(d)`  | `Time.timestamp(Duration.millis(61500))`      | `00:01:01.500` |
 
 They follow the rules above: microsecond precision, time objects truncated to milliseconds, and conversion when the command compiles, so invalid values fail `compile()` with `InvalidArgument`. Inside a filter, a timestamp's colons are escaped automatically.
 
@@ -213,10 +221,10 @@ Pick the form the option reads. FFmpeg's duration options accept both, but some 
 
 ```ts
 import { Duration } from "effect"
-import { Options, options, time } from "ffmpegu"
+import { Options, Time } from "ffmpegu"
 
-const segments = Options.create(options.format("segment"), {
-  segment_time: time.seconds(Duration.millis(2500))
+const segments = Options.make(Options.format("segment"), {
+  segment_time: Time.seconds(Duration.millis(2500))
 })
 // -f segment -segment_time 2.5
 ```
@@ -225,4 +233,4 @@ The `Temporal.Duration` member of the time type is available when your TypeScrip
 
 ## Options for FFprobe
 
-`probeWith(input, options)` takes the same bundles. Use FFprobe's own option names such as `show_entries`, `select_streams`, and `v`; most FFmpeg helpers above do not apply to FFprobe. See [FFprobe](ffprobe.md#selecting-metadata).
+`FFprobe.probeWith(input, options)` takes the same bundles. Use FFprobe's own option names such as `show_entries`, `select_streams`, and `v`; most FFmpeg helpers above do not apply to FFprobe. See [FFprobe](ffprobe.md#selecting-metadata).

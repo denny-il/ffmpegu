@@ -1,7 +1,7 @@
 import vm from "node:vm"
 import { Duration } from "effect"
 import { describe, expect, it } from "vitest"
-import { FFmpeguReferences } from "../../src/core/references.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
 import {
   afade,
   aformat,
@@ -27,10 +27,10 @@ import {
   vflip,
   volume
 } from "../../src/filters/index.ts"
-import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
+import { Filter } from "../../src/index.ts"
 
 describe("Filters Common", { concurrent: false }, () => {
-  const refs = new FFmpeguReferences()
+  const refs = new StandaloneReferences()
 
   it("should build video filters", () => {
     expect(scale({ w: 320, h: 180 }).getArgs(refs)).toEqual([
@@ -68,8 +68,8 @@ describe("Filters Common", { concurrent: false }, () => {
   })
 
   it("should build labeled video filters", () => {
-    const inLabel = FFmpeguFilterLabelRef.create("in")
-    const outLabel = FFmpeguFilterLabelRef.create("out")
+    const inLabel = Filter.label("in")
+    const outLabel = Filter.label("out")
 
     expect(
       overlay(

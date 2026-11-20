@@ -25,9 +25,7 @@ import {
   FFprobe,
   Input,
   Options,
-  Output,
-  probeWith,
-  run
+  Output
 } from "../../src/index.ts"
 import { PlatformLive } from "../helpers/platform.ts"
 
@@ -125,7 +123,7 @@ it.live(
     Effect.gen(function* () {
       const { binary, ready } = stubbornProbe()
       const fiber = yield* Effect.forkChild(
-        probeWith("unused", Options.create("-show_streams")).pipe(
+        FFprobe.probeWith("unused", Options.make("-show_streams")).pipe(
           Effect.provide(
             FFprobe.layer({ binary, forceKillAfter: "100 millis" })
           ),
@@ -145,9 +143,9 @@ it.live(
 it.live("a caller deadline cleans up a probe ignoring SIGTERM", () =>
   Effect.gen(function* () {
     const { binary, ready } = stubbornProbe()
-    const error = yield* probeWith(
+    const error = yield* FFprobe.probeWith(
       "unused",
-      Options.create("-show_streams")
+      Options.make("-show_streams")
     ).pipe(
       Effect.provide(FFprobe.layer({ binary, forceKillAfter: "100 millis" })),
       Effect.provide(PlatformLive),
@@ -163,9 +161,9 @@ it.live("a caller deadline cleans up a probe ignoring SIGTERM", () =>
 it.live("oversized probe output kills a child ignoring SIGTERM", () =>
   Effect.gen(function* () {
     const { binary } = stubbornProbe(true)
-    const error = yield* probeWith(
+    const error = yield* FFprobe.probeWith(
       "unused",
-      Options.create("-show_format")
+      Options.make("-show_format")
     ).pipe(
       Effect.provide(
         FFprobe.layer({
@@ -197,7 +195,7 @@ const live = <A, E>(
     )
   )
 
-const raw = Options.create({ f: "s16le", ar: 8000, ac: 1 })
+const raw = Options.make({ f: "s16le", ar: 8000, ac: 1 })
 const chunk = () => new Uint8Array(1024 * 1024)
 
 /**
@@ -260,10 +258,10 @@ it.live(
             Input.fromStream(first, raw),
             Input.fromStream(sibling(pulled, cleanups, defect), raw)
           ],
-          outputs: [Output.toFile("/dev/null", Options.create({ f: "null" }))]
+          outputs: [Output.toFile("/dev/null", Options.make({ f: "null" }))]
         })
 
-        const exit = yield* Effect.exit(run(command))
+        const exit = yield* Effect.exit(FFmpeg.run(command))
 
         // Effect turns the typed error into a defect next to the sibling's.
         expect(failures(exit)).toEqual([])
@@ -304,7 +302,7 @@ it.live(
         })
 
         const exit = yield* Effect.exit(
-          run(command, {
+          FFmpeg.run(command, {
             onProgress: () =>
               Deferred.succeed(reported, undefined).pipe(Effect.asVoid)
           })
@@ -336,7 +334,7 @@ it.live(
           outputs: [Output.toFile("unused")]
         })
         const fiber = yield* Effect.forkChild(
-          run(command, {
+          FFmpeg.run(command, {
             onProgress: () =>
               Deferred.succeed(reported, undefined).pipe(Effect.asVoid)
           })
@@ -397,9 +395,9 @@ const expectNoLeakedFds = (before: number) =>
 const videoIntoSink = <E>(sink: Sink.Sink<void, Uint8Array, never, E>) =>
   Command.make({
     inputs: [
-      Input.fromFile("testsrc2=s=640x360:r=30", Options.create({ f: "lavfi" }))
+      Input.fromFile("testsrc2=s=640x360:r=30", Options.make({ f: "lavfi" }))
     ],
-    outputs: [Output.toSink(sink, Options.create({ f: "rawvideo" }))]
+    outputs: [Output.toSink(sink, Options.make({ f: "rawvideo" }))]
   })
 
 describe("abandoning a run with a sink output drains it instead of waiting for SIGKILL", () => {
@@ -409,7 +407,7 @@ describe("abandoning a run with a sink output drains it instead of waiting for S
         const fds = openFds()
         const received = yield* Deferred.make<void>()
         const fiber = yield* Effect.forkChild(
-          run(
+          FFmpeg.run(
             videoIntoSink(
               Sink.forEach(() =>
                 Deferred.succeed(received, undefined).pipe(
@@ -444,7 +442,7 @@ describe("abandoning a run with a sink output drains it instead of waiting for S
         const failure = { kind: "sink-error" }
         let chunks = 0
         const started = Date.now()
-        const error = yield* run(
+        const error = yield* FFmpeg.run(
           videoIntoSink(
             Sink.forEach(() =>
               ++chunks > 5 ? Effect.fail(failure) : Effect.void
@@ -464,7 +462,7 @@ describe("abandoning a run with a sink output drains it instead of waiting for S
       Effect.gen(function* () {
         const fds = openFds()
         const started = Date.now()
-        const error = yield* run(
+        const error = yield* FFmpeg.run(
           videoIntoSink(Sink.forEach(() => Effect.sleep("50 millis")))
         ).pipe(Effect.timeout("500 millis"), Effect.flip)
         expect(Date.now() - started).toBeLessThan(500 + SHUTDOWN_BOUND)
@@ -504,14 +502,11 @@ it.live(
           )
         )
         const fiber = yield* Effect.forkChild(
-          run(
+          FFmpeg.run(
             Command.make({
               inputs: [Input.fromStream(source, raw)],
               outputs: [
-                Output.toSink(
-                  sink,
-                  Options.create({ "c:a": "copy", f: "s16le" })
-                )
+                Output.toSink(sink, Options.make({ "c:a": "copy", f: "s16le" }))
               ]
             })
           )

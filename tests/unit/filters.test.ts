@@ -1,42 +1,36 @@
 import { describe, expect, it } from "vitest"
-import { FFmpeguArgument } from "../../src/core/argument.ts"
-import { FFmpeguInput } from "../../src/core/input.ts"
-import { FFmpeguReferences } from "../../src/core/references.ts"
-import { FFmpeguFilterChain } from "../../src/filters/chain.ts"
-import { FFmpeguFilterLabelRef } from "../../src/filters/label.ts"
-import { FFmpeguSimpleFilter } from "../../src/filters/simple.ts"
-import { FFmpeguFilterGraph } from "../../src/index.ts"
+import { StandaloneReferences } from "../../src/core/references.ts"
+import { Argument, Filter, Input } from "../../src/index.ts"
 
 describe("Filters", { concurrent: false }, () => {
-  const refs = new FFmpeguReferences()
+  const refs = new StandaloneReferences()
 
-  class DummyArgument extends FFmpeguArgument {
+  class DummyArgument extends Argument {
     getArgs(): string[] {
       return ["1", "2"]
     }
   }
 
   it("should build a simple filter with options", () => {
-    const filter = FFmpeguSimpleFilter.create("scale", { w: 640, h: 360 })
+    const filter = Filter.make("scale", { w: 640, h: 360 })
     expect(filter.getArgs(refs)).toEqual(["scale=w=640:h=360"])
   })
 
   it("should build a filter with labels", () => {
-    const filter = FFmpeguSimpleFilter.create(
+    const filter = Filter.make(
       "overlay",
       { x: 0, y: 0 },
-      [
-        FFmpeguFilterLabelRef.create("main"),
-        FFmpeguFilterLabelRef.create("logo")
-      ],
-      [FFmpeguFilterLabelRef.create("out")]
+      {
+        inputs: [Filter.label("main"), Filter.label("logo")],
+        outputs: [Filter.label("out")]
+      }
     )
 
     expect(filter.getArgs(refs)).toEqual(["[main][logo]overlay=x=0:y=0[out]"])
   })
 
   it("should escape filter option values", () => {
-    const filter = FFmpeguSimpleFilter.create("drawtext", {
+    const filter = Filter.make("drawtext", {
       text: "hello:world"
     })
 
@@ -46,7 +40,7 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should escape special characters in options", () => {
-    const filter = FFmpeguSimpleFilter.create("drawtext", {
+    const filter = Filter.make("drawtext", {
       text: "a,b;[c]\\'d"
     })
 
@@ -56,7 +50,7 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should escape select expressions", () => {
-    const filter = FFmpeguSimpleFilter.create("select", {
+    const filter = Filter.make("select", {
       expr: "between(t,0,1)"
     })
 
@@ -64,7 +58,7 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should render true boolean options as 1", () => {
-    const filter = FFmpeguSimpleFilter.create("scale", {
+    const filter = Filter.make("scale", {
       w: 640,
       h: 360,
       eval: true
@@ -74,7 +68,7 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should render false boolean options as 0", () => {
-    const filter = FFmpeguSimpleFilter.create("scale", {
+    const filter = Filter.make("scale", {
       w: 640,
       h: 360,
       eval: false
@@ -84,7 +78,7 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should support argumentable option values", () => {
-    const filter = FFmpeguSimpleFilter.create("fps", {
+    const filter = Filter.make("fps", {
       fps: new DummyArgument()
     })
 
@@ -92,17 +86,13 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should render multiple input and output labels", () => {
-    const filter = FFmpeguSimpleFilter.create(
+    const filter = Filter.make(
       "overlay",
       { x: 10, y: 20 },
-      [
-        FFmpeguFilterLabelRef.create("left"),
-        FFmpeguFilterLabelRef.create("right")
-      ],
-      [
-        FFmpeguFilterLabelRef.create("out1"),
-        FFmpeguFilterLabelRef.create("out2")
-      ]
+      {
+        inputs: [Filter.label("left"), Filter.label("right")],
+        outputs: [Filter.label("out1"), Filter.label("out2")]
+      }
     )
 
     expect(filter.getArgs(refs)).toEqual([
@@ -111,61 +101,80 @@ describe("Filters", { concurrent: false }, () => {
   })
 
   it("should build a filter chain", () => {
-    const scale = FFmpeguSimpleFilter.create("scale", { w: 640, h: 360 })
-    const fps = FFmpeguSimpleFilter.create("fps", { fps: 30 })
-    const chain = FFmpeguFilterChain.create(scale, fps)
+    const scale = Filter.make("scale", { w: 640, h: 360 })
+    const fps = Filter.make("fps", { fps: 30 })
+    const chain = Filter.chain(scale, fps)
 
     expect(chain.getArgs(refs)).toEqual(["scale=w=640:h=360,fps=fps=30"])
   })
 
   it("should build a filter graph", () => {
-    const chain1 = FFmpeguFilterChain.create(
-      FFmpeguSimpleFilter.create("scale", { w: 640, h: 360 })
-    )
-    const chain2 = FFmpeguFilterChain.create(
-      FFmpeguSimpleFilter.create("volume", { volume: 0.8 })
-    )
-    const graph = FFmpeguFilterGraph.create(chain1, chain2)
+    const chain1 = Filter.chain(Filter.make("scale", { w: 640, h: 360 }))
+    const chain2 = Filter.chain(Filter.make("volume", { volume: 0.8 }))
+    const graph = Filter.graph(chain1, chain2)
 
     expect(graph.getArgs(refs)).toEqual(["scale=w=640:h=360;volume=volume=0.8"])
   })
 
+  it("should accept names and stream references as labels", () => {
+    const input = Input.fromFile("/test/input.mp4")
+    const filter = Filter.overlay(
+      { x: 0 },
+      {
+        inputs: [input.video, "logo", Filter.label(input.video.track(1))],
+        outputs: ["out"]
+      }
+    )
+
+    // A resolver of its own: the shared one numbers inputs across tests.
+    expect(filter.getArgs(new StandaloneReferences())).toEqual([
+      "[0:v][logo][0:v:1]overlay=x=0[out]"
+    ])
+  })
+
+  it("should treat a filter in a graph as a chain of its own", () => {
+    const graph = Filter.graph(
+      Filter.make("split", {}, { outputs: ["a", "b"] }),
+      Filter.chain(Filter.scale({ w: 320 }, { inputs: ["a"] }), Filter.hflip())
+    )
+
+    expect(graph.getArgs(refs)).toEqual(["split[a][b];[a]scale=w=320,hflip"])
+  })
+
   it("should render labels from input stream references", () => {
-    const input = FFmpeguInput.fromFile("/test/input.mp4")
-    const labelVideo = FFmpeguFilterLabelRef.create(input.video)
-    const labelAudioTrack = FFmpeguFilterLabelRef.create(input.audio.track(1))
+    const input = Input.fromFile("/test/input.mp4")
+    const labelVideo = Filter.label(input.video)
+    const labelAudioTrack = Filter.label(input.audio.track(1))
 
     expect(labelVideo.getArgs(refs)).toEqual(["[0:v]"])
     expect(labelAudioTrack.getArgs(refs)).toEqual(["[0:a:1]"])
   })
 
   it("should build a graph with labeled chains", () => {
-    const aLabel = FFmpeguFilterLabelRef.create("a")
-    const bLabel = FFmpeguFilterLabelRef.create("b")
-    const out1Label = FFmpeguFilterLabelRef.create("out1")
-    const out2Label = FFmpeguFilterLabelRef.create("out2")
+    const aLabel = Filter.label("a")
+    const bLabel = Filter.label("b")
+    const out1Label = Filter.label("out1")
+    const out2Label = Filter.label("out2")
 
-    const chain1 = FFmpeguFilterChain.create(
-      FFmpeguSimpleFilter.create("split", { outputs: 2 }, [], [aLabel, bLabel])
+    const chain1 = Filter.chain(
+      Filter.make("split", { outputs: 2 }, { outputs: [aLabel, bLabel] })
     )
-    const chain2 = FFmpeguFilterChain.create(
-      FFmpeguSimpleFilter.create(
+    const chain2 = Filter.chain(
+      Filter.make(
         "scale",
         { w: 320, h: 180 },
-        [aLabel],
-        [out1Label]
+        { inputs: [aLabel], outputs: [out1Label] }
       )
     )
-    const chain3 = FFmpeguFilterChain.create(
-      FFmpeguSimpleFilter.create(
+    const chain3 = Filter.chain(
+      Filter.make(
         "scale",
         { w: 160, h: 90 },
-        [bLabel],
-        [out2Label]
+        { inputs: [bLabel], outputs: [out2Label] }
       )
     )
 
-    const graph = FFmpeguFilterGraph.create(chain1, chain2, chain3)
+    const graph = Filter.graph(chain1, chain2, chain3)
 
     expect(graph.getArgs(refs)).toEqual([
       "split=outputs=2[a][b];[a]scale=w=320:h=180[out1];[b]scale=w=160:h=90[out2]"

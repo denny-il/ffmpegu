@@ -1,5 +1,12 @@
 import { secondsArgument, timestampArgument } from "./utils.ts"
 
+export type {
+  DurationValue,
+  TemporalDuration,
+  TimeArgument,
+  TimeObject
+} from "./utils.ts"
+
 /**
  * Renders an Effect `Duration`, `Temporal.Duration`, or time object as decimal
  * seconds, such as `61.5`, when the command compiles. Usable as any option or

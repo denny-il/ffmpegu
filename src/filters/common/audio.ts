@@ -1,142 +1,68 @@
-import {
-  type FFmpeguDurationValue,
-  type FFmpeguTimeObject,
-  resolveSecondsOptions
-} from "../../utils.ts"
-import type {
-  FilterArgument,
-  FilterLabels,
-  FilterOptions,
-  OpenFilterHelper
-} from "../core.ts"
-import { FFmpeguSimpleFilter } from "../simple.ts"
-
-type FilterOptionValue = FilterArgument
-type FilterTimeValue =
-  | FilterOptionValue
-  | FFmpeguTimeObject
-  | FFmpeguDurationValue
-
-const create = (
-  name: string,
-  options: FilterOptions = {},
-  labels: FilterLabels = {}
-) =>
-  FFmpeguSimpleFilter.create(
-    name,
-    options,
-    labels.inputs ?? [],
-    labels.outputs ?? []
-  )
+import { helper, type OptionValue, type TimeOptionValue } from "../core.ts"
 
 export type VolumeOptions = {
-  volume?: FilterOptionValue
-  precision?: FilterOptionValue
-  replaygain?: FilterOptionValue
-  eval?: FilterOptionValue
+  volume?: OptionValue
+  precision?: OptionValue
+  replaygain?: OptionValue
+  eval?: OptionValue
 }
 
 export type AtempoOptions = {
-  tempo?: FilterOptionValue
+  tempo?: OptionValue
 }
 
 export type AresampleOptions = {
-  sample_rate?: FilterOptionValue
-  resampler?: FilterOptionValue
-  async?: FilterOptionValue
-  first_pts?: FilterOptionValue
-  min_comp?: FilterOptionValue
-  cutoff?: FilterOptionValue
+  sample_rate?: OptionValue
+  resampler?: OptionValue
+  async?: OptionValue
+  first_pts?: OptionValue
+  min_comp?: OptionValue
+  cutoff?: OptionValue
 }
 
 export type AtrimOptions = {
-  start?: FilterTimeValue
-  end?: FilterTimeValue
-  start_pts?: FilterOptionValue
-  end_pts?: FilterOptionValue
-  start_sample?: FilterOptionValue
-  end_sample?: FilterOptionValue
-  duration?: FilterTimeValue
+  start?: TimeOptionValue
+  end?: TimeOptionValue
+  start_pts?: OptionValue
+  end_pts?: OptionValue
+  start_sample?: OptionValue
+  end_sample?: OptionValue
+  duration?: TimeOptionValue
 }
 
-export type AsetPtsOptions = {
-  expr?: FilterOptionValue
-}
+export type AsetPtsOptions = { expr?: OptionValue }
 
 export type AfadeOptions = {
-  type?: FilterOptionValue
-  start_sample?: FilterOptionValue
-  nb_samples?: FilterOptionValue
-  start_time?: FilterTimeValue
-  duration?: FilterTimeValue
-  curve?: FilterOptionValue
+  type?: OptionValue
+  start_sample?: OptionValue
+  nb_samples?: OptionValue
+  start_time?: TimeOptionValue
+  duration?: TimeOptionValue
+  curve?: OptionValue
 }
 
 export type HighpassOptions = {
-  f?: FilterOptionValue
-  width_type?: FilterOptionValue
-  width?: FilterOptionValue
-  poles?: FilterOptionValue
-  mix?: FilterOptionValue
+  f?: OptionValue
+  width_type?: OptionValue
+  width?: OptionValue
+  poles?: OptionValue
+  mix?: OptionValue
 }
 
-export type LowpassOptions = {
-  f?: FilterOptionValue
-  width_type?: FilterOptionValue
-  width?: FilterOptionValue
-  poles?: FilterOptionValue
-  mix?: FilterOptionValue
-}
+export type LowpassOptions = HighpassOptions
 
 export type AformatOptions = {
-  sample_fmts?: FilterOptionValue
-  sample_rates?: FilterOptionValue
-  channel_layouts?: FilterOptionValue
+  sample_fmts?: OptionValue
+  sample_rates?: OptionValue
+  channel_layouts?: OptionValue
 }
 
-export const volume: OpenFilterHelper<VolumeOptions> = (
-  options: VolumeOptions = {},
-  labels?: FilterLabels
-) => create("volume", options, labels)
-export const atempo: OpenFilterHelper<AtempoOptions> = (
-  options: AtempoOptions = {},
-  labels?: FilterLabels
-) => create("atempo", options, labels)
-export const aresample: OpenFilterHelper<AresampleOptions> = (
-  options: AresampleOptions = {},
-  labels?: FilterLabels
-) => create("aresample", options, labels)
-export const atrim: OpenFilterHelper<AtrimOptions> = (
-  options: AtrimOptions = {},
-  labels?: FilterLabels
-) =>
-  create(
-    "atrim",
-    resolveSecondsOptions(options, ["start", "end", "duration"]),
-    labels
-  )
-export const asetpts: OpenFilterHelper<AsetPtsOptions> = (
-  options: AsetPtsOptions = {},
-  labels?: FilterLabels
-) => create("asetpts", options, labels)
-export const afade: OpenFilterHelper<AfadeOptions> = (
-  options: AfadeOptions = {},
-  labels?: FilterLabels
-) =>
-  create(
-    "afade",
-    resolveSecondsOptions(options, ["start_time", "duration"]),
-    labels
-  )
-export const highpass: OpenFilterHelper<HighpassOptions> = (
-  options: HighpassOptions = {},
-  labels?: FilterLabels
-) => create("highpass", options, labels)
-export const lowpass: OpenFilterHelper<LowpassOptions> = (
-  options: LowpassOptions = {},
-  labels?: FilterLabels
-) => create("lowpass", options, labels)
-export const aformat: OpenFilterHelper<AformatOptions> = (
-  options: AformatOptions = {},
-  labels?: FilterLabels
-) => create("aformat", options, labels)
+export const volume = helper<VolumeOptions>("volume")
+export const atempo = helper<AtempoOptions>("atempo")
+export const aresample = helper<AresampleOptions>("aresample")
+export const atrim = helper<AtrimOptions>("atrim", ["start", "end", "duration"])
+export const asetpts = helper<AsetPtsOptions>("asetpts")
+export const afade = helper<AfadeOptions>("afade", ["start_time", "duration"])
+export const highpass = helper<HighpassOptions>("highpass")
+export const lowpass = helper<LowpassOptions>("lowpass")
+export const aformat = helper<AformatOptions>("aformat")

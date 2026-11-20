@@ -8,7 +8,7 @@ import {
   ReservedOption,
   ReservedPath
 } from "../errors.ts"
-import type { FFmpeguOptions } from "../options/core.ts"
+import type { Options } from "../options/core.ts"
 import {
   CommandReferences,
   ForeignReference,
@@ -27,7 +27,7 @@ const RESERVED_OPTIONS = new Set([
 /** Pure compilation; the probe service always owns input, JSON and stdout. */
 export const probeArgs = (
   input: string,
-  options?: FFmpeguOptions
+  options?: Options
 ): Result.Result<ReadonlyArray<string>, CommandError> => {
   if (input.includes("\0")) {
     return fail(

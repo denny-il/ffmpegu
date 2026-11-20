@@ -9,13 +9,13 @@ Read these in order the first time.
 1. [Getting started](ffmpegu/getting-started.md): install, the describe/compile/execute model, and providing the services.
 2. [Commands](ffmpegu/command.md): building commands, stream references, compiling, and validation rules.
 3. [Inputs and outputs](ffmpegu/inputs-outputs.md): files and URLs, Effect streams and sinks, pipe format requirements.
-4. [Running FFmpeg](ffmpegu/running.md): `run`, streaming output, progress, cancellation, concurrency, and tracing.
+4. [Running FFmpeg](ffmpegu/running.md): `FFmpeg.run`, streaming output, progress, cancellation, concurrency, and tracing.
 5. [FFprobe](ffmpegu/ffprobe.md): probing, selecting metadata, and decoding with your own schema.
 
 ## Reference
 
 - [Options](ffmpegu/options.md): raw option forms, every helper and the flags it renders, time values, HLS and DASH.
-- [Filters](ffmpegu/filters.md): chains, graphs, labels, the builder, value escaping, and every typed filter helper.
+- [Filters](ffmpegu/filters.md): chains, graphs, labels, value escaping, and every typed filter helper.
 - [Errors and types](ffmpegu/errors.md): tagged errors and reasons, sensitive diagnostics, and the `E`/`R`/`S` type parameters.
 - [Configuration and testing](ffmpegu/configuration.md): Layer options, `layerConfig`, and testing with mocks.
 - [Recipes](ffmpegu/recipes.md): complete examples for common media tasks.
@@ -25,16 +25,16 @@ Read these in order the first time.
 | Export                                 | Purpose                                                            |
 | -------------------------------------- | ------------------------------------------------------------------ |
 | `Command`, `Input`, `Output`           | Immutable descriptions of an FFmpeg invocation                     |
-| `Options`                              | Raw option bundles: `Options.create`, `concat`, `merge`            |
-| `options`                              | Option helpers such as `options.crf(23)` and `options.hls({...})`   |
-| `filters`                              | Filter helpers, chains, graphs, labels, and the builder           |
-| `time`                                 | `time.seconds(d)` and `time.timestamp(d)` time value adapters     |
+| `Options`                              | Option bundles (`Options.make`) and helpers such as `Options.crf(23)` and `Options.hls({...})` |
+| `Filter`                               | Filters (`Filter.make`), typed helpers, chains, graphs, and labels |
+| `Time`                                 | `Time.seconds(d)` and `Time.timestamp(d)` time value adapters     |
 | `FFmpeg`, `FFprobe`                    | Effect services with `layer` and `layerConfig`                     |
-| `run`, `stream`, `probe`, `probeWith`  | Execution Effects and Streams that use the services                |
+| `FFmpeg.run`, `FFmpeg.stream`, `FFprobe.probe`, `FFprobe.probeWith`  | Execution Effects and Streams that use the services                |
+| `Argument`                             | Base class for your own option and filter values                   |
 | `CommandError`, `ExitError`, …         | Tagged errors and their reasons                                    |
 | `ProbeResult`, `ProjectedProbeResult`, … | Probe result schemas                                             |
 
-Every builder class is also exported under its `FFmpegu*` name (for example `FFmpeguCommand`), and the default export `ffmpegu` groups the pure builders as `ffmpegu.command`, `ffmpegu.input`, `ffmpegu.output`, `ffmpegu.options`, `ffmpegu.filters`, and `ffmpegu.time`. Prefer the named exports.
+`Options`, `Filter`, and `Time` are namespaces: each holds its constructor, its helpers, and its types, such as `Options.Options` (a bundle), `Options.VideoCodec`, `Filter.Filter`, and `Filter.ScaleOptions`. There is no default export.
 
 ## Compatibility
 

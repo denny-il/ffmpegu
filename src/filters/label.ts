@@ -1,40 +1,27 @@
-import { FFmpeguArgument } from "../core/argument.ts"
-import type {
-  FFmpeguStreamReference,
-  FFmpeguStreamTrackReference
-} from "../core/input.ts"
-import type { FFmpeguReferencesInterface } from "../types/index.ts"
+import { Argument } from "../core/argument.ts"
+import type { StreamReference, StreamTrackReference } from "../core/input.ts"
+import type { References } from "../types/index.ts"
 
-export class FFmpeguFilterLabelRef extends FFmpeguArgument {
-  constructor(
-    readonly value:
-      | string
-      | FFmpeguStreamReference
-      | FFmpeguStreamTrackReference
-  ) {
+/**
+ * A filtergraph link label: a name, or a stream of one of the command's
+ * inputs. As an option value, such as for `-map`, it renders bracketed.
+ */
+export class Label extends Argument {
+  constructor(readonly value: string | StreamReference | StreamTrackReference) {
     super()
   }
 
-  static create(label: string): FFmpeguFilterLabelRef
-  static create(
-    stream: FFmpeguStreamReference | FFmpeguStreamTrackReference
-  ): FFmpeguFilterLabelRef
-  static create(
-    value: string | FFmpeguStreamReference | FFmpeguStreamTrackReference
-  ): FFmpeguFilterLabelRef {
-    return new FFmpeguFilterLabelRef(value)
+  getLabel(refs: References): string {
+    return typeof this.value === "string"
+      ? this.value
+      : this.value.getArgs(refs)[0]!
   }
 
-  getLabel(refs: FFmpeguReferencesInterface): string {
-    if (typeof this.value === "string") {
-      return this.value
-    }
-
-    const [stream] = this.value.getArgs(refs)
-    return stream
-  }
-
-  getArgs(refs: FFmpeguReferencesInterface): string[] {
+  getArgs(refs: References): string[] {
     return [`[${this.getLabel(refs)}]`]
   }
 }
+
+export const label = (
+  value: string | StreamReference | StreamTrackReference
+): Label => new Label(value)
