@@ -25,8 +25,8 @@ The public API now has one name per concept. Builders, helpers, and their types 
 | `FFmpeguCommand`, `FFmpeguInput`, `FFmpeguOutput` | `Command`, `Input`, `Output` |
 | `FFmpeguOptions` (the bundle class and type) | `Options.Options` |
 | `FFmpeguSimpleFilter`, `FFmpeguFilterChain`, `FFmpeguFilterGraph`, `FFmpeguFilterLabelRef` (as types) | `Filter.Filter`, `Filter.Chain`, `Filter.Graph`, `Filter.Label` |
-| `FFmpeguSimpleFilter.create(...)`, `FFmpeguFilterChain.create(...)`, `FFmpeguFilterGraph.create(...)`, `FFmpeguFilterLabelRef.create(...)` | `Filter.make(...)`, `Filter.chain(...)`, `Filter.graph(...)`, `Filter.label(...)` |
-| `new FFmpeguSimpleFilter(name, options, inputs, outputs)` | `Filter.make(name, options, { inputs, outputs })` |
+| `FFmpeguSimpleFilter.create(name, options, inputs, outputs)`, `new FFmpeguSimpleFilter(name, options, inputs, outputs)` | `Filter.make(name, options, { inputs, outputs })` |
+| `FFmpeguFilterChain.create(...)`, `FFmpeguFilterGraph.create(...)`, `FFmpeguFilterLabelRef.create(...)` | `Filter.chain(...)`, `Filter.graph(...)`, `Filter.label(...)` |
 | `FFmpeguStreamReference`, `FFmpeguStreamTrackReference` | `StreamReference`, `StreamTrackReference` |
 | `FFmpeguCommandOptions`, `FFmpeguAnyInput`, `FFmpeguInputSource`, `FFmpeguOutputDestination` | `CommandOptions`, `AnyInput`, `InputSource`, `OutputDestination` |
 | `FFmpegOptions`, `FFprobeOptions` (layer settings) | `FFmpegConfig`, `FFprobeConfig` |
@@ -55,7 +55,7 @@ const command = Command.make({
     )
   ]
 })
-yield* run(command)
+const program = run(command)
 ```
 
 ```ts
@@ -76,7 +76,7 @@ const command = Command.make({
     )
   ]
 })
-yield* FFmpeg.run(command)
+const program = FFmpeg.run(command)
 ```
 
 ### Breaking changes
@@ -87,8 +87,8 @@ yield* FFmpeg.run(command)
 - **Removed.** The `FFmpegu*` class and type names, the `ffmpegu` object (default and named export), `Command.create`, the static `Command.toArgs`, the static `create` factories of the filter classes, and the filter builder (`filters.builder()`, `FFmpeguFilterBuilder`).
 - **Renamed.** `FFmpegOptions` and `FFprobeOptions` are `FFmpegConfig` and `FFprobeConfig`; `profileVideo` and `profileAudio` are `videoProfile` and `audioProfile`.
 - **Bundle entries.** A stream reference, label, or filter is an option value, not an entry of its own: `Options.make(input.video)` is now a type error. Write `{ map: input.video }` or `Options.map(input.video)`.
-- **Nested bundles are flattened.** `Options.make(a, b).args` holds copies of the entries of `a` and `b`, not the bundles themselves. Rendering is unchanged, with one exception: a subclass of the bundle that overrides `getArgs` stays nested and renders itself, where `merge` and `concat` used to read its entries.
-- **Filter options.** `Options.videoFilter` and `Options.audioFilter` no longer accept a boolean or number, so `Options.videoFilter(enabled && chain)` does not compile. Pass `undefined` to the output instead: `Output.toFile(path, enabled ? Options.videoFilter(chain) : undefined)`.
+- **Nested bundles are flattened.** `Options.make(a, b).args` holds copies of the entries of `a` and `b`, not the bundles themselves. Rendering is unchanged. A subclass of the bundle is not flattened: it stays nested and renders through its own `getArgs`.
+- **Filter options.** `Options.videoFilter` and `Options.audioFilter` take a filter, a chain, or a raw string, optionally followed by more filters. They no longer accept a boolean or number, so `Options.videoFilter(enabled && chain)` does not compile; pass `undefined` to the output instead: `Output.toFile(path, enabled ? Options.videoFilter(chain) : undefined)`. As a callback, wrap them: `filters.map((filter) => Options.videoFilter(filter))`.
 - **Stream types.** `streamType` on a stream reference is `"v"`, `"a"`, `"s"`, or `"d"` instead of `"VIDEO"`, `"AUDIO"`, `"SUBTITLE"`, or `"DATA"`.
 
 ### Added
@@ -103,4 +103,4 @@ yield* FFmpeg.run(command)
 ### Fixed
 
 - A record entry set to `undefined`, such as `{ crf: undefined }`, is omitted. It used to render `-crf undefined`.
-- An argument that renders several filters, passed to `Options.videoFilter` or `Options.audioFilter`, is joined into one chain. It used to spill into separate argv tokens, which FFmpeg read as output files.
+- An argument that renders several filters, passed to `Options.videoFilter` or `Options.audioFilter`, is joined into one chain. It used to spill into separate argv tokens, which FFmpeg read as output files. A bundle passed there must therefore hold filters only; give other options, such as `Options.noAudio()`, to the output.

@@ -12,7 +12,7 @@
 | `audioChannels(n)` | `-ac n` |
 | `audioSampleRate(hz)` | `-ar hz` |
 | `audioSampleFormat(f)` | `-sample_fmt f` |
-| `audioFilter(...filters)` | `-af chain` |
+| `audioFilter(first, ...moreFilters)` | `-af chain` |
 | `noAudio()` | `-an` |
 
 Raw PCM has no header, so describe it on both sides of a pipe: `{ f: "s16le", ar: 48000, ac: 2 }`. Use the same record as input options for raw input and as output options for raw output.

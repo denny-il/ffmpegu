@@ -92,7 +92,7 @@ The helpers in `Options` return bundles for frequently used flags. Their string 
 | `pixelFormat(format)`          | `-pix_fmt <format>`       |
 | `size("1280x720")`             | `-s 1280x720`             |
 | `aspect("16:9")`               | `-aspect 16:9`            |
-| `videoFilter(...filters)`      | `-vf <chain>`             |
+| `videoFilter(first, ...more)`  | `-vf <chain>`             |
 
 Use FFmpeg's unit suffixes `k`, `M`, `G`, or `T`: `videoBitrate(2500, "k")` renders `-b:v 2500k`. FFmpeg reads a lowercase `m` as milli and rejects `g` and `t`. A string such as `"2.5M"` is passed through.
 
@@ -106,7 +106,7 @@ Use FFmpeg's unit suffixes `k`, `M`, `G`, or `T`: `videoBitrate(2500, "k")` rend
 | `audioSampleRate(hz)`          | `-ar <hz>`             |
 | `audioSampleFormat(format)`    | `-sample_fmt <format>` |
 | `audioQuality(q)`              | `-q:a <q>`             |
-| `audioFilter(...filters)`      | `-af <chain>`          |
+| `audioFilter(first, ...more)`  | `-af <chain>`          |
 
 ### Timing
 

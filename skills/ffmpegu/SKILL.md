@@ -86,7 +86,7 @@ These files sit next to this one and are self-contained. Read the ones the task 
 - **Never add automatic retries.** Outputs are not atomic or idempotent, and failed runs can leave partial files.
 - **Control concurrency in Effect.** For example `Effect.forEach(items, task, { concurrency: 4 })`. The library has no queue.
 - **Keep secrets out of logs.** Don't put argv, paths, URLs, or stderr into spans or logs. `RunResult.args` and error causes can contain credentials embedded in URLs.
-- **Remember what `FFprobe.probeWith` replaces.** Explicit options replace the default `-show_format -show_streams`; add `{ show_format: true, show_streams: true }` to keep them. Its projected stream `index` is optional. The service owns `-i`, `-of`/`-output_format`/`-print_format`, and `-o`.
+- **Remember what `FFprobe.probeWith` replaces.** Explicit options replace the default `-show_format -show_streams`; add `{ show_format: true, show_streams: true }` to keep them. Its projected stream `index` is optional. The service owns `-i`, `-of`/`-output_format`/`-print_format`, `-o`, and `--`.
 - **Mock the services in tests.** Use `Layer.mock(FFmpeg, { run: () => Effect.succeed({ args: [], stderr: "" }) })` and `Layer.mock(FFprobe, { probe: () => Effect.succeed({ streams: [] }) })`. `FFprobe.probeWith` with a schema calls `probeJson`, so mock that for those calls.
 
 ## Configuration

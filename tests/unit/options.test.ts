@@ -274,6 +274,9 @@ describe("Options", { concurrent: false }, () => {
       "-filter_complex",
       "scale=w=640:h=360"
     ])
+    // A disabled graph, as in `enabled && graph`, omits the option.
+    const enabled = false as boolean
+    expect(Options.filterComplex(enabled && graph).getArgs(refs)).toEqual([])
     // Several filters form a chain; one filter stands alone.
     expect(
       Options.videoFilter(Filter.scale({ w: 640 }), Filter.hflip()).getArgs(

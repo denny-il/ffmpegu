@@ -22,7 +22,7 @@
 | `pixelFormat(f)` | `-pix_fmt f` |
 | `size("WxH")` | `-s WxH` |
 | `aspect("16:9")` | `-aspect 16:9` |
-| `videoFilter(...filters)` | `-vf chain` |
+| `videoFilter(first, ...moreFilters)` | `-vf chain` |
 | `noVideo()` | `-vn` |
 
 Use the unit suffixes `k`, `M`, `G`, or `T`; FFmpeg reads a lowercase `m` as milli and rejects `g` and `t`. `videoBitrate(2500, "k")` renders `-b:v 2500k`, and a string such as `"2.5M"` passes through. For options without a helper, use a record, such as `{ "frames:v": 1 }`, `{ "x264-params": "keyint=60" }`, or `{ "c:v": "h264_nvenc" }`.

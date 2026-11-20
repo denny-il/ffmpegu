@@ -24,7 +24,7 @@ Rendering: `[global] ([input options] -i <input>)... ([output options] <output>)
 Type parameters:
 
 - `E` and `R`: unions of the error and requirement types of all input streams and output sinks.
-- `S`: number of `Output.toStream` outputs, `0`, `1`, or `2` (two or more). `FFmpeg.run` requires `0` and `FFmpeg.stream` requires `1`. `S = any` (from a `Command<E, R>` annotation, `new Output(...)`, or an array of unknown length that may hold a stream output) defers the check to runtime, where the runner fails with `CommandError` (`StreamOutput`). An output chosen by a ternary has `S = 0 | 1` and fits neither runner, so branch on the whole command instead.
+- `S`: number of `Output.toStream` outputs, `0`, `1`, or `2` (two or more). `FFmpeg.run` requires `0` and `FFmpeg.stream` requires `1`. `S = any` (from a `Command<E, R>` annotation, `new Output(...)`, or an array of unknown length that may hold a stream output) defers the check to runtime: a runner given a command with the wrong count fails with `CommandError` (`StreamOutput`). An output chosen by a ternary has `S = 0 | 1` and fits neither runner, so branch on the whole command instead.
 
 Failures are `CommandError` with a tagged `reason`. `compile()` and `toArgs()` report all of them except `StreamOutput`, which only the runners raise:
 
